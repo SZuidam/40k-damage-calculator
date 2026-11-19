@@ -19,9 +19,15 @@
             <h2 id="attacker-title">Attacker</h2>
             <p class="panel-hint">Weapons resolve top to bottom. A wounded model carries over to the next weapon.</p>
           </div>
+          <div id="attack-presets"></div>
           <div id="weapons"></div>
           <div class="panel-actions">
-            <button type="button" id="add-weapon" class="button secondary">+ Add weapon</button>
+            <div class="panel-actions-group">
+              <button type="button" id="add-weapon" class="button secondary">+ Add weapon</button>
+              <select id="add-unit" class="button-select" aria-label="Append a saved unit to the attack"></select>
+              <button type="button" id="open-library" class="button secondary">Weapon profiles…</button>
+              <button type="button" id="open-units" class="button secondary">Units…</button>
+            </div>
             <div class="optimise">
               <button type="button" id="optimise" class="button secondary" aria-describedby="optimise-status">
                 Optimise order <span class="badge" id="optimise-badge" hidden></span>
@@ -36,6 +42,7 @@
             <h2 id="defender-title">Defender</h2>
             <p class="panel-hint">Damage beyond a model's remaining wounds is lost.</p>
           </div>
+          <div id="defender-presets"></div>
           <div id="defender"></div>
         </section>
 

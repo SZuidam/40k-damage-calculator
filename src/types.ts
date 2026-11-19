@@ -1,4 +1,57 @@
-/** One attacking weapon profile, fired by `models` models. */
+/** The stats of a weapon profile, without the number of models firing it. */
+export interface WeaponStats {
+  name: string;
+  /** Attacks per model, as a dice expression ("2", "D6", "2D3+1"). */
+  attacks: string;
+  /** Ballistic / Weapon Skill target (2–6). */
+  skill: number;
+  strength: number;
+  /** Armour penetration, entered as 0 or a negative number. */
+  ap: number;
+  /** Damage per unsaved wound, as a dice expression. */
+  damage: string;
+}
+
+/** A weapon profile in the user's library. */
+export interface StoredWeapon extends WeaponStats {
+  id: string;
+}
+
+/** A live attack row: `models` models firing the library weapon `weaponId`. */
+export interface AttackRow {
+  id: string;
+  models: number;
+  weaponId: string | null;
+}
+
+/** A row inside a saved preset: a copy of the weapon, so later library edits don't change it. */
+export interface RowSnapshot {
+  models: number;
+  weaponId: string;
+  weapon: WeaponStats;
+}
+
+/** A saved attack: the whole attack order. */
+export interface AttackPreset {
+  id: string;
+  name: string;
+  rows: RowSnapshot[];
+}
+
+/** A saved attacking unit: a block of rows that can be appended to the attack. */
+export interface UnitPreset {
+  id: string;
+  name: string;
+  rows: RowSnapshot[];
+}
+
+export interface DefenderPreset {
+  id: string;
+  name: string;
+  defender: DefenderProfile;
+}
+
+/** Engine input: one attacking weapon profile, fired by `models` models. */
 export interface WeaponProfile {
   id: string;
   name: string;

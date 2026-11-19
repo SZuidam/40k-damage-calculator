@@ -8,8 +8,13 @@ const SAVE_OPTIONS: Option[] = [
 ];
 const INVULN_OPTIONS: Option[] = [{ value: '', label: 'None' }, ...[2, 3, 4, 5, 6].map((v) => ({ value: v, label: `${v}++` }))];
 
+export interface DefenderForm {
+  /** Write the current values of `defender` back into the controls (after loading a preset). */
+  setValues(): void;
+}
+
 /** Defender profile form. Edits mutate `defender` in place and call `onChange`. */
-export function renderDefenderForm(container: HTMLElement, defender: DefenderProfile, onChange: () => void): void {
+export function renderDefenderForm(container: HTMLElement, defender: DefenderProfile, onChange: () => void): DefenderForm {
   const models = h('input', { id: 'def-models', type: 'number', inputmode: 'numeric', min: 1, max: 40, value: defender.models });
   const toughness = h('input', { id: 'def-toughness', type: 'number', inputmode: 'numeric', min: 1, max: 20, value: defender.toughness });
   const save = select({ id: 'def-save' }, SAVE_OPTIONS, defender.save);
@@ -56,4 +61,15 @@ export function renderDefenderForm(container: HTMLElement, defender: DefenderPro
     errors,
   );
   validate();
+
+  return {
+    setValues() {
+      models.value = String(defender.models);
+      toughness.value = String(defender.toughness);
+      save.value = String(defender.save);
+      invuln.value = defender.invuln === null ? '' : String(defender.invuln);
+      wounds.value = String(defender.wounds);
+      validate();
+    },
+  };
 }

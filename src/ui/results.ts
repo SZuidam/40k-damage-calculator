@@ -1,4 +1,4 @@
-import type { SimulationResult, StepStats } from '../types';
+import type { SimulationResult, StepStats, WeaponProfile } from '../types';
 import { h } from './dom';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -21,7 +21,8 @@ const pct = (p: number) => {
 };
 
 export interface ResultsView {
-  show(result: SimulationResult, defenderModels: number, defenderWounds: number): void;
+  /** `weapons` are the profiles that were simulated, used to label rows `10× Bolt rifle`. */
+  show(result: SimulationResult, weapons: WeaponProfile[], defenderModels: number, defenderWounds: number): void;
   markStale(stale: boolean): void;
 }
 
@@ -29,13 +30,13 @@ export function createResultsView(container: HTMLElement): ResultsView {
   let resizeObserver: ResizeObserver | null = null;
 
   return {
-    show(result, defenderModels, defenderWounds) {
+    show(result, weapons, defenderModels, defenderWounds) {
       resizeObserver?.disconnect();
       container.replaceChildren();
       container.classList.remove('is-stale');
 
       const stale = h('p', { class: 'stale-notice', role: 'status' }, 'Inputs changed since this run. Simulate again to update.');
-      container.append(stale, summary(result, defenderModels, defenderWounds), stepTable(result));
+      container.append(stale, summary(result, defenderModels, defenderWounds), stepTable(result, weapons));
 
       const chartHost = h('div', { class: 'chart-host' });
       container.append(chartSection(result, chartHost));
@@ -83,16 +84,18 @@ function tile(label: string, value: string, context: string): HTMLElement {
   return h('div', { class: 'tile' }, h('dt', {}, label), h('dd', {}, h('span', { class: 'tile-value' }, value), h('span', { class: 'tile-context' }, context)));
 }
 
-function stepTable(result: SimulationResult): HTMLElement {
+function stepTable(result: SimulationResult, weapons: WeaponProfile[]): HTMLElement {
   const headRow = h('tr', {}, h('th', { scope: 'col' }, 'Weapon'), ...STEPS.map((s) => h('th', { scope: 'col', class: 'num' }, s.label)));
-  const bodyRows = result.perWeapon.map((p, i) =>
-    h(
+  const bodyRows = result.perWeapon.map((p, i) => {
+    const models = weapons.find((w) => w.id === p.id)?.models;
+    const name = p.name || `Weapon ${i + 1}`;
+    return h(
       'tr',
       {},
-      h('th', { scope: 'row' }, h('span', { class: 'order' }, `${i + 1}.`), ' ', p.name || `Weapon ${i + 1}`),
+      h('th', { scope: 'row' }, h('span', { class: 'order' }, `${i + 1}.`), ' ', models === undefined ? name : `${models}× ${name}`),
       ...STEPS.map((s) => h('td', { class: 'num' }, fmt(p.stats[s.key]))),
-    ),
-  );
+    );
+  });
   const totalRow = h('tr', {}, h('th', { scope: 'row' }, 'Total'), ...STEPS.map((s) => h('td', { class: 'num' }, fmt(result.total[s.key]))));
 
   return h(

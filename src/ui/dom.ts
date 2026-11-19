@@ -52,11 +52,5 @@ export function setFieldError(control: HTMLInputElement | HTMLSelectElement, mes
   }
 }
 
-let counter = 0;
-export function uid(prefix = 'id'): string {
-  counter += 1;
-  return `${prefix}-${Date.now().toString(36)}-${counter}`;
-}
-
 export const SKILL_OPTIONS: Option[] = [2, 3, 4, 5, 6].map((v) => ({ value: v, label: `${v}+` }));
 export const AP_OPTIONS: Option[] = [0, -1, -2, -3, -4, -5, -6].map((v) => ({ value: v, label: v === 0 ? '0' : String(v) }));

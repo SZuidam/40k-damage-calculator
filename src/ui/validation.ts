@@ -1,5 +1,5 @@
 import { tryParseDice } from '../engine/dice';
-import type { DefenderProfile, WeaponProfile } from '../types';
+import type { AttackRow, DefenderProfile, StoredWeapon, WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -27,14 +27,31 @@ function dice(expr: string, label: string): string | undefined {
   return tryParseDice(expr) ? undefined : `${label}: use 3, D3, D6, 2D6, D6+1, …`;
 }
 
-export function validateWeapon(w: WeaponProfile): FieldErrors<WeaponProfile> {
-  const errors: FieldErrors<WeaponProfile> = {
-    models: intInRange(w.models, LIMITS.weaponModels, 'Models'),
+export const MAX_WEAPON_NAME = 40;
+
+export function validateWeaponStats(w: WeaponStats): FieldErrors<WeaponStats> {
+  const name = w.name.trim();
+  const errors: FieldErrors<WeaponStats> = {
+    name: name === '' ? 'Name is required' : name.length > MAX_WEAPON_NAME ? `Name must be at most ${MAX_WEAPON_NAME} characters` : undefined,
     attacks: dice(w.attacks, 'Attacks'),
     skill: intInRange(w.skill, { min: 2, max: 6 }, 'BS/WS'),
     strength: intInRange(w.strength, LIMITS.strength, 'Strength'),
     ap: intInRange(w.ap, LIMITS.ap, 'AP'),
     damage: dice(w.damage, 'Damage'),
+  };
+  return prune(errors);
+}
+
+/** A live attack row: models in range, a weapon chosen, and that weapon valid. */
+export function validateRow(row: AttackRow, library: StoredWeapon[]): FieldErrors<AttackRow> {
+  const weapon = row.weaponId === null ? undefined : library.find((w) => w.id === row.weaponId);
+  let weaponError: string | undefined;
+  if (row.weaponId === null) weaponError = 'Choose a weapon';
+  else if (!weapon) weaponError = 'Weapon profile not found';
+  else if (hasErrors(validateWeaponStats(weapon))) weaponError = `${weapon.name || 'Weapon'} has invalid stats: edit the profile`;
+  const errors: FieldErrors<AttackRow> = {
+    models: intInRange(row.models, LIMITS.weaponModels, 'Models'),
+    weaponId: weaponError,
   };
   return prune(errors);
 }
