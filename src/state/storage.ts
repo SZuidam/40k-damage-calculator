@@ -139,7 +139,7 @@ function normalise(raw: unknown): StoredState {
 
 // ---------- shape checks ----------
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -148,12 +148,12 @@ function num(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function list<T>(value: unknown, convert: (item: unknown) => T | null): T[] {
+export function list<T>(value: unknown, convert: (item: unknown) => T | null): T[] {
   if (!Array.isArray(value)) return [];
   return value.map(convert).filter((x): x is T => x !== null);
 }
 
-function toWeaponStats(value: unknown): WeaponStats | null {
+export function toWeaponStats(value: unknown): WeaponStats | null {
   if (!isRecord(value)) return null;
   const { name, attacks, damage } = value;
   if (typeof name !== 'string' || typeof attacks !== 'string' || typeof damage !== 'string') return null;
@@ -189,7 +189,7 @@ function toRow(value: unknown): AttackRow | null {
   return { id: value.id, models: num(value.models, 1), weaponId: typeof value.weaponId === 'string' ? value.weaponId : null };
 }
 
-function toSnapshot(value: unknown): RowSnapshot | null {
+export function toSnapshot(value: unknown): RowSnapshot | null {
   if (!isRecord(value) || typeof value.weaponId !== 'string') return null;
   const weapon = toWeaponStats(value.weapon);
   return weapon ? { models: num(value.models, 1), weaponId: value.weaponId, weapon } : null;
@@ -200,7 +200,7 @@ function toRowsPreset(value: unknown): AttackPreset | null {
   return { id: value.id, name: value.name, rows: list(value.rows, toSnapshot) };
 }
 
-function toDefender(value: unknown): DefenderProfile | null {
+export function toDefender(value: unknown): DefenderProfile | null {
   if (!isRecord(value)) return null;
   const d = defaultDefender();
   return {

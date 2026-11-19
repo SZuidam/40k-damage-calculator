@@ -1,0 +1,196 @@
+import { describe, expect, it } from 'vitest';
+import { noAbilities, type StoredWeapon } from '../types';
+import {
+  SHARE_FORMAT,
+  applyImport,
+  buildShareFile,
+  parseShareText,
+  planImport,
+  serializeShareFile,
+  uniqueName,
+  type ShareData,
+  type ShareState,
+} from './share';
+
+const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
+const lascannon = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: noAbilities() });
+const meq = () => ({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 });
+const stats = ({ id: _, ...weapon }: StoredWeapon) => weapon;
+
+function sourceState(): ShareState {
+  const bolt = boltRifle();
+  const las = { ...lascannon(), abilities: { ...noAbilities(), lethalHits: true, sustainedHits: '1', devastatingWounds: false } };
+  return {
+    library: [bolt, las],
+    attackPresets: [{ id: 'a1', name: 'Gunline', rows: [{ models: 10, weaponId: bolt.id, weapon: stats(bolt) }, { models: 1, weaponId: las.id, weapon: stats(las) }] }],
+    unitPresets: [{ id: 'u1', name: 'Intercessors', rows: [{ models: 5, weaponId: bolt.id, weapon: stats(bolt) }] }],
+    defenderPresets: [{ id: 'd1', name: 'MEQ', defender: meq() }],
+  };
+}
+
+const everything = (s: ShareState) => ({
+  attacks: s.attackPresets.map((p) => p.id),
+  units: s.unitPresets.map((p) => p.id),
+  defenders: s.defenderPresets.map((p) => p.id),
+  weapons: s.library.map((w) => w.id),
+});
+
+function emptyState(): ShareState {
+  return { library: [], attackPresets: [], unitPresets: [], defenderPresets: [] };
+}
+
+function roundTrip(source = sourceState()): ShareData {
+  const parsed = parseShareText(serializeShareFile(buildShareFile(source, everything(source))));
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.data;
+}
+
+describe('buildShareFile', () => {
+  it('exports only the selected items, without preset ids', () => {
+    const source = sourceState();
+    const file = buildShareFile(source, { attacks: [], units: ['u1'], defenders: ['d1'], weapons: ['w-las'] }, new Date('2026-11-19T10:00:00Z'));
+    expect(file).toMatchObject({ format: SHARE_FORMAT, version: 1, exportedAt: '2026-11-19T10:00:00.000Z', attacks: [] });
+    expect(file.units).toEqual([{ name: 'Intercessors', rows: [{ models: 5, weaponId: 'w-bolt', weapon: stats(boltRifle()) }] }]);
+    expect(file.defenders).toEqual([{ name: 'MEQ', defender: meq() }]);
+    expect(file.weapons.map((w) => [w.id, w.name, w.abilities.lethalHits])).toEqual([['w-las', 'Lascannon', true]]);
+  });
+
+  it('round-trips through JSON unchanged', () => {
+    const source = sourceState();
+    const data = roundTrip(source);
+    expect(data.attacks[0].rows.map((r) => [r.models, r.weapon.name, r.weapon.abilities.sustainedHits])).toEqual([
+      [10, 'Bolt rifle', null],
+      [1, 'Lascannon', '1'],
+    ]);
+    expect(data.weapons).toEqual(source.library);
+  });
+});
+
+describe('parseShareText', () => {
+  const error = (text: string) => {
+    const result = parseShareText(text);
+    return result.ok ? null : result.error;
+  };
+
+  it('explains why text cannot be imported', () => {
+    expect(error('   ')).toMatch(/Paste/);
+    expect(error('{ nope')).toMatch(/not valid JSON/);
+    expect(error('{"library": []}')).toMatch(/not an export/);
+    expect(error(JSON.stringify({ format: SHARE_FORMAT, version: 2 }))).toMatch(/newer version/);
+    expect(error(JSON.stringify({ format: SHARE_FORMAT, version: 1, attacks: [] }))).toMatch(/nothing to import/);
+  });
+
+  it('drops malformed entries, trims names and fills in missing abilities', () => {
+    const text = JSON.stringify({
+      format: SHARE_FORMAT,
+      version: 1,
+      defenders: [{ name: '  Terminators  ', defender: { models: 5, toughness: 5, save: 2, invuln: 4, wounds: 3 } }, { name: '', defender: meq() }, 'junk'],
+      weapons: [{ name: 'Old gun', attacks: '1', skill: 4, strength: 4, ap: 0, damage: '1' }, { name: 'No attacks' }],
+      units: [{ name: 'x'.repeat(60), rows: [] }],
+    });
+    const result = parseShareText(text);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.data.defenders).toEqual([{ name: 'Terminators', defender: { models: 5, toughness: 5, save: 2, invuln: 4, wounds: 3 } }]);
+    expect(result.data.weapons).toHaveLength(1);
+    expect(result.data.weapons[0]).toMatchObject({ name: 'Old gun', abilities: noAbilities(), id: expect.any(String) });
+    expect(result.data.units[0].name).toHaveLength(40);
+  });
+});
+
+describe('planImport', () => {
+  it('marks items as new, duplicate, conflict or invalid', () => {
+    const data = roundTrip();
+    data.defenders.push({ name: 'Too big', defender: { ...meq(), models: 40, wounds: 40 } });
+    data.units.push({ name: 'Empty', rows: [] });
+
+    const target = sourceState();
+    target.attackPresets[0].rows[0].models = 5; // same name, different content
+    target.library[1] = lascannon(); // Lascannon without abilities
+
+    const plan = planImport(data, target).map((i) => [i.kind, i.name, i.status, i.problem]);
+    expect(plan).toEqual([
+      ['attacks', 'Gunline', 'conflict', undefined],
+      ['units', 'Intercessors', 'duplicate', undefined],
+      ['units', 'Empty', 'invalid', 'Has no attack rows'],
+      ['defenders', 'MEQ', 'duplicate', undefined],
+      ['defenders', 'Too big', 'invalid', 'Models × wounds must be at most 400'],
+      ['weapons', 'Bolt rifle', 'duplicate', undefined],
+      ['weapons', 'Lascannon', 'conflict', undefined],
+    ]);
+  });
+
+  it('matches names case-insensitively and flags invalid rows by weapon', () => {
+    const data = roundTrip();
+    data.attacks[0].rows[1].weapon.strength = 99;
+    const target = emptyState();
+    target.defenderPresets.push({ id: 'x', name: 'meq', defender: meq() });
+    const plan = planImport(data, target);
+    expect(plan.find((i) => i.kind === 'attacks')).toMatchObject({ status: 'invalid', problem: 'Lascannon: Strength must be between 1 and 30' });
+    expect(plan.find((i) => i.kind === 'defenders')).toMatchObject({ status: 'duplicate' });
+  });
+});
+
+describe('applyImport', () => {
+  it('adds everything to an empty state, keeping free weapon ids', () => {
+    const data = roundTrip();
+    const target = emptyState();
+    const summary = applyImport(data, planImport(data, target), target, 'rename');
+    expect(summary).toEqual({ added: 5, renamed: 0, replaced: 0 });
+    expect(target.library.map((w) => w.id)).toEqual(['w-bolt', 'w-las']);
+    expect(target.attackPresets.map((p) => p.name)).toEqual(['Gunline']);
+    expect(target.attackPresets[0].id).not.toBe('a1');
+    expect(target.unitPresets[0].rows).toEqual(sourceState().unitPresets[0].rows);
+    expect(target.defenderPresets[0]).toMatchObject({ name: 'MEQ', defender: meq() });
+  });
+
+  it('skips duplicates, and renames conflicts under the rename policy', () => {
+    const data = roundTrip();
+    const target = sourceState();
+    target.defenderPresets[0].defender.save = 4;
+    target.library[0] = { ...boltRifle(), damage: '2' };
+    const summary = applyImport(data, planImport(data, target), target, 'rename');
+    expect(summary).toEqual({ added: 0, renamed: 2, replaced: 0 });
+    expect(target.defenderPresets.map((p) => [p.name, p.defender.save])).toEqual([
+      ['MEQ', 4],
+      ['MEQ (2)', 3],
+    ]);
+    expect(target.library.map((w) => [w.name, w.damage])).toEqual([
+      ['Bolt rifle', '2'],
+      ['Lascannon', 'D6+1'],
+      ['Bolt rifle (2)', '1'],
+    ]);
+    // The original id is taken, so the renamed copy gets a fresh one.
+    expect(target.library[2].id).not.toBe('w-bolt');
+  });
+
+  it('replaces conflicts in place under the replace policy', () => {
+    const data = roundTrip();
+    const target = sourceState();
+    const unit = target.unitPresets[0];
+    unit.rows[0].models = 3;
+    target.library[0] = { ...boltRifle(), name: 'BOLT RIFLE', damage: '2' };
+    const summary = applyImport(data, planImport(data, target), target, 'replace');
+    expect(summary).toEqual({ added: 0, renamed: 0, replaced: 2 });
+    expect(target.unitPresets).toEqual([{ ...unit, rows: [{ models: 5, weaponId: 'w-bolt', weapon: stats(boltRifle()) }] }]);
+    expect(target.library[0]).toEqual(boltRifle());
+  });
+
+  it('only applies the chosen items and renames clashes within one import', () => {
+    const data = roundTrip();
+    data.defenders.push({ name: 'meq', defender: { ...meq(), toughness: 5 } });
+    const target = emptyState();
+    const plan = planImport(data, target).filter((i) => i.kind === 'defenders');
+    expect(applyImport(data, plan, target, 'replace')).toEqual({ added: 1, renamed: 1, replaced: 0 });
+    expect(target.defenderPresets.map((p) => p.name)).toEqual(['MEQ', 'meq (2)']);
+    expect(target.library).toEqual([]);
+  });
+});
+
+describe('uniqueName', () => {
+  it('numbers clashing names and stays within 40 characters', () => {
+    expect(uniqueName(['A'], 'B')).toBe('B');
+    expect(uniqueName(['A', 'a (2)'], 'A')).toBe('A (3)');
+    const long = 'x'.repeat(40);
+    expect(uniqueName([long], long)).toBe(`${'x'.repeat(36)} (2)`);
+  });
+});

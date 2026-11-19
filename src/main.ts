@@ -8,6 +8,7 @@ import { AttackList } from './ui/attackList';
 import { renderDefenderForm } from './ui/defenderForm';
 import { h, numberValue, setFieldError } from './ui/dom';
 import { openLibraryModal } from './ui/libraryModal';
+import { openExportModal, openImportModal } from './ui/shareModal';
 import { PresetBar } from './ui/presetBar';
 import { createResultsView } from './ui/results';
 import { openUnitModal } from './ui/unitModal';
@@ -277,6 +278,21 @@ $('open-units').addEventListener('click', async () => {
 
 $('open-library').addEventListener('click', () =>
   openLibraryModal({ library: state.library, rows: state.rows, onChange: onLibraryChanged }),
+);
+
+// ---------- Import / export ----------
+
+$('open-export').addEventListener('click', () => openExportModal(state));
+
+$('open-import').addEventListener('click', () =>
+  openImportModal({
+    state,
+    onImported: () => {
+      // Weapons may have been added or replaced, presets added or overwritten.
+      renderAddUnitSelect();
+      onLibraryChanged();
+    },
+  }),
 );
 
 // ---------- Run bar ----------

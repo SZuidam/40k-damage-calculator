@@ -129,3 +129,10 @@ export function statsSummary(w: WeaponStats): string {
 export function rowsSummary(rows: RowSnapshot[]): string {
   return rows.map((r) => `${r.models}× ${r.weapon.name}`).join(', ');
 }
+
+/** "10 models · T4 · Sv 3+ · Inv 4+ · W2". */
+export function defenderSummary(d: DefenderProfile): string {
+  const save = d.save >= 7 ? 'Sv –' : `Sv ${d.save}+`;
+  const invuln = d.invuln === null ? '' : ` · Inv ${d.invuln}+`;
+  return `${d.models} model${d.models === 1 ? '' : 's'} · T${d.toughness} · ${save}${invuln} · W${d.wounds}`;
+}

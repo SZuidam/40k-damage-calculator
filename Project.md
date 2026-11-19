@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (131 tests, about 3 s)
+- `npm test`: Vitest, run once (142 tests, about 3 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -37,6 +37,7 @@ src/
     storage.ts          loadState / saveState (key damage-calculator:v2), v1 migration, shape checks, defaults
     abilities.ts        ability labels, "Add ability…" choices, sameAbilities
     presets.ts          resolveRows, snapshotRows, sameSnapshot, sameDefender, materialiseRows, weaponUsage, helpers
+    share.ts            export file (build/serialise), parseShareText, planImport, applyImport, uniqueName
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateRow / validateDefender / validateIterations, LIMITS
@@ -46,6 +47,7 @@ src/
     attackList.ts       AttackList class: Models + weapon select + read-only stat chips + ✎; add / remove / move / reorder; compact mode
     presetBar.ts        PresetBar class: [Preset ▾] [Save] [Save as…] [Delete] with dirty detection
     unitModal.ts        "Units…": list, create, edit, delete attacking unit presets
+    shareModal.ts       "Export…" (pick items, Copy / Download) and "Import…" (paste or file, review, import)
     defenderForm.ts     renderDefenderForm() → { setValues() }
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
 ```
@@ -145,6 +147,15 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - `statsSummary` (library modal) appends the abilities. Results count Sustained Hits extra hits under Hits, and Lethal Hits auto-wounds under Wounds.
 - `npm test` 131/131 (new: ability rules against hand calculations, sim vs exact for each ability and a combined loadout, the kernel cap, storage, presets, validation, `state/abilities.test.ts`). `npm run build` is clean. Checked in Chrome: add, replace (SH1 → SH2), remove, save, read-only row text, localStorage, and 10 bolt rifles with all three abilities into 10 MEQ: hits 16.67, wounds 9.97 (expected 10.0), unsaved 6.08 (expected 6.11); no console errors.
 
+## Import and export (session 4, 2026-11-19)
+
+- **Export…** / **Import…** buttons sit in the page header. Export lists attack profiles, units, defenders and weapon profiles as grouped checkboxes (all checked, a select-all box per group) and offers **Copy** (clipboard) and **Download** (`damage-calculator-YYYY-MM-DD.json`).
+- **File format** (`state/share.ts`): `{ format: "damage-calculator-share", version: 1, exportedAt, attacks, units, defenders, weapons }`. Presets travel without ids (the importer assigns new ones) and keep their `RowSnapshot` weapon copies, so they are self-contained. Weapon profiles keep their ids so preset rows link to them when loaded.
+- **Parsing** reuses the storage shape checks (`isRecord`, `list`, `toWeaponStats`, `toSnapshot`, `toDefender` are now exported): malformed entries are dropped, missing abilities are filled in, names are trimmed and cut to 40 characters. Clear errors for empty input, invalid JSON, a non-export, a newer version, or nothing to import. Max 1,000,000 characters.
+- **Review** (`planImport`) tags each item: new; **Already saved** (same name, case-insensitive, and same content: not selectable); **Name in use** (same name, different content); invalid (fails `ui/validation`, with the first error shown: not selectable). When a selected item has a name clash, a choice appears: **Keep both** (imported as `Name (2)`, `Name (3)`…) or **Replace the saved item** (a replaced weapon keeps its library id, so rows using it change straight away). Clashes inside one import are always renamed.
+- `applyImport` mutates the state arrays in place (weapons first), then `main.ts` re-renders the unit select, the rows and the preset bars and saves.
+- `npm test` 142/142 (new `state/share.test.ts`). `npm run build` is clean. Checked in Chrome: invalid JSON error, review tags, import with a rename, loading the imported attack profile links its rows to the imported weapon and restores the missing Lascannon, export lists the result; no console errors.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -156,5 +167,5 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - More abilities through the `AttackContext` step functions: hit/wound modifiers, rerolls (1s or all), Anti-X (lowers `criticalWound`), Twin-linked, Torrent, Feel No Pain, damage reduction, cover.
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
-- Import/export of the library and presets as JSON (they only live in this browser's localStorage).
+- A share link (export encoded in the URL hash) next to Copy / Download.
 - A "Revert" button on the preset bar instead of the detach-and-reselect workaround.
