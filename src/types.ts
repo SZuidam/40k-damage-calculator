@@ -9,10 +9,14 @@ export interface WeaponAbilities {
   sustainedHits: string | null;
   /** Devastating Wounds: a critical wound can't be saved (armour or invulnerable). */
   devastatingWounds: boolean;
+  /** Blast X: X extra attacks per model for every 5 models in the target unit; null for none. */
+  blast: number | null;
+  /** Cleave X: Blast X for melee weapons. Ranged and melee aren't told apart, so it works the same as Blast. */
+  cleave: number | null;
 }
 
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null };
 }
 
 /** The stats of a weapon profile, without the number of models firing it. */

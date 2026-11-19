@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { noAbilities } from '../types';
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, defaultState, loadState, saveState, type KeyValueStorage } from './storage';
 
 function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & { data: Record<string, string> } {
@@ -87,8 +88,8 @@ describe('loadState', () => {
   it('round trips through saveState', () => {
     const storage = memoryStorage();
     const state = defaultState();
-    state.library[0].abilities = { lethalHits: true, sustainedHits: '2', devastatingWounds: true };
-    const presetWeapon = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: { lethalHits: true, sustainedHits: null, devastatingWounds: false } };
+    state.library[0].abilities = { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true, blast: 2, cleave: 1 };
+    const presetWeapon = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: { ...noAbilities(), lethalHits: true, sustainedHits: null, devastatingWounds: false } };
     state.attackPresets.push({ id: 'p1', name: 'Test', rows: [{ models: 10, weaponId: state.library[0].id, weapon: presetWeapon }] });
     state.activeAttackPresetId = 'p1';
     saveState(state, storage);
@@ -99,7 +100,7 @@ describe('loadState', () => {
     const saved = JSON.parse(JSON.stringify(defaultState()));
     delete saved.library[0].abilities;
     saved.unitPresets = [{ id: 'u', name: 'U', rows: [{ models: 1, weaponId: 'x', weapon: { name: 'Gun', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1' } }] }];
-    const none = { lethalHits: false, sustainedHits: null, devastatingWounds: false };
+    const none = { ...noAbilities(), lethalHits: false, sustainedHits: null, devastatingWounds: false };
     const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
     expect(state.library[0].abilities).toEqual(none);
     expect(state.unitPresets[0].rows[0].weapon.abilities).toEqual(none);
@@ -108,9 +109,9 @@ describe('loadState', () => {
 
   it('repairs malformed abilities', () => {
     const saved = JSON.parse(JSON.stringify(defaultState()));
-    saved.library[0].abilities = { lethalHits: 'yes', sustainedHits: 2, devastatingWounds: true };
+    saved.library[0].abilities = { lethalHits: 'yes', sustainedHits: 2, devastatingWounds: true, blast: '2', cleave: 1.5 };
     const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
-    expect(state.library[0].abilities).toEqual({ lethalHits: false, sustainedHits: null, devastatingWounds: true });
+    expect(state.library[0].abilities).toEqual({ ...noAbilities(), lethalHits: false, sustainedHits: null, devastatingWounds: true });
   });
 
   it('does not throw when storage throws', () => {

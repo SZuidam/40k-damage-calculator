@@ -24,8 +24,14 @@ describe('validateWeaponStats', () => {
     expect(Object.keys(errors).sort()).toEqual(['abilities', 'ap', 'attacks', 'damage', 'skill', 'strength']);
   });
 
+  it('checks the Blast and Cleave values', () => {
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), blast: 2, cleave: 10 } })).toEqual({});
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), blast: 0 } }).abilities).toBe('Blast must be between 1 and 10');
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), cleave: 11 } }).abilities).toBe('Cleave must be between 1 and 10');
+  });
+
   it('accepts abilities with a valid Sustained Hits value', () => {
-    expect(validateWeaponStats({ ...stats, abilities: { lethalHits: true, sustainedHits: '2', devastatingWounds: true } })).toEqual({});
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true } })).toEqual({});
   });
 });
 

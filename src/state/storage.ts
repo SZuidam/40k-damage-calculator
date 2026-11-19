@@ -176,7 +176,14 @@ function toAbilities(value: unknown): WeaponAbilities {
     lethalHits: value.lethalHits === true,
     sustainedHits: typeof value.sustainedHits === 'string' && value.sustainedHits.trim() !== '' ? value.sustainedHits : a.sustainedHits,
     devastatingWounds: value.devastatingWounds === true,
+    blast: toAbilityValue(value.blast),
+    cleave: toAbilityValue(value.cleave),
   };
+}
+
+/** A whole number of 1 or more, or null. The range is checked by ui/validation. */
+function toAbilityValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : null;
 }
 
 function toStoredWeapon(value: unknown): StoredWeapon | null {

@@ -1,5 +1,5 @@
 import { tryParseDice } from '../engine/dice';
-import type { AttackRow, DefenderProfile, StoredWeapon, WeaponStats } from '../types';
+import type { AttackRow, DefenderProfile, StoredWeapon, WeaponAbilities, WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -10,6 +10,8 @@ export const LIMITS = {
   defenderModels: { min: 1, max: 40 },
   toughness: { min: 1, max: 20 },
   wounds: { min: 1, max: 40 },
+  /** X of Blast X / Cleave X. */
+  abilityValue: { min: 1, max: 10 },
   iterations: { min: 100, max: 1_000_000 },
 } as const;
 
@@ -38,9 +40,17 @@ export function validateWeaponStats(w: WeaponStats): FieldErrors<WeaponStats> {
     strength: intInRange(w.strength, LIMITS.strength, 'Strength'),
     ap: intInRange(w.ap, LIMITS.ap, 'AP'),
     damage: dice(w.damage, 'Damage'),
-    abilities: w.abilities.sustainedHits === null ? undefined : dice(w.abilities.sustainedHits, 'Sustained Hits'),
+    abilities: abilityError(w.abilities),
   };
   return prune(errors);
+}
+
+function abilityError(a: WeaponAbilities): string | undefined {
+  return (
+    (a.sustainedHits === null ? undefined : dice(a.sustainedHits, 'Sustained Hits')) ??
+    (a.blast === null ? undefined : intInRange(a.blast, LIMITS.abilityValue, 'Blast')) ??
+    (a.cleave === null ? undefined : intInRange(a.cleave, LIMITS.abilityValue, 'Cleave'))
+  );
 }
 
 /** A live attack row: models in range, a weapon chosen, and that weapon valid. */

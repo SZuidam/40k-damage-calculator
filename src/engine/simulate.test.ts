@@ -90,6 +90,17 @@ describe('simulate', () => {
     gravis,
     19,
   );
+  it('Blast counts the target unit at the start, even after earlier weapons destroyed models', () => {
+    // 11 models → Blast 1 adds 2 attacks per model. Overkill destroys 10 models first; the
+    // blast weapon still makes 5 × (1 + 2) attacks.
+    const overkill = weapon('Overkill', 10, '1', 2, 20, -6, '10');
+    const blast = weapon('Blast', 5, '1', 3, 4, 0, '1', { blast: 1 });
+    const sim = simulate([overkill, blast], defender(11, 4, 3, 1), 2000, mulberry32(23));
+    expect(sim.perWeapon[1].stats.attacks).toBe(15);
+  });
+
+  compareWithExact('Blast 1 into 10 models', [weapon('Frag', 2, 'D6', 3, 4, 0, '1', { blast: 1 })], defender(10, 3, 5, 1), 24);
+  compareWithExact('Blast 2 and Cleave 1 with carry-over', [weapon('Both', 3, 'D3', 4, 5, -1, 'D3', { blast: 2, cleave: 1 }), heavyBolter], defender(10, 4, 3, 2), 25);
   compareWithExact('Sustained Hits D3', [weapon('Sustained D3', 4, '2', 4, 4, 0, '1', { sustainedHits: 'D3' })], defender(10, 4, 4, 1), 20);
 });
 

@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (142 tests, about 3 s)
+- `npm test`: Vitest, run once (149 tests, about 3 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -62,13 +62,15 @@ src/
 - **Lethal Hits:** a critical hit wounds automatically; there is no wound roll. That auto-wound is **not** a critical wound, so Devastating Wounds can't trigger on it.
 - **Sustained Hits X:** a critical hit scores X extra hits (X is stored as a dice expression; the UI offers 1 and 2 for now). The extra hits roll to wound normally. With Lethal Hits as well, the critical hit itself auto-wounds and only the extra hits roll.
 - **Devastating Wounds:** a critical wound skips the saving throw (armour and invulnerable). Damage is applied as normal (excess lost, no spill-over), as per the current rules rather than the old mortal-wounds version.
+- **Blast X:** each model makes X extra attacks for every 5 models in the target unit (rounded down), added to the weapon's A (`rules.bonusAttacks`, folded into `ctx.attacks.bonus`). The unit size is the defender's **starting** model count, as when targets are picked: models destroyed by earlier weapons in the list don't lower it.
+- **Cleave X:** the melee version of Blast X. The app doesn't tell ranged and melee apart, so it works exactly like Blast. A weapon with both adds them up.
 - When every defending model is destroyed, damage stops being applied. Hits, wounds and unsaved wounds are still counted, so the per-step stats show the weapon's full output.
 - **Weapon order:** weapons resolve top to bottom. The user can reorder them, and the "Optimise order" button can reorder them for the user.
 
 ## Inputs
 
 - **Weapon profile** (library, edited in a modal): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression), abilities.
-- **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits: string | null, devastatingWounds }`): in the modal an "Add ability…" dropdown plus a removable chip per ability. Choosing another Sustained Hits value replaces the current one. The options live in `state/abilities.ts` (`ABILITY_CHOICES`, `SUSTAINED_HITS_VALUES = ['1', '2']`: extend there for D3/D6 and higher numbers; the engine already handles any dice expression).
+- **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits: string | null, devastatingWounds, blast: number | null, cleave: number | null }`): in the modal an "Add ability…" dropdown plus a removable chip per ability. Choosing another Sustained Hits, Blast or Cleave value replaces the current one. Blast and Cleave values are offered from `BONUS_ATTACK_VALUES = [1, 2]`; validation allows 1–10 (`LIMITS.abilityValue`). The options live in `state/abilities.ts` (`ABILITY_CHOICES`, `SUSTAINED_HITS_VALUES = ['1', '2']`: extend there for D3/D6 and higher numbers; the engine already handles any dice expression).
 - **Attack row:** models + a weapon picked from the library. The row's stats are read-only chips with the abilities as read-only text below them; ✎ edits the linked profile.
 - **Defender:** models, T, Sv (2–6, or 7 for none), Inv (none or 2–6), W.
 - **Dice expressions:** `3`, `D3`, `D6`, `2D6`, `D6+1`, `2D3+2`. Case and spaces don't matter. Only **D3 and D6** are allowed, only a **`+` bonus** (no minus), at most 20 dice, and constants from 1 to 200.
@@ -155,6 +157,12 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - **Review** (`planImport`) tags each item: new; **Already saved** (same name, case-insensitive, and same content: not selectable); **Name in use** (same name, different content); invalid (fails `ui/validation`, with the first error shown: not selectable). When a selected item has a name clash, a choice appears: **Keep both** (imported as `Name (2)`, `Name (3)`…) or **Replace the saved item** (a replaced weapon keeps its library id, so rows using it change straight away). Clashes inside one import are always renamed.
 - `applyImport` mutates the state arrays in place (weapons first), then `main.ts` re-renders the unit select, the rows and the preset bars and saves.
 - `npm test` 142/142 (new `state/share.test.ts`). `npm run build` is clean. Checked in Chrome: invalid JSON error, review tags, import with a rename, loading the imported attack profile links its rows to the imported weapon and restores the missing Lascannon, export lists the result; no console errors.
+
+## Blast and Cleave (session 5, 2026-11-19)
+
+- `blast` / `cleave` are new fields on `WeaponAbilities` (`number | null`). Storage fills in `null` for older saves and repairs anything that isn't a whole number ≥ 1, so the key stays `damage-calculator:v2`. `sameAbilities` compares both, so presets and the import review see them as changes.
+- The engine only changes in `createAttackContext`: the extra attacks are added to the attacks dice expression, so the simulation, the exact engine and the optimiser pick it up unchanged. The extra attacks count under Attacks in the results.
+- `npm test` 149/149 (new: bonus attack counts, Blast + Cleave stacking, starting unit size after earlier weapons destroyed models, sim vs exact for Blast and Blast + Cleave, storage round trip and repair, validation, ability choices). `npm run build` is clean. Checked in Chrome: the dropdown lists Blast 1/2 and Cleave 1/2, the chip and row text show "Blast 1", localStorage holds `blast: 1`, and 10 bolt rifles with Blast 1 into 10 MEQ give 40 attacks and 6.68 unsaved (expected 6.67); no console errors.
 
 ## Housekeeping
 

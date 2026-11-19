@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { WeaponAbilities } from '../types';
 import {
   IMPOSSIBLE,
+  bonusAttacks,
   createAttackContext,
   hitChance,
   isCriticalHit,
@@ -115,6 +116,22 @@ describe('abilities', () => {
   it('Sustained Hits 2 with Lethal Hits: the critical hit auto-wounds and both extra hits roll to wound', () => {
     const mean = unsavedPerAttack(ctxWith({ sustainedHits: '2', lethalHits: true }));
     expect(mean).toBeCloseTo((3 / 6) * (1 / 6) + (1 / 6) * (1 / 3 + 2 * (1 / 6)), 12);
+  });
+
+  it('Blast X: X extra attacks per model for every 5 models in the target unit, rounded down', () => {
+    const gun = (abilities: Partial<WeaponAbilities>) => weapon('Gun', 3, 'D6', 3, 4, 0, '1', abilities);
+    const unit = (models: number) => ({ ...marines, models });
+    expect(createAttackContext(gun({ blast: 1 }), unit(4)).attacks).toEqual({ count: 1, sides: 6, bonus: 0 });
+    expect(createAttackContext(gun({ blast: 1 }), unit(5)).attacks).toEqual({ count: 1, sides: 6, bonus: 1 });
+    expect(createAttackContext(gun({ blast: 1 }), unit(14)).bonusAttacks).toBe(2);
+    expect(createAttackContext(gun({ blast: 2 }), unit(10)).attacks.bonus).toBe(4);
+    expect(bonusAttacks(gun({}), unit(20))).toBe(0);
+  });
+
+  it('Cleave X works the same as Blast X, and the two add up', () => {
+    const unit = { ...marines, models: 10 };
+    expect(bonusAttacks(weapon('Axe', 1, '2', 3, 4, 0, '1', { cleave: 1 }), unit)).toBe(2);
+    expect(bonusAttacks(weapon('Axe', 1, '2', 3, 4, 0, '1', { blast: 1, cleave: 2 }), unit)).toBe(6);
   });
 
   it('supports a dice expression for Sustained Hits', () => {

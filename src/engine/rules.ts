@@ -51,14 +51,28 @@ export interface AttackContext {
   sustainedHits: DiceExpr | null;
   /** Devastating Wounds: a critical wound skips the saving throw. */
   devastatingWounds: boolean;
+  /** Extra attacks per model from Blast / Cleave, already added to `attacks`. */
+  bonusAttacks: number;
+}
+
+/**
+ * Blast X / Cleave X: X extra attacks per model for every 5 models in the target unit
+ * (rounded down). The unit size is the one at the start of the attack, as when targets are
+ * picked, so models destroyed by earlier weapons in the list don't lower it.
+ */
+export function bonusAttacks(weapon: WeaponProfile, defender: DefenderProfile): number {
+  const perFive = (weapon.abilities.blast ?? 0) + (weapon.abilities.cleave ?? 0);
+  return perFive * Math.floor(defender.models / 5);
 }
 
 export function createAttackContext(weapon: WeaponProfile, defender: DefenderProfile): AttackContext {
   const { abilities } = weapon;
+  const attacks = parseDice(weapon.attacks);
+  const bonus = bonusAttacks(weapon, defender);
   return {
     weapon,
     defender,
-    attacks: parseDice(weapon.attacks),
+    attacks: { ...attacks, bonus: attacks.bonus + bonus },
     damage: parseDice(weapon.damage),
     hitTarget: weapon.skill,
     woundTarget: woundTarget(weapon.strength, defender.toughness),
@@ -68,6 +82,7 @@ export function createAttackContext(weapon: WeaponProfile, defender: DefenderPro
     lethalHits: abilities.lethalHits,
     sustainedHits: abilities.sustainedHits === null ? null : parseDice(abilities.sustainedHits),
     devastatingWounds: abilities.devastatingWounds,
+    bonusAttacks: bonus,
   };
 }
 
