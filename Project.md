@@ -22,11 +22,11 @@ index.html              static shell: attacker panel, defender panel, run bar, r
 src/
   main.ts               app state, wiring of views and preset bars, optimiser debounce, simulate button
   style.css             design tokens on :root, dark mode, layout, chart, preset bar and dialog styles
-  types.ts              WeaponStats, WeaponAbilities (+ copyAbilities), DEFENDER_KEYWORDS / KEYWORD_NAMES, StoredWeapon, AttackRow, RowSnapshot, *Preset, WeaponProfile (engine input), DefenderProfile, results
+  types.ts              WeaponStats, WeaponAbilities (+ copyAbilities), AttackConditions (+ noConditions), DEFENDER_KEYWORDS / KEYWORD_NAMES, StoredWeapon, AttackRow, RowSnapshot, *Preset, WeaponProfile (engine input), DefenderProfile, results
   engine/
     rng.ts              Rng type, mulberry32(seed), rollDie, d6 (default rng = Math.random)
     dice.ts             tryParseDice/parseDice, rollDice, diceDistribution (exact PMF), convolve, repeatDice, sums of expressions (rollDiceSum, diceSumDistribution, formatDiceSum)
-    rules.ts            woundTarget, saveTarget, rollSucceeds, antiCriticalWound, AttackContext + step functions
+    rules.ts            woundTarget, saveTarget, rollSucceeds, bonusAttacks, woundModifier, antiCriticalWound, AttackContext + step functions
     simulate.ts         Monte Carlo simulate(weapons, defender, iterations, rng), atLeast()
     exact.ts            exact Markov-chain expectation (weaponKernel, applyWeapon, exactResult)
     optimise.ts         optimiseOrder(): exhaustive for 7 or fewer weapons, greedy above that
@@ -34,7 +34,7 @@ src/
     *.test.ts           tests next to each module
   state/                pure, DOM-free, unit-tested
     ids.ts              uid()
-    storage.ts          loadState / saveState (key damage-calculator:v2), v1 migration, shape checks, defaults
+    storage.ts          loadState / saveState (key damage-calculator:v2), v1 migration, shape checks, defaults (incl. the attack conditions)
     abilities.ts        ability labels, "Add ability…" choices, withAbilityValue, withAntiValue / withoutAnti, parseAntiValue, sameAbilities
     presets.ts          pickStats, copyDefender, resolveRows, snapshotRows, sameSnapshot, sameDefender, materialiseRows, weaponUsage, helpers
     share.ts            export file (build/serialise), parseShareText, planImport, applyImport, uniqueName
@@ -43,20 +43,21 @@ src/
     validation.ts       validateWeaponStats / validateRow / validateDefender / validateIterations, abilityValueError, antiValueError, LIMITS
     modal.ts            openModal() around a native <dialog>, confirmDialog(), promptName()
     weaponModal.ts      openWeaponModal(initial?): create or edit a weapon profile
-    abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave or the Y of Anti-X Y+
+    abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire or the Y of Anti-X Y+
     libraryModal.ts     "Weapon profiles…": list, create, edit, delete (blocked while in use)
-    attackList.ts       AttackList class: Models + weapon select + read-only stat chips (active Anti outlined) + ✎; add / remove / move / reorder; compact mode
+    attackList.ts       AttackList class: Models + weapon select + read-only stat chips (active Anti / Rapid Fire / Lance outlined) + ✎; add / remove / move / reorder; compact mode
     presetBar.ts        PresetBar class: [Preset ▾] [Save] [Save as…] [Delete] with dirty detection
     unitModal.ts        "Units…": list, create, edit, delete attacking unit presets
     shareModal.ts       "Export…" (pick items, Copy / Download) and "Import…" (paste or file, review, import)
     defenderForm.ts     renderDefenderForm() → { setValues() }: stats plus the keyword toggles
+    conditionsForm.ts   renderAttackConditions() → { setValues() }: the "Within half range" / "Charged this turn" toggles
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
 ```
 
 ## Rules implemented (confirmed with the user)
 
 - **Hit:** d6 ≥ BS/WS. An unmodified 1 always fails.
-- **Wound:** S ≥ 2T → 2+, S > T → 3+, S = T → 4+, S < T → 5+, T ≥ 2S → 6+. An unmodified 1 always fails.
+- **Wound:** S ≥ 2T → 2+, S > T → 3+, S = T → 4+, S < T → 5+, T ≥ 2S → 6+. An unmodified 1 always fails. A wound roll modifier (`ctx.woundModifier`, capped at -1 / +1 by `MAX_ROLL_MODIFIER`) is added to the roll before it is compared with the S vs T target; critical wounds are always judged on the **unmodified** roll.
 - **Save:** armour target = Sv + |AP| (AP is entered as 0 or a negative number). Effective target = min(armour, Inv), and AP does not affect Inv. A target above 6 fails automatically (`IMPOSSIBLE = 7`). Sv 7 means no armour save. An unmodified 1 always fails.
 - **Damage:** rolled separately for each failed save. Applied damage = min(damage, wounds left on the current model), and any excess is lost. The next failed save goes to the next model, which has full wounds. A partly wounded model carries over between weapons.
 - **Critical hit / critical wound:** an unmodified roll that succeeds and is at least `ctx.criticalHit` / `ctx.criticalWound`. Both are 6, except that Anti-X Y+ lowers `criticalWound`.
@@ -65,14 +66,17 @@ src/
 - **Devastating Wounds:** a critical wound skips the saving throw (armour and invulnerable). Damage is applied as normal (excess lost, no spill-over), as per the current rules rather than the old mortal-wounds version.
 - **Blast X:** each model makes X extra attacks for every 5 models in the target unit (rounded down), on top of the weapon's A. X is a dice expression rolled **independently per block of 5 and per attacking model**: Blast D6+2 into 10 models adds 2D6+4 attacks per model (`rules.bonusAttacks` returns one `DiceExpr` per ability via `repeatDice`; `ctx.attacks` stays the base A and `attacksPerModel(ctx)` = A plus those terms, rolled with `rollDiceSum` / convolved with `diceSumDistribution`). The unit size is the defender's **starting** model count, as when targets are picked: models destroyed by earlier weapons in the list don't lower it.
 - **Cleave X:** the melee version of Blast X. The app doesn't tell ranged and melee apart, so it works exactly like Blast. A weapon with both rolls both.
-- **Anti-X Y+:** against a target with keyword X, an unmodified wound roll of Y+ is a critical wound and always wounds, whatever S vs T says (`woundSucceeds` uses `min(woundTarget, criticalWound)`; an unmodified 1 still fails). With several matching Anti abilities the lowest Y counts (`antiCriticalWound`). Devastating Wounds then triggers on Y+ as well. Lethal Hits auto-wounds stay non-critical.
+- **Anti-X Y+:** against a target with keyword X, an unmodified wound roll of Y+ is a critical wound and always wounds, whatever S vs T says (`woundSucceeds`: `roll !== 1 && (roll + woundModifier >= woundTarget || roll >= criticalWound)`). With several matching Anti abilities the lowest Y counts (`antiCriticalWound`). Devastating Wounds then triggers on Y+ as well. Lethal Hits auto-wounds stay non-critical.
+- **Rapid Fire X:** while the attack condition *Within half range* is on, each model makes X extra attacks (a dice expression rolled once per attacking model; the defender's size doesn't matter). It is one more `bonusAttacks` term, so it stacks with Blast / Cleave.
+- **Lance:** while the attack condition *Charged this turn* is on, +1 to the wound roll (`woundModifier`). S4 vs T4 goes from 4+ to 3+, S4 vs T8 from 6+ to 5+, a 2+ still fails on a 1. Lance never makes a critical wound on its own: Devastating Wounds and Anti still use the unmodified roll.
 - When every defending model is destroyed, damage stops being applied. Hits, wounds and unsaved wounds are still counted, so the per-step stats show the weapon's full output.
 - **Weapon order:** weapons resolve top to bottom. The user can reorder them, and the "Optimise order" button can reorder them for the user.
 
 ## Inputs
 
 - **Weapon profile** (library, edited in a modal): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression), abilities.
-- **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits, devastatingWounds, blast, cleave, anti }`, the X fields `string | null` dice expressions, `anti` a `Partial<Record<DefenderKeyword, number>>` of Y per keyword, e.g. `{ vehicle: 4, monster: 4 }`): in the modal an "Add ability…" dropdown with one entry per ability (`ABILITY_CHOICES` in `state/abilities.ts`) plus a removable chip per ability. Picking `Sustained Hits X…`, `Blast X…` or `Cleave X…` opens a small pop-up beside the dropdown (`ui/abilityValuePopover.ts`) with a text input that takes the same dice expressions as A and D; OK is disabled while the value is invalid, Enter confirms without submitting the weapon form, Esc / Cancel / a click outside closes only the pop-up. Clicking the label of an X chip reopens the pop-up prefilled to change X. Values are stored normalised (`withAbilityValue`: ` d6 + 2 ` → `D6+2`). Validation (`abilityValueError`): the expression must parse and its highest roll must be at most 12 (`LIMITS.abilityValue.max`, allows 2D6 / D6+6 and keeps the exact engine's attack PMF small).
+- **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits, devastatingWounds, blast, cleave, anti, rapidFire, lance }`, the X fields `string | null` dice expressions, `anti` a `Partial<Record<DefenderKeyword, number>>` of Y per keyword, e.g. `{ vehicle: 4, monster: 4 }`): in the modal an "Add ability…" dropdown with one entry per ability (`ABILITY_CHOICES` in `state/abilities.ts`) plus a removable chip per ability. Picking `Sustained Hits X…`, `Blast X…`, `Cleave X…` or `Rapid Fire X…` opens a small pop-up beside the dropdown (`ui/abilityValuePopover.ts`) with a text input that takes the same dice expressions as A and D; OK is disabled while the value is invalid, Enter confirms without submitting the weapon form, Esc / Cancel / a click outside closes only the pop-up. Clicking the label of an X chip reopens the pop-up prefilled to change X. Values are stored normalised (`withAbilityValue`: ` d6 + 2 ` → `D6+2`). Validation (`abilityValueError`): the expression must parse and its highest roll must be at most 12 (`LIMITS.abilityValue.max`, allows 2D6 / D6+6 and keeps the exact engine's attack PMF small).
+- **Attack conditions** (`AttackConditions` = `{ halfRange, charged }`): two pill toggles, "Within half range" and "Charged this turn", in their own segment of the Attacker panel between the attack profile bar and the weapons. They apply to every weapon and are situational: saved with the live state (`StoredState.conditions`) but not in presets, units or exports, so toggling one never marks a preset "(modified)".
 - **Attack row:** models + a weapon picked from the library. The row's stats are read-only chips with the abilities as read-only text below them; ✎ edits the linked profile.
 - **Defender:** models, T, Sv (2–6, or 7 for none), Inv (none or 2–6), W, and keywords (Vehicle, Monster, Psyker, Infantry, Fly; `DefenderProfile.keywords`, always in `DEFENDER_KEYWORDS` order without duplicates) as pill-shaped checkbox toggles under the stats.
 - **Dice expressions:** `3`, `D3`, `D6`, `2D6`, `D6+1`, `2D3+2`. Case and spaces don't matter. Only **D3 and D6** are allowed, only a **`+` bonus** (no minus), at most 20 dice, and constants from 1 to 200.
@@ -183,6 +187,15 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - `defenderSummary` appends the keywords (`5 models · T8 · Sv 2+ · W10 · Vehicle`), so the export and import lists show them; `sameDefender` compares them, so a toggle makes a defender preset "(modified)" and an import differing only in keywords is a "Name in use" conflict.
 - `npm test` 212/212 (new: Anti wound chances and critical faces for 6+ and 2+ wound targets, lowest Y, Anti + Devastating Wounds, sim vs exact for Anti + DW and Anti + Lethal + DW, Lethal auto-wounds non-critical; choices, grouping, labels, `withAntiValue` / `withoutAnti`, `parseAntiValue`, `sameAbilities`; storage round trip and repair; `sameDefender`, copies, `defenderSummary`; share export / import / conflicts; validation). `npm run build` is clean. Checked in Chrome: `7` and `abc` disable OK with the error shown, `4+` + Enter gives `Anti-Vehicle 4+` without submitting the form; adding Monster 4+ merges into `Anti-Vehicle/Monster 4+`, Psyker 4+ makes a second chip, changing it to 3+ after the group went to 3+ merges all three with focus on the merged chip; ✕ removes the group. 10× A1 S4 AP0 D1 with Anti-Vehicle 4+ and Devastating Wounds into 5× T8 Sv2+ W10: wounds 1.13 without the keyword (expected 1.11) and 3.35 with Vehicle (expected 3.33), all unsaved; the row outline follows the Vehicle toggle; a defender preset keeps its keywords, turns "(modified)" on a toggle and back when undone, reloads with the toggle set; the export JSON holds `"keywords": ["vehicle"]` and `"anti": { "vehicle": 4 }` and importing it into cleared storage restores both; no console errors. Light mode, keyboard focus on the toggles and the 390px layout were not checked in the browser.
 
+## Rapid Fire, Lance and attack conditions (session 8, 2026-11-19)
+
+- **Data:** `WeaponAbilities.rapidFire: string | null` and `lance: boolean`; storage reads them with `toAbilityDice` / `=== true`, so older saves and exports load with neither. `StoredState.conditions: AttackConditions` defaults to `noConditions()` and is repaired flag by flag (`toConditions`); the storage key stays `damage-calculator:v2` and `SHARE_VERSION` didn't change.
+- **Engine:** `WeaponProfile` (engine input) has a required `conditions`; `resolveRows(rows, library, conditions)` gives each weapon its own copy. `createAttackContext` reads it: `bonusAttacks` adds the Rapid Fire term while `halfRange`, and `woundModifier` is +1 for Lance while `charged`. `simulate`, `exactResult`, `weaponKernel` and `optimiseOrder` kept their signatures.
+- **Weapon modal:** `Rapid Fire X…` (pop-up for X, same validation as the other X values) and `Lance` (added straight away) come after Cleave in the dropdown.
+- **Attack row:** within half range the A chip reads `A 2+1`, with "plus 1 from Rapid Fire 1 (within half range)" in its tooltip (Blast / Cleave sources are listed with the model count, joined with "and"). `ActiveAbility.condition` marks Rapid Fire (`halfRange`) and Lance (`charged`); while that condition is on the ability is outlined like an active Anti (`.ability-active`, "Active: the bearer charged this turn.", visually hidden "(active)"). `AttackList` takes `conditions: () => AttackConditions`; `refreshStats()` from `onInputsChanged` updates the chips.
+- **Styles:** the defender keyword toggle classes were renamed to generic ones (`.toggle-group`, `.toggle-pills`, `.toggle-pill`, `.toggle-input`), shared by both forms. `.attack-conditions` floats the legend so it sits on the same line as the pills; it wraps above them when there is no room.
+- `npm test` 234/234 (new: Rapid Fire terms only within half range, fixed and D3, stacking with Blast; Lance wound chances 4+→3+, 6+→5+, a 1 still failing, Lance + Devastating Wounds and Lance + Anti; sim vs exact for Rapid Fire D3 + Lance with carry-over; 20 vs 30 attacks for Rapid Fire 1; choices, labels, conditions, `sameAbilities`, `withoutAbility`; storage round trip, missing fields and condition repair; `resolveRows` conditions and `sameSnapshot` independence; validation; share round trip). `npm run build` is clean. Checked in Chrome: Rapid Fire 1 added through the pop-up and Lance as a flag; 10 bolt rifles into 10 MEQ make 20.00 attacks / 6.66 wounds, 30.00 / 10.03 within half range, and 13.37 wounds out of 20.05 hits after a charge too (2/3); the A chip reads `A 2+1` and the abilities are outlined while their condition is on; the "Rapid lances" preset stays unmodified and holds no conditions; the toggles persist after a reload and work with Tab / Space with a visible focus ring; at 390px (same-origin iframe, the window can't be resized) the legend wraps above the pills without sideways scroll; dark and light mode both fine; no console errors.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -190,7 +203,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## Ideas for next steps
 
-- More abilities through the `AttackContext` step functions: hit/wound modifiers, rerolls (1s or all), Twin-linked, Torrent, Feel No Pain, damage reduction, cover.
+- More abilities through the `AttackContext` step functions: hit modifiers (and more wound modifiers, which already go through `woundModifier`), rerolls (1s or all), Twin-linked, Torrent, Feel No Pain, damage reduction, cover.
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - A share link (export encoded in the URL hash) next to Copy / Download.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities } from '../types';
+import { noAbilities, noConditions } from '../types';
 import { LEGACY_STORAGE_KEY, STORAGE_KEY, defaultState, loadState, saveState, type KeyValueStorage } from './storage';
 
 function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & { data: Record<string, string> } {
@@ -159,6 +159,42 @@ describe('loadState', () => {
     const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
     expect(state.defender.keywords).toEqual([]);
     expect(state.library[0].abilities.anti).toEqual({});
+  });
+
+  it('round trips Rapid Fire and Lance, and gives weapons saved before them none', () => {
+    const storage = memoryStorage();
+    const state = defaultState();
+    state.library[0].abilities = { ...noAbilities(), rapidFire: 'D3', lance: true };
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
+
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    delete saved.library[0].abilities.rapidFire;
+    delete saved.library[0].abilities.lance;
+    const loaded = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(loaded.library[0].abilities).toEqual(noAbilities());
+
+    saved.library[0].abilities = { rapidFire: 1, lance: 'yes' };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual({ ...noAbilities(), rapidFire: '1' });
+  });
+
+  it('defaults, repairs and round trips the attack conditions', () => {
+    expect(defaultState().conditions).toEqual(noConditions());
+
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    delete saved.conditions;
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).conditions).toEqual(noConditions());
+    saved.conditions = 'on';
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).conditions).toEqual(noConditions());
+    saved.conditions = { halfRange: 'yes', charged: true };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).conditions).toEqual({ halfRange: false, charged: true });
+    expect(loadState(memoryStorage({ [LEGACY_STORAGE_KEY]: JSON.stringify(v1) })).conditions).toEqual(noConditions());
+
+    const storage = memoryStorage();
+    const state = defaultState();
+    state.conditions = { halfRange: true, charged: true };
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
   });
 
   it('does not throw when storage throws', () => {

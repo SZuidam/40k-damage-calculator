@@ -105,6 +105,21 @@ describe('keywords and Anti', () => {
   });
 });
 
+describe('Rapid Fire and Lance', () => {
+  it('survive export and import', () => {
+    const source = sourceState();
+    source.library[0].abilities = { ...noAbilities(), rapidFire: 'D3', lance: true };
+    const file = JSON.parse(serializeShareFile(buildShareFile(source, everything(source))));
+    expect(file.weapons[0].abilities).toMatchObject({ rapidFire: 'D3', lance: true });
+    expect(file).not.toHaveProperty('conditions');
+    const data = roundTrip(source);
+    expect(data.weapons[0].abilities).toEqual({ ...noAbilities(), rapidFire: 'D3', lance: true });
+    const target = emptyState();
+    applyImport(data, planImport(data, target), target, 'rename');
+    expect(target.library[0].abilities).toEqual({ ...noAbilities(), rapidFire: 'D3', lance: true });
+  });
+});
+
 describe('parseShareText', () => {
   const error = (text: string) => {
     const result = parseShareText(text);

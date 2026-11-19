@@ -135,6 +135,24 @@ describe('simulate', () => {
     expectClose(sim.total.unsaved, 10 * ((3 / 6) * (3 / 6) + (1 / 6) * (1 / 6)));
   });
   compareWithExact('Sustained Hits D3', [weapon('Sustained D3', 4, '2', 4, 4, 0, '1', { sustainedHits: 'D3' })], defender(10, 4, 4, 1), 20);
+  compareWithExact(
+    'Rapid Fire D3 and Lance within half range after a charge',
+    [weapon('Lance rifle', 5, '1', 3, 4, -1, '2', { rapidFire: 'D3', lance: true }, { halfRange: true, charged: true }), heavyBolter],
+    defender(10, 4, 3, 2),
+    32,
+  );
+
+  it('Rapid Fire 1: 10 bolt rifles make 20 attacks, 30 within half range', () => {
+    const rifles = (halfRange: boolean) => [weapon('Bolt rifles', 10, '2', 3, 4, -1, '1', { rapidFire: '1' }, { halfRange })];
+    expect(simulate(rifles(false), defender(10, 4, 3, 2), 200, mulberry32(33)).total.attacks).toBe(20);
+    expect(simulate(rifles(true), defender(10, 4, 3, 2), 200, mulberry32(33)).total.attacks).toBe(30);
+  });
+
+  it('Lance: S4 into T4 wounds on 3+ after a charge', () => {
+    const lance = (charged: boolean) => [weapon('Lance', 10, '1', 2, 4, 0, '1', { lance: true }, { charged })];
+    expectClose(simulate(lance(false), defender(20, 4, 3, 1), ITERATIONS, mulberry32(34)).total.wounds, 10 * (5 / 6) * (3 / 6));
+    expectClose(simulate(lance(true), defender(20, 4, 3, 1), ITERATIONS, mulberry32(34)).total.wounds, 10 * (5 / 6) * (4 / 6));
+  });
 });
 
 describe('atLeast', () => {

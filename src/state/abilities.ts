@@ -1,9 +1,9 @@
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderKeyword, type WeaponAbilities } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type AttackConditions, type DefenderKeyword, type WeaponAbilities } from '../types';
 
 export type AbilityKey = keyof WeaponAbilities;
 
 /** The abilities that take an X (a dice expression) typed in by the user. */
-export type ValueAbilityKey = 'sustainedHits' | 'blast' | 'cleave';
+export type ValueAbilityKey = 'sustainedHits' | 'blast' | 'cleave' | 'rapidFire';
 
 /** An ability a weapon has, as shown in the UI. */
 export interface ActiveAbility {
@@ -14,6 +14,8 @@ export interface ActiveAbility {
   valueKey?: ValueAbilityKey;
   /** Set for Anti-X Y+: the keywords that share this Y (one chip), in display order. */
   anti?: { keywords: DefenderKeyword[]; value: number };
+  /** Set for abilities that only work under an attack condition (Rapid Fire, Lance). */
+  condition?: keyof AttackConditions;
 }
 
 interface BaseChoice {
@@ -58,6 +60,7 @@ export const VALUE_ABILITY_NAMES: Record<ValueAbilityKey, string> = {
   sustainedHits: 'Sustained Hits',
   blast: 'Blast',
   cleave: 'Cleave',
+  rapidFire: 'Rapid Fire',
 };
 
 const attacksPerFive = (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model for every 5 models in the target unit`;
@@ -69,7 +72,12 @@ const DESCRIPTIONS = {
   blast: (x: string) => `${attacksPerFive(x)}.`,
   cleave: (x: string) => `${attacksPerFive(x)} (melee only; works the same as Blast here).`,
   anti: (keywords: string, y: string) => `An unmodified wound roll of ${y} against a ${keywords} target is a critical wound (it always wounds).`,
+  rapidFire: (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model when the target is within half range.`,
+  lance: 'Adds 1 to the wound roll if the bearer charged this turn.',
 };
+
+/** The attack condition each conditional ability needs. */
+const CONDITIONS: Partial<Record<keyof WeaponAbilities, keyof AttackConditions>> = { rapidFire: 'halfRange', lance: 'charged' };
 
 /** "Vehicle", "Vehicle or Monster", "Vehicle, Monster or Fly". */
 function keywordList(keywords: DefenderKeyword[]): string {
@@ -118,6 +126,14 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
   ...DEFENDER_KEYWORDS.map(antiChoice),
   valueChoice('blast', 'blast', DESCRIPTIONS.blast('X')),
   valueChoice('cleave', 'cleave', DESCRIPTIONS.cleave('X')),
+  valueChoice('rapidFire', 'rapid-fire', DESCRIPTIONS.rapidFire('X')),
+  {
+    value: 'lance',
+    label: 'Lance',
+    description: DESCRIPTIONS.lance,
+    isActive: (a) => a.lance,
+    apply: (a) => ({ ...a, lance: true }),
+  },
 ];
 
 /** The abilities with X of `key` set (or replaced), stored normalised: " d6 + 2 " → "D6+2". */
@@ -130,7 +146,8 @@ export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   const out: ActiveAbility[] = [];
   const withValue = (key: ValueAbilityKey, value: string) => {
     const x = normaliseDice(value);
-    out.push({ key, label: `${VALUE_ABILITY_NAMES[key]} ${x}`, description: DESCRIPTIONS[key](x), valueKey: key });
+    const condition = CONDITIONS[key];
+    out.push({ key, label: `${VALUE_ABILITY_NAMES[key]} ${x}`, description: DESCRIPTIONS[key](x), valueKey: key, ...(condition && { condition }) });
   };
   if (a.lethalHits) out.push({ key: 'lethalHits', label: 'Lethal Hits', description: DESCRIPTIONS.lethalHits });
   if (a.sustainedHits !== null) withValue('sustainedHits', a.sustainedHits);
@@ -140,6 +157,8 @@ export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   }
   if (a.blast !== null) withValue('blast', a.blast);
   if (a.cleave !== null) withValue('cleave', a.cleave);
+  if (a.rapidFire !== null) withValue('rapidFire', a.rapidFire);
+  if (a.lance) out.push({ key: 'lance', label: 'Lance', description: DESCRIPTIONS.lance, condition: 'charged' });
   return out;
 }
 
@@ -196,9 +215,11 @@ export function sameAbilities(a: WeaponAbilities, b: WeaponAbilities): boolean {
   return (
     a.lethalHits === b.lethalHits &&
     a.devastatingWounds === b.devastatingWounds &&
+    a.lance === b.lance &&
     sameValue('sustainedHits') &&
     sameValue('blast') &&
     sameValue('cleave') &&
+    sameValue('rapidFire') &&
     DEFENDER_KEYWORDS.every((k) => a.anti[k] === b.anti[k])
   );
 }

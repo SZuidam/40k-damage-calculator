@@ -5,6 +5,7 @@ import { uid } from './state/ids';
 import { copyDefender, findWeapon, materialiseRows, resolveRows, sameDefender, sameSnapshot, snapshotRows } from './state/presets';
 import { loadState, saveState } from './state/storage';
 import { AttackList } from './ui/attackList';
+import { renderAttackConditions } from './ui/conditionsForm';
 import { renderDefenderForm } from './ui/defenderForm';
 import { h, numberValue, setFieldError } from './ui/dom';
 import { openLibraryModal } from './ui/libraryModal';
@@ -47,7 +48,7 @@ function inputsValid(): boolean {
 function onInputsChanged(): void {
   saveState(state);
   // The Blast / Cleave extra attacks on the A chips depend on the defender's model count,
-  // the Anti markers on its keywords.
+  // the Anti markers on its keywords, Rapid Fire and Lance on the attack conditions.
   attackList.refreshStats();
   if (!reordering) reorderNote = '';
   simulateButton.disabled = !inputsValid();
@@ -77,7 +78,7 @@ function runOptimise(): void {
   if (state.rows.length < 2) return setOptimiseState('single');
   if (!inputsValid()) return setOptimiseState('invalid');
   // Every row is valid here, so resolved index i is row i.
-  lastOptimise = optimiseOrder(resolveRows(state.rows, state.library), state.defender);
+  lastOptimise = optimiseOrder(resolveRows(state.rows, state.library, state.conditions), state.defender);
   setOptimiseState('ready');
 }
 
@@ -127,7 +128,7 @@ function runSimulation(): void {
   runStatus.textContent = 'Simulating…';
   // Let the status paint before the (synchronous) simulation blocks the thread.
   window.setTimeout(() => {
-    const weapons = resolveRows(state.rows, state.library);
+    const weapons = resolveRows(state.rows, state.library, state.conditions);
     const defender = copyDefender(state.defender);
     const started = performance.now();
     const result = simulate(weapons, defender, state.iterations);
@@ -146,7 +147,10 @@ const attackList = new AttackList($('weapons'), state.rows, {
   onChange: onInputsChanged,
   onLibraryChange: onLibraryChanged,
   defender: () => state.defender,
+  conditions: () => state.conditions,
 });
+// Situational: saved with the live state, but not part of presets, so toggling never makes one "(modified)".
+renderAttackConditions($('attack-conditions'), state.conditions, onInputsChanged);
 const defenderForm = renderDefenderForm($('defender'), state.defender, onInputsChanged);
 
 /** Replace the live rows (and library, which may have gained restored weapons). */

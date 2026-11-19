@@ -3,7 +3,7 @@ import { bonusAttacks } from '../engine/rules';
 import { activeAbilities, normaliseDice } from '../state/abilities';
 import { uid } from '../state/ids';
 import { findWeapon, sortedLibrary } from '../state/presets';
-import { KEYWORD_NAMES, type AttackRow, type DefenderProfile, type StoredWeapon, type WeaponStats } from '../types';
+import { KEYWORD_NAMES, noConditions, type AttackConditions, type AttackRow, type DefenderProfile, type StoredWeapon, type WeaponStats } from '../types';
 import { field, h, numberValue, setFieldError } from './dom';
 import { validateRow } from './validation';
 import { openWeaponModal } from './weaponModal';
@@ -26,6 +26,8 @@ export interface AttackListOptions {
    * its keywords to mark Anti abilities that apply.
    */
   defender?: () => Pick<DefenderProfile, 'models' | 'keywords'>;
+  /** The attack conditions: Rapid Fire adds to the A chip within half range, and conditional abilities are outlined while on. */
+  conditions?: () => AttackConditions;
 }
 
 export function newRow(weaponId: string | null, models = 1): AttackRow {
@@ -160,7 +162,7 @@ export class AttackList {
       }
       errors.textContent = Object.values(result).join(' · ');
       if (compact) return;
-      chips.replaceChildren(...statChips(weapon, this.options.defender?.()));
+      chips.replaceChildren(...statChips(weapon, this.options.defender?.(), this.options.conditions?.() ?? noConditions()));
       edit.disabled = !weapon;
       edit.setAttribute('aria-label', weapon ? `Edit ${weapon.name}` : 'Edit weapon profile');
     };
@@ -230,47 +232,63 @@ const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities'>; label: string
   { key: 'damage', label: 'D', title: 'Damage' },
 ];
 
-function statChips(weapon: WeaponStats | undefined, defender: Pick<DefenderProfile, 'models' | 'keywords'> | undefined): HTMLElement[] {
+/** Why an attack condition makes an ability active, for its tooltip. */
+const CONDITION_REASONS: Record<keyof AttackConditions, string> = {
+  halfRange: 'the target is within half range',
+  charged: 'the bearer charged this turn',
+};
+
+function statChips(weapon: WeaponStats | undefined, defender: Pick<DefenderProfile, 'models' | 'keywords'> | undefined, conditions: AttackConditions): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
-  const defenderModels = defender?.models;
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, label), ' ', format ? format(weapon) : String(weapon[key])),
   );
-  const bonus = attacksBonus(weapon, defenderModels);
+  const bonus = attacksBonus(weapon, defender?.models, conditions);
   if (bonus) {
-    // The A chip comes first: "A 4+2" or "A D6+2D6+4", with the Blast / Cleave extra attacks in blue.
+    // The A chip comes first: "A 4+2" or "A D6+2D6+4", with the Blast / Cleave / Rapid Fire extra attacks in blue.
     chips[0].append(h('span', { class: 'chip-bonus' }, `+${bonus.value}`));
-    chips[0].title = `Attacks: ${weapon.attacks}, plus ${bonus.value} from ${bonus.sources} (${defenderModels} models in the target unit)`;
+    chips[0].title = `Attacks: ${weapon.attacks}, plus ${bonus.value} from ${bonus.sources}`;
   }
   const abilities = activeAbilities(weapon.abilities);
   if (abilities.length === 0) return chips;
   // Read-only here; abilities are edited in the weapon profile modal (✎).
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
-  abilities.forEach(({ label, description, anti }, i) => {
+  abilities.forEach(({ label, description, anti, condition }, i) => {
     if (i > 0) text.append(', ');
-    // An Anti ability is outlined when the current defender has one of its keywords.
+    // An Anti ability is outlined when the current defender has one of its keywords, a
+    // conditional ability (Rapid Fire, Lance) while its attack condition is on.
+    let active: string | null = null;
     const matched = anti && defender ? anti.keywords.filter((k) => defender.keywords.includes(k)) : [];
-    if (matched.length === 0) {
+    if (matched.length > 0) {
+      const names = matched.map((k) => KEYWORD_NAMES[k]).join(' and ');
+      active = `Active: the target has the ${names} keyword${matched.length === 1 ? '' : 's'}.`;
+    } else if (condition && conditions[condition]) {
+      active = `Active: ${CONDITION_REASONS[condition]}.`;
+    }
+    if (active === null) {
       text.append(h('span', { title: description }, label));
       return;
     }
-    const names = matched.map((k) => KEYWORD_NAMES[k]).join(' and ');
-    const active = `Active: the target has the ${names} keyword${matched.length === 1 ? '' : 's'}.`;
     text.append(h('span', { class: 'ability-active', title: `${description} ${active}` }, label, h('span', { class: 'visually-hidden' }, ' (active)')));
   });
   return [...chips, text];
 }
 
 /**
- * Blast / Cleave extra attacks per model against the current defender ("2D6+4"), or null
- * when there are none or an X is invalid (the row shows that error instead).
+ * Blast / Cleave / Rapid Fire extra attacks per model against the current defender and
+ * under the current conditions ("2D6+4"), with their sources for the tooltip, or null when
+ * there are none or an X is invalid (the row shows that error instead).
  */
-function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined): { value: string; sources: string } | null {
-  if (defenderModels === undefined || !Number.isInteger(defenderModels) || defenderModels < 1) return null;
-  const { blast, cleave } = weapon.abilities;
-  if ([blast, cleave].some((x) => x !== null && !tryParseDice(x))) return null;
-  const terms = bonusAttacks(weapon, { models: defenderModels });
+function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined, conditions: AttackConditions): { value: string; sources: string } | null {
+  const { blast, cleave, rapidFire } = weapon.abilities;
+  if ([blast, cleave, rapidFire].some((x) => x !== null && !tryParseDice(x))) return null;
+  // Without a valid model count Blast / Cleave add nothing here; Rapid Fire still can.
+  const models = defenderModels !== undefined && Number.isInteger(defenderModels) && defenderModels >= 1 ? defenderModels : 0;
+  const terms = bonusAttacks({ abilities: weapon.abilities, conditions }, { models });
   if (terms.length === 0) return null;
-  const sources = [blast === null ? '' : `Blast ${normaliseDice(blast)}`, cleave === null ? '' : `Cleave ${normaliseDice(cleave)}`].filter(Boolean).join(' and ');
-  return { value: formatDiceSum(terms), sources };
+  const perFive = models >= 5 ? [blast === null ? '' : `Blast ${normaliseDice(blast)}`, cleave === null ? '' : `Cleave ${normaliseDice(cleave)}`].filter(Boolean) : [];
+  const sources: string[] = [];
+  if (perFive.length > 0) sources.push(`${perFive.join(' and ')} (${models} models in the target unit)`);
+  if (rapidFire !== null && conditions.halfRange) sources.push(`Rapid Fire ${normaliseDice(rapidFire)} (within half range)`);
+  return { value: formatDiceSum(terms), sources: sources.join(' and ') };
 }

@@ -50,7 +50,7 @@ export function renderDefenderForm(container: HTMLElement, defender: DefenderPro
 
   // Keywords (for Anti-X Y+): one toggle per keyword, styled as a small chip.
   const keywordBoxes = DEFENDER_KEYWORDS.map((keyword) => {
-    const box = h('input', { id: `def-keyword-${keyword}`, type: 'checkbox', class: 'keyword-input', checked: defender.keywords.includes(keyword) });
+    const box = h('input', { id: `def-keyword-${keyword}`, type: 'checkbox', class: 'toggle-input', checked: defender.keywords.includes(keyword) });
     box.addEventListener('change', () => {
       defender.keywords = DEFENDER_KEYWORDS.filter((_, i) => keywordBoxes[i].checked);
       onChange();
@@ -59,12 +59,12 @@ export function renderDefenderForm(container: HTMLElement, defender: DefenderPro
   });
   const keywords = h(
     'fieldset',
-    { class: 'keyword-group' },
+    { class: 'toggle-group' },
     h('legend', {}, 'Keywords'),
     h(
       'div',
-      { class: 'keyword-toggles' },
-      ...DEFENDER_KEYWORDS.map((keyword, i) => h('label', { class: 'keyword-toggle' }, keywordBoxes[i], h('span', {}, KEYWORD_NAMES[keyword]))),
+      { class: 'toggle-pills' },
+      ...DEFENDER_KEYWORDS.map((keyword, i) => h('label', { class: 'toggle-pill' }, keywordBoxes[i], h('span', {}, KEYWORD_NAMES[keyword]))),
     ),
   );
 

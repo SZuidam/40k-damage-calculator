@@ -416,15 +416,15 @@ select[aria-invalid='true'] {
   gap: 8px;
 }
 
-/* Keyword toggles (for Anti-X Y+): a checkbox per keyword, shown as a small pill. */
-.keyword-group {
+/* Toggle pills: a group of checkboxes, each shown as a small pill (defender keywords, attack conditions). */
+.toggle-group {
   margin: 10px 0 0;
   padding: 0;
   border: 0;
   min-width: 0;
 }
 
-.keyword-group legend {
+.toggle-group legend {
   padding: 0;
   margin-bottom: 4px;
   font-size: 0.75rem;
@@ -432,19 +432,19 @@ select[aria-invalid='true'] {
   color: var(--text-secondary);
 }
 
-.keyword-toggles {
+.toggle-pills {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.keyword-toggle {
+.toggle-pill {
   position: relative;
   display: inline-flex;
   cursor: pointer;
 }
 
-.keyword-toggle .keyword-input {
+.toggle-pill .toggle-input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -455,7 +455,7 @@ select[aria-invalid='true'] {
   cursor: pointer;
 }
 
-.keyword-toggle span {
+.toggle-pill span {
   display: inline-flex;
   align-items: center;
   height: 28px;
@@ -469,27 +469,46 @@ select[aria-invalid='true'] {
   user-select: none;
 }
 
-.keyword-toggle:hover span {
+.toggle-pill:hover span {
   background: var(--surface-2);
 }
 
-.keyword-input:checked + span {
+.toggle-input:checked + span {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
 }
 
-.keyword-toggle:hover .keyword-input:checked + span {
+.toggle-pill:hover .toggle-input:checked + span {
   background: var(--accent-hover);
 }
 
-.keyword-input:focus-visible {
+.toggle-input:focus-visible {
   outline: none;
 }
 
-.keyword-input:focus-visible + span {
+.toggle-input:focus-visible + span {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* ---------- Attack conditions ---------- */
+
+/* Situational toggles between the attack profile bar and the weapons: legend and pills on one line. */
+.attack-conditions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--grid);
+}
+
+/* A floated legend takes part in the flex layout instead of sitting on the border. */
+.attack-conditions legend {
+  float: left;
+  margin: 0;
 }
 
 /* ---------- Buttons ---------- */

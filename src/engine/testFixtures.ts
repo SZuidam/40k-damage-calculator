@@ -1,4 +1,4 @@
-import { noAbilities, type DefenderKeyword, type DefenderProfile, type WeaponAbilities, type WeaponProfile } from '../types';
+import { noAbilities, noConditions, type AttackConditions, type DefenderKeyword, type DefenderProfile, type WeaponAbilities, type WeaponProfile } from '../types';
 
 export function weapon(
   name: string,
@@ -9,8 +9,9 @@ export function weapon(
   ap: number,
   damage: string,
   abilities: Partial<WeaponAbilities> = {},
+  conditions: Partial<AttackConditions> = {},
 ): WeaponProfile {
-  return { id: name, name, models, attacks, skill, strength, ap, damage, abilities: { ...noAbilities(), ...abilities } };
+  return { id: name, name, models, attacks, skill, strength, ap, damage, abilities: { ...noAbilities(), ...abilities }, conditions: { ...noConditions(), ...conditions } };
 }
 
 export function defender(models: number, toughness: number, save: number, wounds: number, invuln: number | null = null, keywords: DefenderKeyword[] = []): DefenderProfile {

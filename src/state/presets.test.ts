@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type AttackPreset, type AttackRow, type DefenderProfile, type StoredWeapon } from '../types';
+import { noAbilities, noConditions, type AttackPreset, type AttackRow, type DefenderProfile, type StoredWeapon } from '../types';
 import {
   copyDefender,
   defenderSummary,
@@ -29,11 +29,22 @@ function setup() {
 describe('resolveRows', () => {
   it('turns rows into engine profiles with the row id and the library name', () => {
     const { library, rows } = setup();
-    expect(resolveRows(rows, library)).toEqual([
-      { id: 'r1', name: 'Bolt rifle', models: 10, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none },
-      { id: 'r2', name: 'Lascannon', models: 1, attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: none },
-      { id: 'r3', name: 'Bolt rifle', models: 5, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none },
+    const conditions = noConditions();
+    expect(resolveRows(rows, library, conditions)).toEqual([
+      { id: 'r1', name: 'Bolt rifle', models: 10, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none, conditions },
+      { id: 'r2', name: 'Lascannon', models: 1, attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: none, conditions },
+      { id: 'r3', name: 'Bolt rifle', models: 5, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none, conditions },
     ]);
+  });
+
+  it('gives every weapon its own copy of the attack conditions', () => {
+    const { library, rows } = setup();
+    const conditions = { halfRange: true, charged: true };
+    const resolved = resolveRows(rows, library, conditions);
+    expect(resolved.every((w) => w.conditions.halfRange && w.conditions.charged)).toBe(true);
+    resolved[0].conditions.charged = false;
+    expect(conditions.charged).toBe(true);
+    expect(resolved[1].conditions.charged).toBe(true);
   });
 
   it('skips rows without a weapon or with a missing weapon', () => {
@@ -43,7 +54,7 @@ describe('resolveRows', () => {
       { id: 'b', models: 1, weaponId: 'gone' },
       { id: 'c', models: 2, weaponId: 'w-las' },
     ];
-    expect(resolveRows(rows, library).map((w) => w.id)).toEqual(['c']);
+    expect(resolveRows(rows, library, noConditions()).map((w) => w.id)).toEqual(['c']);
   });
 });
 
@@ -93,6 +104,23 @@ describe('snapshots', () => {
     expect(sameSnapshot(sustained, saved)).toBe(false);
     library[0].abilities = { ...none, sustainedHits: ' 1 ' };
     expect(sameSnapshot(snapshotRows(rows, library), sustained)).toBe(true);
+  });
+
+  it('does not depend on the attack conditions', () => {
+    // Conditions are not part of a snapshot, so toggling them never makes a preset dirty.
+    const { library, rows } = setup();
+    const saved = snapshotRows(rows, library);
+    expect(saved.every((row) => !('conditions' in row) && !('conditions' in row.weapon))).toBe(true);
+    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(true);
+  });
+
+  it('treats Rapid Fire and Lance as weapon changes', () => {
+    const { library, rows } = setup();
+    const saved = snapshotRows(rows, library);
+    library[0].abilities = { ...noAbilities(), rapidFire: '1' };
+    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
+    library[0].abilities = { ...noAbilities(), lance: true };
+    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
   });
 
   it('ignores a rename of the library profile', () => {

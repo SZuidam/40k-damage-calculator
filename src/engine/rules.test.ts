@@ -213,3 +213,77 @@ describe('Anti-X Y+', () => {
     expect(unsavedPerWoundRoll(createAttackContext(gun(4, { anti: { vehicle: 4 }, devastatingWounds: true }), infantry))).toBeCloseTo(1 / 6, 12);
   });
 });
+
+describe('Rapid Fire X', () => {
+  const marines = defender(10, 4, 3, 2);
+  const rifle = (abilities: Partial<WeaponAbilities>, halfRange: boolean) => weapon('Rifle', 10, '2', 3, 4, -1, '1', abilities, { halfRange });
+
+  it('adds X attacks per model only while the target is within half range', () => {
+    expect(bonusAttacks(rifle({ rapidFire: '1' }, false), marines)).toEqual([]);
+    expect(bonusAttacks(rifle({ rapidFire: '1' }, true), marines)).toEqual([{ count: 0, sides: 0, bonus: 1 }]);
+    expect(attacksPerModel(createAttackContext(rifle({ rapidFire: '1' }, true), marines))).toEqual([
+      { count: 0, sides: 0, bonus: 2 },
+      { count: 0, sides: 0, bonus: 1 },
+    ]);
+  });
+
+  it('rolls a dice X once per model, whatever the size of the target unit', () => {
+    expect(bonusAttacks(rifle({ rapidFire: 'D3' }, true), { models: 1 })).toEqual([{ count: 1, sides: 3, bonus: 0 }]);
+    expect(bonusAttacks(rifle({ rapidFire: 'D3' }, true), { models: 20 })).toEqual([{ count: 1, sides: 3, bonus: 0 }]);
+  });
+
+  it('stacks with Blast', () => {
+    expect(bonusAttacks(rifle({ rapidFire: 'D3', blast: '1' }, true), marines)).toEqual([
+      { count: 0, sides: 0, bonus: 2 },
+      { count: 1, sides: 3, bonus: 0 },
+    ]);
+    expect(bonusAttacks(rifle({ rapidFire: 'D3', blast: '1' }, false), marines)).toEqual([{ count: 0, sides: 0, bonus: 2 }]);
+  });
+});
+
+describe('Lance', () => {
+  const faces = [1, 2, 3, 4, 5, 6];
+  const lance = (strength: number, charged: boolean, abilities: Partial<WeaponAbilities> = {}) =>
+    weapon('Lance', 1, '1', 3, strength, 0, '1', { lance: true, ...abilities }, { charged });
+
+  it('adds 1 to the wound roll only while the bearer charged', () => {
+    const t4 = defender(1, 4, 3, 2);
+    expect(createAttackContext(lance(4, false), t4).woundModifier).toBe(0);
+    expect(createAttackContext(lance(4, true), t4).woundModifier).toBe(1);
+    expect(createAttackContext(weapon('Spear', 1, '1', 3, 4, 0, '1', {}, { charged: true }), t4).woundModifier).toBe(0);
+    // S4 vs T4: 4+ becomes 3+.
+    expect(woundChance(createAttackContext(lance(4, false), t4))).toBeCloseTo(3 / 6);
+    expect(woundChance(createAttackContext(lance(4, true), t4))).toBeCloseTo(4 / 6);
+  });
+
+  it('S4 vs T8: 6+ becomes 5+', () => {
+    const t8 = defender(1, 8, 3, 2);
+    expect(woundChance(createAttackContext(lance(4, false), t8))).toBeCloseTo(1 / 6);
+    expect(woundChance(createAttackContext(lance(4, true), t8))).toBeCloseTo(2 / 6);
+  });
+
+  it('an unmodified 1 still fails on a 2+ wound roll', () => {
+    const ctx = createAttackContext(lance(8, true), defender(1, 4, 3, 2));
+    expect(ctx.woundTarget).toBe(2);
+    expect(woundChance(ctx)).toBeCloseTo(5 / 6);
+  });
+
+  it('with Devastating Wounds, only unmodified 6s skip the save', () => {
+    const ctx = createAttackContext(lance(4, true, { devastatingWounds: true }), defender(1, 4, 2, 2));
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([6]);
+    // 3-5 wound and fail the 2+ save on a 1; a 6 is never saved.
+    expect(unsavedPerWoundRoll(ctx)).toBeCloseTo((3 / 6) * (1 / 6) + 1 / 6, 12);
+  });
+
+  it('works together with Anti-X Y+', () => {
+    // S4 vs T8 Vehicle with Anti-Vehicle 4+: 5+ from Lance, but 4+ is a critical wound anyway.
+    const vehicle = defender(1, 8, 2, 12, null, ['vehicle']);
+    const ctx = createAttackContext(lance(4, true, { anti: { vehicle: 4 } }), vehicle);
+    expect(woundChance(ctx)).toBeCloseTo(3 / 6);
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([4, 5, 6]);
+    // Anti-Vehicle 6+ (the default) with Lance: 5+ wounds, only a 6 is critical.
+    const ctx6 = createAttackContext(lance(4, true, { anti: { vehicle: 6 } }), vehicle);
+    expect(woundChance(ctx6)).toBeCloseTo(2 / 6);
+    expect(faces.filter((r) => isCriticalWound(ctx6, r))).toEqual([6]);
+  });
+});

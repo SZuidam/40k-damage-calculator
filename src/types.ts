@@ -33,10 +33,32 @@ export interface WeaponAbilities {
    * roll of Y+ is a critical wound (it always wounds). E.g. `{ vehicle: 4, monster: 4 }`.
    */
   anti: Partial<Record<DefenderKeyword, number>>;
+  /**
+   * Rapid Fire X: X extra attacks per model while the target is within half range
+   * (`AttackConditions.halfRange`), as a dice expression rolled per attacking model; null for none.
+   */
+  rapidFire: string | null;
+  /** Lance: +1 to the wound roll while the bearer charged this turn (`AttackConditions.charged`). */
+  lance: boolean;
 }
 
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {} };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, lance: false };
+}
+
+/**
+ * Situational conditions of the attack that switch abilities on. They apply to every weapon
+ * in the attack and are part of the live state only (not of presets, units or exports).
+ */
+export interface AttackConditions {
+  /** The target is within half range: Rapid Fire X adds its attacks. */
+  halfRange: boolean;
+  /** The attacking unit made a Charge move this turn: Lance adds 1 to the wound roll. */
+  charged: boolean;
+}
+
+export function noConditions(): AttackConditions {
+  return { halfRange: false, charged: false };
 }
 
 /** A copy that shares no objects with `a`. */
@@ -114,6 +136,8 @@ export interface WeaponProfile {
   /** Damage per unsaved wound, as a dice expression. */
   damage: string;
   abilities: WeaponAbilities;
+  /** The situational conditions of the attack (half range, charged). */
+  conditions: AttackConditions;
 }
 
 export interface DefenderProfile {

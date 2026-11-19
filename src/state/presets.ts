@@ -1,4 +1,4 @@
-import { KEYWORD_NAMES, copyAbilities, type AttackRow, type DefenderProfile, type RowSnapshot, type StoredWeapon, type WeaponProfile, type WeaponStats } from '../types';
+import { KEYWORD_NAMES, copyAbilities, type AttackConditions, type AttackRow, type DefenderProfile, type RowSnapshot, type StoredWeapon, type WeaponProfile, type WeaponStats } from '../types';
 import { abilitiesSummary, sameAbilities } from './abilities';
 import { uid } from './ids';
 
@@ -36,12 +36,13 @@ export function findWeapon(library: StoredWeapon[], weaponId: string | null): St
  * Engine input for the live rows. The row id becomes the weapon id (two rows may share
  * a library weapon) and the library name becomes the weapon name. Rows without a
  * library weapon are skipped; the UI only runs the engine once every row is valid.
+ * Every weapon gets its own copy of the attack conditions.
  */
-export function resolveRows(rows: AttackRow[], library: StoredWeapon[]): WeaponProfile[] {
+export function resolveRows(rows: AttackRow[], library: StoredWeapon[], conditions: AttackConditions): WeaponProfile[] {
   const out: WeaponProfile[] = [];
   for (const row of rows) {
     const weapon = findWeapon(library, row.weaponId);
-    if (weapon) out.push({ ...pickStats(weapon), id: row.id, models: row.models });
+    if (weapon) out.push({ ...pickStats(weapon), id: row.id, models: row.models, conditions: { ...conditions } });
   }
   return out;
 }

@@ -1,4 +1,4 @@
-import { DEFENDER_KEYWORDS, noAbilities, type AttackPreset, type DefenderKeyword, type AttackRow, type DefenderPreset, type DefenderProfile, type RowSnapshot, type StoredWeapon, type UnitPreset, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, noAbilities, noConditions, type AttackConditions, type AttackPreset, type DefenderKeyword, type AttackRow, type DefenderPreset, type DefenderProfile, type RowSnapshot, type StoredWeapon, type UnitPreset, type WeaponAbilities, type WeaponStats } from '../types';
 import { uid } from './ids';
 import { pickStats, sameCombatStats } from './presets';
 
@@ -16,6 +16,8 @@ export interface StoredState {
   defenderPresets: DefenderPreset[];
   activeAttackPresetId: string | null;
   activeDefenderPresetId: string | null;
+  /** Situational attack conditions (half range, charged): live state only, never in presets or exports. */
+  conditions: AttackConditions;
 }
 
 /** The subset of the Web Storage API the app uses, so tests can pass an in-memory stub. */
@@ -40,6 +42,7 @@ export function defaultState(): StoredState {
     defenderPresets: [],
     activeAttackPresetId: null,
     activeDefenderPresetId: null,
+    conditions: noConditions(),
   };
 }
 
@@ -134,7 +137,14 @@ function normalise(raw: unknown): StoredState {
     defenderPresets,
     activeAttackPresetId: activeId(raw.activeAttackPresetId, attackPresets),
     activeDefenderPresetId: activeId(raw.activeDefenderPresetId, defenderPresets),
+    conditions: toConditions(raw.conditions),
   };
+}
+
+/** States saved before conditions existed have none switched on. */
+function toConditions(value: unknown): AttackConditions {
+  if (!isRecord(value)) return noConditions();
+  return { halfRange: value.halfRange === true, charged: value.charged === true };
 }
 
 // ---------- shape checks ----------
@@ -179,6 +189,8 @@ function toAbilities(value: unknown): WeaponAbilities {
     blast: toAbilityDice(value.blast),
     cleave: toAbilityDice(value.cleave),
     anti: toAnti(value.anti),
+    rapidFire: toAbilityDice(value.rapidFire),
+    lance: value.lance === true,
   };
 }
 
@@ -203,7 +215,7 @@ function toKeywords(value: unknown): DefenderKeyword[] {
 }
 
 /**
- * X of Sustained Hits / Blast / Cleave: a non-empty dice expression, or null. Blast and
+ * X of Sustained Hits / Blast / Cleave / Rapid Fire: a non-empty dice expression, or null. Blast and
  * Cleave were saved as whole numbers before they took dice; those become "2". The
  * expression itself is checked by ui/validation.
  */

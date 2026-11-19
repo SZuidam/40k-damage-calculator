@@ -31,6 +31,12 @@ describe('validateWeaponStats', () => {
     expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), cleave: '13' } }).abilities).toBe('Cleave: X can roll at most 12');
   });
 
+  it('checks the Rapid Fire value', () => {
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), rapidFire: 'D3', lance: true } })).toEqual({});
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), rapidFire: 'D7' } }).abilities).toBe('Rapid Fire: use 3, D3, D6, 2D6, D6+1, …');
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), rapidFire: '3D6' } }).abilities).toBe('Rapid Fire: X can roll at most 12');
+  });
+
   it.each(['3', 'D3', 'd6+2', '2D6', '2D3+1', 'D6+6'])('accepts ability X %j', (x) => {
     expect(abilityValueError(x, 'Blast')).toBeUndefined();
   });

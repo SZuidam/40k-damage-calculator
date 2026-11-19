@@ -39,10 +39,12 @@ describe('ability choices', () => {
       'Anti-Fly Y+…',
       'Blast X…',
       'Cleave X…',
+      'Rapid Fire X…',
+      'Lance',
     ]);
     expect(ABILITY_CHOICES.filter(isAntiChoice).map((c) => c.keyword)).toEqual(['vehicle', 'monster', 'psyker', 'infantry', 'fly']);
     expect(ABILITY_CHOICES.filter(isAntiChoice).every((c) => !isValueChoice(c))).toBe(true);
-    expect(ABILITY_CHOICES.filter(isValueChoice).map((c) => c.valueKey)).toEqual(['sustainedHits', 'blast', 'cleave']);
+    expect(ABILITY_CHOICES.filter(isValueChoice).map((c) => c.valueKey)).toEqual(['sustainedHits', 'blast', 'cleave', 'rapidFire']);
   });
 
   it('adds abilities without changing the input', () => {
@@ -88,10 +90,49 @@ describe('activeAbilities', () => {
   });
 
   it('marks the abilities with an X as editable', () => {
-    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {} };
+    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, lance: false };
     expect(activeAbilities(all).map((a) => a.valueKey)).toEqual([undefined, 'sustainedHits', undefined, 'blast', 'cleave']);
     expect(activeAbilities(all).find((a) => a.key === 'blast')?.description).toBe('Adds D3 attacks per model for every 5 models in the target unit.');
     expect(activeAbilities(all).find((a) => a.key === 'cleave')?.description).toMatch(/^Adds 1 attack per model/);
+  });
+});
+
+describe('Rapid Fire and Lance', () => {
+  it('Rapid Fire asks for X, Lance is added straight away', () => {
+    expect(valued('rapid-fire').name).toBe('Rapid Fire');
+    const rapid = withAbilityValue(noAbilities(), 'rapidFire', ' d3 ');
+    expect(rapid.rapidFire).toBe('D3');
+    expect(valued('rapid-fire').isActive(rapid)).toBe(true);
+    const lance = flag('lance').apply(noAbilities());
+    expect(lance).toEqual({ ...noAbilities(), lance: true });
+    expect(flag('lance').isActive(lance)).toBe(true);
+    expect(flag('lance').isActive(noAbilities())).toBe(false);
+  });
+
+  it('lists them after Cleave, with the condition they need', () => {
+    const all = { ...noAbilities(), cleave: '1', rapidFire: '2', lance: true };
+    const active = activeAbilities(all);
+    expect(active.map((a) => a.label)).toEqual(['Cleave 1', 'Rapid Fire 2', 'Lance']);
+    expect(active.map((a) => a.condition)).toEqual([undefined, 'halfRange', 'charged']);
+    expect(active.map((a) => a.valueKey)).toEqual(['cleave', 'rapidFire', undefined]);
+    expect(active[1].description).toBe('Adds 2 attacks per model when the target is within half range.');
+    expect(activeAbilities({ ...noAbilities(), rapidFire: '1' })[0].description).toBe('Adds 1 attack per model when the target is within half range.');
+    expect(active[2].description).toBe('Adds 1 to the wound roll if the bearer charged this turn.');
+  });
+
+  it('removes them one at a time', () => {
+    const all = { ...noAbilities(), rapidFire: '2', lance: true };
+    expect(withoutAbility(all, 'rapidFire')).toEqual({ ...noAbilities(), lance: true });
+    expect(withoutAbility(all, 'lance')).toEqual({ ...noAbilities(), rapidFire: '2' });
+  });
+
+  it('sameAbilities compares them', () => {
+    const none = noAbilities();
+    expect(sameAbilities({ ...none, rapidFire: ' d3' }, { ...none, rapidFire: 'D3' })).toBe(true);
+    expect(sameAbilities({ ...none, rapidFire: '1' }, { ...none, rapidFire: '2' })).toBe(false);
+    expect(sameAbilities({ ...none, rapidFire: '1' }, { ...none, blast: '1' })).toBe(false);
+    expect(sameAbilities({ ...none, lance: true }, none)).toBe(false);
+    expect(sameAbilities({ ...none, lance: true }, { ...none, lance: true })).toBe(true);
   });
 });
 

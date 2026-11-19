@@ -36,7 +36,7 @@ export function rollSucceeds(roll: number, target: number): boolean {
 export interface AttackContext {
   weapon: WeaponProfile;
   defender: DefenderProfile;
-  /** The weapon's own attacks per model (A), without Blast / Cleave. */
+  /** The weapon's own attacks per model (A), without Blast / Cleave / Rapid Fire. */
   attacks: DiceExpr;
   damage: DiceExpr;
   hitTarget: number;
@@ -52,23 +52,41 @@ export interface AttackContext {
   sustainedHits: DiceExpr | null;
   /** Devastating Wounds: a critical wound skips the saving throw. */
   devastatingWounds: boolean;
-  /** Extra attacks per model from Blast / Cleave, rolled on top of `attacks`. */
+  /** Extra attacks per model from Blast / Cleave / Rapid Fire, rolled on top of `attacks`. */
   bonusAttacks: DiceExpr[];
+  /**
+   * Added to the wound roll (Lance while charging), already capped at -1 / +1. It moves the
+   * roll against the S vs T target only: critical wounds use the unmodified roll.
+   */
+  woundModifier: number;
 }
 
+/** A hit or wound roll can be modified by at most -1 / +1 in total. */
+export const MAX_ROLL_MODIFIER = 1;
+
 /**
- * Blast X / Cleave X: X extra attacks per model for every 5 models in the target unit
- * (rounded down). X may be a dice expression; it is rolled separately for every block of
- * 5 models and for every attacking model, so Blast D6+2 into 10 models adds 2D6+4 attacks
- * per model. The unit size is the one at the start of the attack, as when targets are
- * picked, so models destroyed by earlier weapons in the list don't lower it.
- * Returns one term per ability, or none when the unit is too small or the weapon has neither.
+ * Extra attacks per model on top of A:
+ * - Blast X / Cleave X: X for every 5 models in the target unit (rounded down). X may be a
+ *   dice expression; it is rolled separately for every block of 5 models and for every
+ *   attacking model, so Blast D6+2 into 10 models adds 2D6+4 attacks per model. The unit size
+ *   is the one at the start of the attack, as when targets are picked, so models destroyed by
+ *   earlier weapons in the list don't lower it.
+ * - Rapid Fire X: X while the target is within half range, rolled once per attacking model.
+ * Returns one term per ability that applies (Blast, Cleave, Rapid Fire), or none.
  */
-export function bonusAttacks(weapon: Pick<WeaponProfile, 'abilities'>, defender: Pick<DefenderProfile, 'models'>): DiceExpr[] {
+export function bonusAttacks(weapon: Pick<WeaponProfile, 'abilities' | 'conditions'>, defender: Pick<DefenderProfile, 'models'>): DiceExpr[] {
+  const { blast, cleave, rapidFire } = weapon.abilities;
+  const terms: DiceExpr[] = [];
   const blocks = Math.floor(defender.models / 5);
-  if (blocks < 1) return [];
-  const { blast, cleave } = weapon.abilities;
-  return [blast, cleave].filter((x): x is string => x !== null).map((x) => repeatDice(parseDice(x), blocks));
+  if (blocks >= 1) for (const x of [blast, cleave]) if (x !== null) terms.push(repeatDice(parseDice(x), blocks));
+  if (rapidFire !== null && weapon.conditions.halfRange) terms.push(parseDice(rapidFire));
+  return terms;
+}
+
+/** The wound roll modifier: +1 for Lance while charging, capped at -1 / +1. */
+export function woundModifier(weapon: Pick<WeaponProfile, 'abilities' | 'conditions'>): number {
+  const total = weapon.abilities.lance && weapon.conditions.charged ? 1 : 0;
+  return Math.max(-MAX_ROLL_MODIFIER, Math.min(MAX_ROLL_MODIFIER, total));
 }
 
 /**
@@ -84,7 +102,7 @@ export function antiCriticalWound(abilities: Pick<WeaponAbilities, 'anti'>, keyw
   return best;
 }
 
-/** Everything one attacking model rolls for its number of attacks: A plus Blast / Cleave. */
+/** Everything one attacking model rolls for its number of attacks: A plus Blast / Cleave / Rapid Fire. */
 export function attacksPerModel(ctx: AttackContext): DiceExpr[] {
   return [ctx.attacks, ...ctx.bonusAttacks];
 }
@@ -105,6 +123,7 @@ export function createAttackContext(weapon: WeaponProfile, defender: DefenderPro
     sustainedHits: abilities.sustainedHits === null ? null : parseDice(abilities.sustainedHits),
     devastatingWounds: abilities.devastatingWounds,
     bonusAttacks: bonusAttacks(weapon, defender),
+    woundModifier: woundModifier(weapon),
   };
 }
 
@@ -112,9 +131,12 @@ export function hitSucceeds(ctx: AttackContext, roll: number): boolean {
   return rollSucceeds(roll, ctx.hitTarget);
 }
 
-/** A wound roll succeeds on the S vs T target, and a critical wound (Anti-X Y+) always wounds. */
+/**
+ * A wound roll succeeds when the modified roll meets the S vs T target, and a critical wound
+ * (an unmodified roll of `criticalWound`+, see Anti-X Y+) always wounds. An unmodified 1 always fails.
+ */
 export function woundSucceeds(ctx: AttackContext, roll: number): boolean {
-  return rollSucceeds(roll, Math.min(ctx.woundTarget, ctx.criticalWound));
+  return roll !== 1 && (roll + ctx.woundModifier >= ctx.woundTarget || roll >= ctx.criticalWound);
 }
 
 export function saveSucceeds(ctx: AttackContext, roll: number): boolean {
