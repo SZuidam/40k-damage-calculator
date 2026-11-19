@@ -1,8 +1,9 @@
+import { formatDiceSum, tryParseDice } from '../engine/dice';
 import { bonusAttacks } from '../engine/rules';
-import { activeAbilities } from '../state/abilities';
+import { activeAbilities, normaliseDice } from '../state/abilities';
 import { uid } from '../state/ids';
 import { findWeapon, sortedLibrary } from '../state/presets';
-import type { AttackRow, StoredWeapon, WeaponStats } from '../types';
+import { KEYWORD_NAMES, type AttackRow, type DefenderProfile, type StoredWeapon, type WeaponStats } from '../types';
 import { field, h, numberValue, setFieldError } from './dom';
 import { validateRow } from './validation';
 import { openWeaponModal } from './weaponModal';
@@ -20,8 +21,11 @@ export interface AttackListOptions {
   compact?: boolean;
   /** Rows that can't be removed below this count. Default 1. */
   minRows?: number;
-  /** Models in the defending unit, for the Blast / Cleave extra attacks shown on the A chip. */
-  defenderModels?: () => number;
+  /**
+   * The defending unit: its models for the Blast / Cleave extra attacks shown on the A chip,
+   * its keywords to mark Anti abilities that apply.
+   */
+  defender?: () => Pick<DefenderProfile, 'models' | 'keywords'>;
 }
 
 export function newRow(weaponId: string | null, models = 1): AttackRow {
@@ -156,7 +160,7 @@ export class AttackList {
       }
       errors.textContent = Object.values(result).join(' · ');
       if (compact) return;
-      chips.replaceChildren(...statChips(weapon, this.options.defenderModels?.()));
+      chips.replaceChildren(...statChips(weapon, this.options.defender?.()));
       edit.disabled = !weapon;
       edit.setAttribute('aria-label', weapon ? `Edit ${weapon.name}` : 'Edit weapon profile');
     };
@@ -226,14 +230,15 @@ const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities'>; label: string
   { key: 'damage', label: 'D', title: 'Damage' },
 ];
 
-function statChips(weapon: WeaponStats | undefined, defenderModels: number | undefined): HTMLElement[] {
+function statChips(weapon: WeaponStats | undefined, defender: Pick<DefenderProfile, 'models' | 'keywords'> | undefined): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
+  const defenderModels = defender?.models;
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, label), ' ', format ? format(weapon) : String(weapon[key])),
   );
   const bonus = attacksBonus(weapon, defenderModels);
   if (bonus) {
-    // The A chip comes first: "A 4+2", with the Blast / Cleave extra attacks in blue.
+    // The A chip comes first: "A 4+2" or "A D6+2D6+4", with the Blast / Cleave extra attacks in blue.
     chips[0].append(h('span', { class: 'chip-bonus' }, `+${bonus.value}`));
     chips[0].title = `Attacks: ${weapon.attacks}, plus ${bonus.value} from ${bonus.sources} (${defenderModels} models in the target unit)`;
   }
@@ -241,19 +246,31 @@ function statChips(weapon: WeaponStats | undefined, defenderModels: number | und
   if (abilities.length === 0) return chips;
   // Read-only here; abilities are edited in the weapon profile modal (✎).
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
-  abilities.forEach(({ label, description }, i) => {
+  abilities.forEach(({ label, description, anti }, i) => {
     if (i > 0) text.append(', ');
-    text.append(h('span', { title: description }, label));
+    // An Anti ability is outlined when the current defender has one of its keywords.
+    const matched = anti && defender ? anti.keywords.filter((k) => defender.keywords.includes(k)) : [];
+    if (matched.length === 0) {
+      text.append(h('span', { title: description }, label));
+      return;
+    }
+    const names = matched.map((k) => KEYWORD_NAMES[k]).join(' and ');
+    const active = `Active: the target has the ${names} keyword${matched.length === 1 ? '' : 's'}.`;
+    text.append(h('span', { class: 'ability-active', title: `${description} ${active}` }, label, h('span', { class: 'visually-hidden' }, ' (active)')));
   });
   return [...chips, text];
 }
 
-/** Blast / Cleave extra attacks per model against the current defender, or null when there are none. */
-function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined): { value: number; sources: string } | null {
+/**
+ * Blast / Cleave extra attacks per model against the current defender ("2D6+4"), or null
+ * when there are none or an X is invalid (the row shows that error instead).
+ */
+function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined): { value: string; sources: string } | null {
   if (defenderModels === undefined || !Number.isInteger(defenderModels) || defenderModels < 1) return null;
-  const value = bonusAttacks(weapon, { models: defenderModels });
-  if (value === 0) return null;
   const { blast, cleave } = weapon.abilities;
-  const sources = [blast === null ? '' : `Blast ${blast}`, cleave === null ? '' : `Cleave ${cleave}`].filter(Boolean).join(' and ');
-  return { value, sources };
+  if ([blast, cleave].some((x) => x !== null && !tryParseDice(x))) return null;
+  const terms = bonusAttacks(weapon, { models: defenderModels });
+  if (terms.length === 0) return null;
+  const sources = [blast === null ? '' : `Blast ${normaliseDice(blast)}`, cleave === null ? '' : `Cleave ${normaliseDice(cleave)}`].filter(Boolean).join(' and ');
+  return { value: formatDiceSum(terms), sources };
 }

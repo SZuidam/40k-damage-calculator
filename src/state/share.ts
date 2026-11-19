@@ -1,7 +1,7 @@
 import type { AttackPreset, DefenderPreset, DefenderProfile, RowSnapshot, StoredWeapon, UnitPreset } from '../types';
 import { MAX_WEAPON_NAME, validateDefender, validateRow, validateWeaponStats } from '../ui/validation';
 import { uid } from './ids';
-import { pickStats, sameCombatStats, sameDefender, sameSnapshot } from './presets';
+import { copyDefender, pickStats, sameCombatStats, sameDefender, sameSnapshot } from './presets';
 import { isRecord, list, toDefender, toSnapshot, toWeaponStats } from './storage';
 
 /** Marks a JSON document as a share file of this app. */
@@ -61,7 +61,7 @@ export function buildShareFile(state: ShareState, selection: ShareSelection, now
     exportedAt: now.toISOString(),
     attacks: pick(state.attackPresets, selection.attacks).map((p) => ({ name: p.name, rows: copyRows(p.rows) })),
     units: pick(state.unitPresets, selection.units).map((p) => ({ name: p.name, rows: copyRows(p.rows) })),
-    defenders: pick(state.defenderPresets, selection.defenders).map((p) => ({ name: p.name, defender: { ...p.defender } })),
+    defenders: pick(state.defenderPresets, selection.defenders).map((p) => ({ name: p.name, defender: copyDefender(p.defender) })),
     weapons: pick(state.library, selection.weapons).map((w) => ({ id: w.id, ...pickStats(w) })),
   };
 }
@@ -244,8 +244,8 @@ export function applyImport(data: ShareData, items: ImportItem[], state: ShareSt
       state.library.push({ ...pickStats(weapon), id, name });
     } else if (item.kind === 'defenders') {
       const preset = data.defenders[item.index];
-      const name = place(item, state.defenderPresets, (target) => (target.defender = { ...preset.defender }));
-      if (name !== null) state.defenderPresets.push({ id: uid('defender'), name, defender: { ...preset.defender } });
+      const name = place(item, state.defenderPresets, (target) => (target.defender = copyDefender(preset.defender)));
+      if (name !== null) state.defenderPresets.push({ id: uid('defender'), name, defender: copyDefender(preset.defender) });
     } else {
       const preset = data[item.kind][item.index];
       const target = item.kind === 'attacks' ? state.attackPresets : state.unitPresets;

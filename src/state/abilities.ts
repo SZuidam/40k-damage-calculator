@@ -1,49 +1,103 @@
-import type { WeaponAbilities } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderKeyword, type WeaponAbilities } from '../types';
 
 export type AbilityKey = keyof WeaponAbilities;
+
+/** The abilities that take an X (a dice expression) typed in by the user. */
+export type ValueAbilityKey = 'sustainedHits' | 'blast' | 'cleave';
 
 /** An ability a weapon has, as shown in the UI. */
 export interface ActiveAbility {
   key: AbilityKey;
   label: string;
   description: string;
+  /** Set for abilities with an X, whose chip can be clicked to change X. */
+  valueKey?: ValueAbilityKey;
+  /** Set for Anti-X Y+: the keywords that share this Y (one chip), in display order. */
+  anti?: { keywords: DefenderKeyword[]; value: number };
 }
 
-/** An entry in the "Add ability…" dropdown. */
-export interface AbilityChoice {
+interface BaseChoice {
   value: string;
   label: string;
   description: string;
-  /** Whether the weapon already has exactly this ability. */
+  /** Whether the weapon already has this ability (then it leaves the dropdown). */
   isActive: (a: WeaponAbilities) => boolean;
-  /** The abilities with this one added (a different value of the same ability is replaced). */
+}
+
+/** An ability without a value: picking it adds it straight away. */
+export interface FlagAbilityChoice extends BaseChoice {
+  /** The abilities with this one added. */
   apply: (a: WeaponAbilities) => WeaponAbilities;
 }
 
-/** Sustained Hits values offered in the dropdown. D3/D6 and higher numbers come later. */
-export const SUSTAINED_HITS_VALUES = ['1', '2'] as const;
+/** An ability with an X: picking it asks for X first, then stores it with `withAbilityValue`. */
+export interface ValueAbilityChoice extends BaseChoice {
+  valueKey: ValueAbilityKey;
+  /** The ability's name without X, e.g. "Blast". */
+  name: string;
+}
 
-/** Blast X / Cleave X values offered in the dropdown (validation allows up to 10). */
-export const BONUS_ATTACK_VALUES = [1, 2] as const;
+/** Anti-X Y+ for one keyword: picking it asks for Y first, then stores it with `withAntiValue`. */
+export interface AntiAbilityChoice extends BaseChoice {
+  keyword: DefenderKeyword;
+}
 
-const attacksPerFive = (x: number) => `Adds ${x} attack${x === 1 ? '' : 's'} per model for every 5 models in the target unit`;
+/** An entry in the "Add ability…" dropdown. */
+export type AbilityChoice = FlagAbilityChoice | ValueAbilityChoice | AntiAbilityChoice;
+
+export function isValueChoice(choice: AbilityChoice): choice is ValueAbilityChoice {
+  return 'valueKey' in choice;
+}
+
+export function isAntiChoice(choice: AbilityChoice): choice is AntiAbilityChoice {
+  return 'keyword' in choice;
+}
+
+/** Ability names without X, as shown before the value: "Blast D6+2". */
+export const VALUE_ABILITY_NAMES: Record<ValueAbilityKey, string> = {
+  sustainedHits: 'Sustained Hits',
+  blast: 'Blast',
+  cleave: 'Cleave',
+};
+
+const attacksPerFive = (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model for every 5 models in the target unit`;
 
 const DESCRIPTIONS = {
   lethalHits: 'An unmodified hit roll of 6 wounds automatically.',
   sustainedHits: (x: string) => `An unmodified hit roll of 6 scores ${x} extra hit${x === '1' ? '' : 's'}.`,
   devastatingWounds: 'An unmodified wound roll of 6 cannot be saved.',
-  blast: (x: number) => `${attacksPerFive(x)}.`,
-  cleave: (x: number) => `${attacksPerFive(x)} (melee only; works the same as Blast here).`,
+  blast: (x: string) => `${attacksPerFive(x)}.`,
+  cleave: (x: string) => `${attacksPerFive(x)} (melee only; works the same as Blast here).`,
+  anti: (keywords: string, y: string) => `An unmodified wound roll of ${y} against a ${keywords} target is a critical wound (it always wounds).`,
 };
 
-const bonusChoices = (key: 'blast' | 'cleave', label: string): AbilityChoice[] =>
-  BONUS_ATTACK_VALUES.map((x) => ({
-    value: `${key}-${x}`,
-    label: `${label} ${x}`,
-    description: DESCRIPTIONS[key](x),
-    isActive: (a) => a[key] === x,
-    apply: (a) => ({ ...a, [key]: x }),
-  }));
+/** "Vehicle", "Vehicle or Monster", "Vehicle, Monster or Fly". */
+function keywordList(keywords: DefenderKeyword[]): string {
+  const names = keywords.map((k) => KEYWORD_NAMES[k]);
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`;
+}
+
+/** "Anti-Vehicle/Monster": the name of an Anti chip, without Y. */
+export function antiName(keywords: DefenderKeyword[]): string {
+  return `Anti-${keywords.map((k) => KEYWORD_NAMES[k]).join('/')}`;
+}
+
+const antiChoice = (keyword: DefenderKeyword): AntiAbilityChoice => ({
+  value: `anti-${keyword}`,
+  label: `${antiName([keyword])} Y+…`,
+  description: DESCRIPTIONS.anti(KEYWORD_NAMES[keyword], 'Y+'),
+  keyword,
+  isActive: (a) => a.anti[keyword] !== undefined,
+});
+
+const valueChoice = (valueKey: ValueAbilityKey, value: string, description: string): ValueAbilityChoice => ({
+  value,
+  label: `${VALUE_ABILITY_NAMES[valueKey]} X…`,
+  name: VALUE_ABILITY_NAMES[valueKey],
+  description,
+  valueKey,
+  isActive: (a) => a[valueKey] !== null,
+});
 
 export const ABILITY_CHOICES: AbilityChoice[] = [
   {
@@ -53,15 +107,7 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
     isActive: (a) => a.lethalHits,
     apply: (a) => ({ ...a, lethalHits: true }),
   },
-  ...SUSTAINED_HITS_VALUES.map(
-    (x): AbilityChoice => ({
-      value: `sustained-hits-${x}`,
-      label: `Sustained Hits ${x}`,
-      description: DESCRIPTIONS.sustainedHits(x),
-      isActive: (a) => normaliseDice(a.sustainedHits) === x,
-      apply: (a) => ({ ...a, sustainedHits: x }),
-    }),
-  ),
+  valueChoice('sustainedHits', 'sustained-hits', DESCRIPTIONS.sustainedHits('X')),
   {
     value: 'devastating-wounds',
     label: 'Devastating Wounds',
@@ -69,26 +115,73 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
     isActive: (a) => a.devastatingWounds,
     apply: (a) => ({ ...a, devastatingWounds: true }),
   },
-  ...bonusChoices('blast', 'Blast'),
-  ...bonusChoices('cleave', 'Cleave'),
+  ...DEFENDER_KEYWORDS.map(antiChoice),
+  valueChoice('blast', 'blast', DESCRIPTIONS.blast('X')),
+  valueChoice('cleave', 'cleave', DESCRIPTIONS.cleave('X')),
 ];
+
+/** The abilities with X of `key` set (or replaced), stored normalised: " d6 + 2 " → "D6+2". */
+export function withAbilityValue(a: WeaponAbilities, key: ValueAbilityKey, expr: string): WeaponAbilities {
+  return { ...a, [key]: normaliseDice(expr) };
+}
 
 /** The abilities a weapon has, in a fixed order. */
 export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   const out: ActiveAbility[] = [];
+  const withValue = (key: ValueAbilityKey, value: string) => {
+    const x = normaliseDice(value);
+    out.push({ key, label: `${VALUE_ABILITY_NAMES[key]} ${x}`, description: DESCRIPTIONS[key](x), valueKey: key });
+  };
   if (a.lethalHits) out.push({ key: 'lethalHits', label: 'Lethal Hits', description: DESCRIPTIONS.lethalHits });
-  if (a.sustainedHits !== null) {
-    const x = normaliseDice(a.sustainedHits);
-    out.push({ key: 'sustainedHits', label: `Sustained Hits ${x}`, description: DESCRIPTIONS.sustainedHits(x) });
-  }
+  if (a.sustainedHits !== null) withValue('sustainedHits', a.sustainedHits);
   if (a.devastatingWounds) out.push({ key: 'devastatingWounds', label: 'Devastating Wounds', description: DESCRIPTIONS.devastatingWounds });
-  if (a.blast !== null) out.push({ key: 'blast', label: `Blast ${a.blast}`, description: DESCRIPTIONS.blast(a.blast) });
-  if (a.cleave !== null) out.push({ key: 'cleave', label: `Cleave ${a.cleave}`, description: DESCRIPTIONS.cleave(a.cleave) });
+  for (const { keywords, value } of antiGroups(a)) {
+    out.push({ key: 'anti', label: `${antiName(keywords)} ${value}+`, description: DESCRIPTIONS.anti(keywordList(keywords), `${value}+`), anti: { keywords, value } });
+  }
+  if (a.blast !== null) withValue('blast', a.blast);
+  if (a.cleave !== null) withValue('cleave', a.cleave);
   return out;
 }
 
+/**
+ * The Anti abilities grouped by Y: keywords with the same Y share one entry. Keywords keep
+ * their display order, and groups are ordered by their first keyword.
+ */
+function antiGroups(a: WeaponAbilities): { keywords: DefenderKeyword[]; value: number }[] {
+  const groups = new Map<number, DefenderKeyword[]>();
+  for (const keyword of DEFENDER_KEYWORDS) {
+    const y = a.anti[keyword];
+    if (y === undefined) continue;
+    const group = groups.get(y);
+    if (group) group.push(keyword);
+    else groups.set(y, [keyword]);
+  }
+  return [...groups].map(([value, keywords]) => ({ keywords, value }));
+}
+
 export function withoutAbility(a: WeaponAbilities, key: AbilityKey): WeaponAbilities {
+  if (key === 'anti') return { ...a, anti: {} };
   return { ...a, [key]: typeof a[key] === 'boolean' ? false : null };
+}
+
+/** The abilities with Anti-X Y+ set (or replaced) to `y` for every keyword in `keywords`. */
+export function withAntiValue(a: WeaponAbilities, keywords: readonly DefenderKeyword[], y: number): WeaponAbilities {
+  const anti = { ...a.anti };
+  for (const keyword of keywords) anti[keyword] = y;
+  return { ...a, anti };
+}
+
+/** The abilities without Anti for any of `keywords`. */
+export function withoutAnti(a: WeaponAbilities, keywords: readonly DefenderKeyword[]): WeaponAbilities {
+  const anti = { ...a.anti };
+  for (const keyword of keywords) delete anti[keyword];
+  return { ...a, anti };
+}
+
+/** Y of Anti-X Y+ as typed: "4", "4+", " 4 + " → 4. Only 2–6; anything else is null. */
+export function parseAntiValue(text: string): number | null {
+  const match = /^\s*([2-6])\s*\+?\s*$/.exec(text);
+  return match ? Number(match[1]) : null;
 }
 
 /** "Lethal Hits, Sustained Hits 1", or '' for none. */
@@ -99,16 +192,18 @@ export function abilitiesSummary(a: WeaponAbilities): string {
 }
 
 export function sameAbilities(a: WeaponAbilities, b: WeaponAbilities): boolean {
+  const sameValue = (key: ValueAbilityKey) => (a[key] === null ? null : normaliseDice(a[key])) === (b[key] === null ? null : normaliseDice(b[key]));
   return (
     a.lethalHits === b.lethalHits &&
     a.devastatingWounds === b.devastatingWounds &&
-    a.blast === b.blast &&
-    a.cleave === b.cleave &&
-    (a.sustainedHits === null ? null : normaliseDice(a.sustainedHits)) === (b.sustainedHits === null ? null : normaliseDice(b.sustainedHits))
+    sameValue('sustainedHits') &&
+    sameValue('blast') &&
+    sameValue('cleave') &&
+    DEFENDER_KEYWORDS.every((k) => a.anti[k] === b.anti[k])
   );
 }
 
 /** Dice are compared and shown case- and space-insensitively: " d3 " → "D3". */
-function normaliseDice(expr: string | null): string {
+export function normaliseDice(expr: string | null): string {
   return (expr ?? '').replace(/\s+/g, '').toUpperCase();
 }

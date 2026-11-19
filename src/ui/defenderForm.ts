@@ -1,4 +1,4 @@
-import type { DefenderProfile } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile } from '../types';
 import { field, h, numberValue, select, setFieldError, type Option } from './dom';
 import { validateDefender } from './validation';
 
@@ -48,6 +48,26 @@ export function renderDefenderForm(container: HTMLElement, defender: DefenderPro
   bind(invuln, () => (defender.invuln = invuln.value === '' ? null : numberValue(invuln)));
   bind(wounds, () => (defender.wounds = numberValue(wounds)));
 
+  // Keywords (for Anti-X Y+): one toggle per keyword, styled as a small chip.
+  const keywordBoxes = DEFENDER_KEYWORDS.map((keyword) => {
+    const box = h('input', { id: `def-keyword-${keyword}`, type: 'checkbox', class: 'keyword-input', checked: defender.keywords.includes(keyword) });
+    box.addEventListener('change', () => {
+      defender.keywords = DEFENDER_KEYWORDS.filter((_, i) => keywordBoxes[i].checked);
+      onChange();
+    });
+    return box;
+  });
+  const keywords = h(
+    'fieldset',
+    { class: 'keyword-group' },
+    h('legend', {}, 'Keywords'),
+    h(
+      'div',
+      { class: 'keyword-toggles' },
+      ...DEFENDER_KEYWORDS.map((keyword, i) => h('label', { class: 'keyword-toggle' }, keywordBoxes[i], h('span', {}, KEYWORD_NAMES[keyword]))),
+    ),
+  );
+
   container.append(
     h(
       'div',
@@ -58,6 +78,7 @@ export function renderDefenderForm(container: HTMLElement, defender: DefenderPro
       field('Inv', invuln),
       field('W', wounds),
     ),
+    keywords,
     errors,
   );
   validate();
@@ -69,6 +90,7 @@ export function renderDefenderForm(container: HTMLElement, defender: DefenderPro
       save.value = String(defender.save);
       invuln.value = defender.invuln === null ? '' : String(defender.invuln);
       wounds.value = String(defender.wounds);
+      keywordBoxes.forEach((box, i) => (box.checked = defender.keywords.includes(DEFENDER_KEYWORDS[i])));
       validate();
     },
   };

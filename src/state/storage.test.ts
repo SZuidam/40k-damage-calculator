@@ -30,7 +30,7 @@ describe('loadState', () => {
     expect(state.library).toHaveLength(1);
     expect(state.library[0]).toMatchObject({ name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' });
     expect(state.rows).toEqual([{ id: expect.any(String), models: 10, weaponId: state.library[0].id }]);
-    expect(state.defender).toEqual({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 });
+    expect(state.defender).toEqual({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] });
     expect(state.iterations).toBe(10_000);
     expect(state.attackPresets).toEqual([]);
   });
@@ -49,7 +49,7 @@ describe('loadState', () => {
       [5, bolt],
       [5, boltAp2],
     ]);
-    expect(state.defender).toEqual(v1.defender);
+    expect(state.defender).toEqual({ ...v1.defender, keywords: [] });
     expect(state.iterations).toBe(50_000);
     expect(state.activeAttackPresetId).toBeNull();
   });
@@ -68,7 +68,7 @@ describe('loadState', () => {
   });
 
   it('falls back to the default library and rows when the library is empty, keeping the rest', () => {
-    const saved = { ...defaultState(), library: [], rows: [], iterations: 2_000, defenderPresets: [{ id: 'd1', name: 'MEQ', defender: { models: 5, toughness: 4, save: 3, invuln: null, wounds: 2 } }] };
+    const saved = { ...defaultState(), library: [], rows: [], iterations: 2_000, defenderPresets: [{ id: 'd1', name: 'MEQ', defender: { models: 5, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] } }] };
     const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
     expect(state.library.map((w) => w.name)).toEqual(['Bolt rifle']);
     expect(state.rows[0].weaponId).toBe(state.library[0].id);
@@ -88,7 +88,7 @@ describe('loadState', () => {
   it('round trips through saveState', () => {
     const storage = memoryStorage();
     const state = defaultState();
-    state.library[0].abilities = { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true, blast: 2, cleave: 1 };
+    state.library[0].abilities = { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true, blast: 'D6+2', cleave: '1' };
     const presetWeapon = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: { ...noAbilities(), lethalHits: true, sustainedHits: null, devastatingWounds: false } };
     state.attackPresets.push({ id: 'p1', name: 'Test', rows: [{ models: 10, weaponId: state.library[0].id, weapon: presetWeapon }] });
     state.activeAttackPresetId = 'p1';
@@ -109,9 +109,56 @@ describe('loadState', () => {
 
   it('repairs malformed abilities', () => {
     const saved = JSON.parse(JSON.stringify(defaultState()));
-    saved.library[0].abilities = { lethalHits: 'yes', sustainedHits: 2, devastatingWounds: true, blast: '2', cleave: 1.5 };
+    saved.library[0].abilities = { lethalHits: 'yes', sustainedHits: '', devastatingWounds: true, blast: 1.5, cleave: [] };
     const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
     expect(state.library[0].abilities).toEqual({ ...noAbilities(), lethalHits: false, sustainedHits: null, devastatingWounds: true });
+  });
+
+  it('keeps ability X as text and migrates whole-number Blast / Cleave saved before dice', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    saved.library[0].abilities = { lethalHits: false, sustainedHits: 2, devastatingWounds: false, blast: 2, cleave: '2' };
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.library[0].abilities).toEqual({ ...noAbilities(), sustainedHits: '2', blast: '2', cleave: '2' });
+    saved.library[0].abilities = { blast: 0, cleave: '  ' };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual(noAbilities());
+  });
+
+  it('round trips defender keywords and Anti abilities', () => {
+    const storage = memoryStorage();
+    const state = defaultState();
+    state.defender.keywords = ['vehicle', 'fly'];
+    state.library[0].abilities = { ...noAbilities(), devastatingWounds: true, anti: { vehicle: 4, monster: 4, infantry: 2 } };
+    state.defenderPresets.push({ id: 'd1', name: 'Tank', defender: { ...state.defender, keywords: ['vehicle'] } });
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
+  });
+
+  it('keeps only known keywords, without duplicates, in display order', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    saved.defender.keywords = ['fly', 'titanic', 'vehicle', 'fly', 3, null, 'Monster'];
+    saved.defenderPresets = [{ id: 'd1', name: 'X', defender: { ...saved.defender, keywords: 'vehicle' } }];
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.defender.keywords).toEqual(['vehicle', 'fly']);
+    expect(state.defenderPresets[0].defender.keywords).toEqual([]);
+  });
+
+  it('keeps known Anti keywords with a number as Y, dropping the rest', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    saved.library[0].abilities = { anti: { vehicle: 4, titanic: 3, monster: '4', psyker: null, fly: 9 } };
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    // Y out of range is kept: validation flags it in the UI.
+    expect(state.library[0].abilities.anti).toEqual({ vehicle: 4, fly: 9 });
+    saved.library[0].abilities = { anti: [4] };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities.anti).toEqual({});
+  });
+
+  it('gives data saved before keywords and Anti existed none', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    delete saved.defender.keywords;
+    delete saved.library[0].abilities.anti;
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.defender.keywords).toEqual([]);
+    expect(state.library[0].abilities.anti).toEqual({});
   });
 
   it('does not throw when storage throws', () => {

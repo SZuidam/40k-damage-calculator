@@ -94,13 +94,46 @@ describe('simulate', () => {
     // 11 models → Blast 1 adds 2 attacks per model. Overkill destroys 10 models first; the
     // blast weapon still makes 5 × (1 + 2) attacks.
     const overkill = weapon('Overkill', 10, '1', 2, 20, -6, '10');
-    const blast = weapon('Blast', 5, '1', 3, 4, 0, '1', { blast: 1 });
+    const blast = weapon('Blast', 5, '1', 3, 4, 0, '1', { blast: '1' });
     const sim = simulate([overkill, blast], defender(11, 4, 3, 1), 2000, mulberry32(23));
     expect(sim.perWeapon[1].stats.attacks).toBe(15);
   });
 
-  compareWithExact('Blast 1 into 10 models', [weapon('Frag', 2, 'D6', 3, 4, 0, '1', { blast: 1 })], defender(10, 3, 5, 1), 24);
-  compareWithExact('Blast 2 and Cleave 1 with carry-over', [weapon('Both', 3, 'D3', 4, 5, -1, 'D3', { blast: 2, cleave: 1 }), heavyBolter], defender(10, 4, 3, 2), 25);
+  compareWithExact('Blast 1 into 10 models', [weapon('Frag', 2, 'D6', 3, 4, 0, '1', { blast: '1' })], defender(10, 3, 5, 1), 24);
+  compareWithExact('Blast 2 and Cleave 1 with carry-over', [weapon('Both', 3, 'D3', 4, 5, -1, 'D3', { blast: '2', cleave: '1' }), heavyBolter], defender(10, 4, 3, 2), 25);
+  compareWithExact('Blast D6+2 into 10 models', [weapon('Frag', 2, 'D6', 3, 4, 0, '1', { blast: 'D6+2' })], defender(10, 3, 5, 2), 26);
+  compareWithExact('Blast D3 and Cleave 1 on D6 attacks', [weapon('Both', 2, 'D6', 4, 4, 0, '1', { blast: 'D3', cleave: '1' }), heavyBolter], defender(15, 4, 4, 1), 27);
+
+  it('rolls Blast dice for every block of 5 models and every attacking model', () => {
+    // 3 models with A 1 and Blast D6+2 into 10 models: 3 × (1 + 2 × 5.5) = 36 attacks on average.
+    const sim = simulate([weapon('Frag', 3, '1', 3, 4, 0, '1', { blast: 'D6+2' })], defender(10, 4, 3, 1), ITERATIONS, mulberry32(28));
+    expectClose(sim.total.attacks, 36);
+  });
+  compareWithExact(
+    'Anti-Vehicle 4+ with Devastating Wounds',
+    [weapon('Anti', 10, '1', 3, 4, 0, '1', { anti: { vehicle: 4 }, devastatingWounds: true })],
+    defender(3, 8, 2, 4, null, ['vehicle']),
+    29,
+  );
+  compareWithExact(
+    'Anti-Monster 3+ with Lethal Hits and Devastating Wounds',
+    [weapon('Anti lethal', 6, '2', 3, 5, -1, 'D3', { anti: { monster: 3 }, lethalHits: true, devastatingWounds: true }), heavyBolter],
+    defender(2, 10, 2, 8, 4, ['monster']),
+    30,
+  );
+
+  it('Anti with Devastating Wounds: Lethal Hits auto-wounds stay non-critical', () => {
+    // BS 3+, S4 vs T8, Sv 2+ (fails on a 1 only), Anti-Vehicle 4+:
+    // normal hits (3/6): wound faces 4-6 are critical, never saved: 3/6
+    // critical hits (1/6): auto-wound, not critical: saved unless a 1, 1/6
+    const sim = simulate(
+      [weapon('Gun', 10, '1', 3, 4, 0, '1', { anti: { vehicle: 4 }, lethalHits: true, devastatingWounds: true })],
+      defender(20, 8, 2, 1, null, ['vehicle']),
+      ITERATIONS,
+      mulberry32(31),
+    );
+    expectClose(sim.total.unsaved, 10 * ((3 / 6) * (3 / 6) + (1 / 6) * (1 / 6)));
+  });
   compareWithExact('Sustained Hits D3', [weapon('Sustained D3', 4, '2', 4, 4, 0, '1', { sustainedHits: 'D3' })], defender(10, 4, 4, 1), 20);
 });
 

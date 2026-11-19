@@ -82,3 +82,40 @@ export function diceDistribution(dice: DiceExpr): number[] {
   }
   return [...new Array<number>(dice.bonus).fill(0), ...pmf];
 }
+
+/** The sum of `k` independent rolls of `dice`: D6+2 three times is 3D6+6. */
+export function repeatDice(dice: DiceExpr, k: number): DiceExpr {
+  return { count: dice.count * k, sides: dice.sides, bonus: dice.bonus * k };
+}
+
+/** Roll every term and add them up, e.g. base attacks D6 plus Blast 2D3. */
+export function rollDiceSum(terms: DiceExpr[], rng: Rng): number {
+  let total = 0;
+  for (const term of terms) total += rollDice(term, rng);
+  return total;
+}
+
+/** Exact PMF of the sum of independent dice expressions (possibly with different sides). */
+export function diceSumDistribution(terms: DiceExpr[]): number[] {
+  let pmf = [1];
+  for (const term of terms) pmf = convolve(pmf, diceDistribution(term));
+  return pmf;
+}
+
+/**
+ * Write a sum of dice expressions as one expression: dice with the same sides are merged
+ * and constants are added up, so [D6+2, D6+2, D3] reads "2D6+D3+4". An empty sum is "0".
+ */
+export function formatDiceSum(terms: DiceExpr[]): string {
+  const countBySides = new Map<number, number>();
+  let bonus = 0;
+  for (const term of terms) {
+    bonus += term.bonus;
+    if (term.count > 0) countBySides.set(term.sides, (countBySides.get(term.sides) ?? 0) + term.count);
+  }
+  const parts = [...countBySides.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([sides, count]) => `${count === 1 ? '' : count}D${sides}`);
+  if (bonus > 0 || parts.length === 0) parts.push(String(bonus));
+  return parts.join('+');
+}

@@ -1,4 +1,4 @@
-import { noAbilities, type DefenderProfile, type WeaponAbilities, type WeaponProfile } from '../types';
+import { noAbilities, type DefenderKeyword, type DefenderProfile, type WeaponAbilities, type WeaponProfile } from '../types';
 
 export function weapon(
   name: string,
@@ -13,8 +13,8 @@ export function weapon(
   return { id: name, name, models, attacks, skill, strength, ap, damage, abilities: { ...noAbilities(), ...abilities } };
 }
 
-export function defender(models: number, toughness: number, save: number, wounds: number, invuln: number | null = null): DefenderProfile {
-  return { models, toughness, save, invuln, wounds };
+export function defender(models: number, toughness: number, save: number, wounds: number, invuln: number | null = null, keywords: DefenderKeyword[] = []): DefenderProfile {
+  return { models, toughness, save, invuln, wounds, keywords };
 }
 
 export const boltRifles = weapon('Bolt rifles', 5, '2', 3, 4, -1, '1');

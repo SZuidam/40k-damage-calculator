@@ -1,5 +1,6 @@
-import { tryParseDice } from '../engine/dice';
-import type { AttackRow, DefenderProfile, StoredWeapon, WeaponAbilities, WeaponStats } from '../types';
+import { maxValue, tryParseDice } from '../engine/dice';
+import { parseAntiValue } from '../state/abilities';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type AttackRow, type DefenderProfile, type StoredWeapon, type WeaponAbilities, type WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -10,8 +11,8 @@ export const LIMITS = {
   defenderModels: { min: 1, max: 40 },
   toughness: { min: 1, max: 20 },
   wounds: { min: 1, max: 40 },
-  /** X of Blast X / Cleave X. */
-  abilityValue: { min: 1, max: 10 },
+  /** Highest possible roll of X for Sustained Hits X / Blast X / Cleave X (2D6, D6+6). */
+  abilityValue: { min: 1, max: 12 },
   iterations: { min: 100, max: 1_000_000 },
 } as const;
 
@@ -47,10 +48,38 @@ export function validateWeaponStats(w: WeaponStats): FieldErrors<WeaponStats> {
 
 function abilityError(a: WeaponAbilities): string | undefined {
   return (
-    (a.sustainedHits === null ? undefined : dice(a.sustainedHits, 'Sustained Hits')) ??
-    (a.blast === null ? undefined : intInRange(a.blast, LIMITS.abilityValue, 'Blast')) ??
-    (a.cleave === null ? undefined : intInRange(a.cleave, LIMITS.abilityValue, 'Cleave'))
+    (a.sustainedHits === null ? undefined : abilityValueError(a.sustainedHits, 'Sustained Hits')) ??
+    (a.blast === null ? undefined : abilityValueError(a.blast, 'Blast')) ??
+    (a.cleave === null ? undefined : abilityValueError(a.cleave, 'Cleave')) ??
+    antiError(a)
   );
+}
+
+/** Y of every Anti-X Y+ must be a whole number 2–6 (it can come out of range from storage or an import). */
+function antiError(a: WeaponAbilities): string | undefined {
+  for (const keyword of DEFENDER_KEYWORDS) {
+    const y = a.anti[keyword];
+    if (y !== undefined && !(Number.isInteger(y) && y >= 2 && y <= 6)) return `Anti-${KEYWORD_NAMES[keyword]}: Y must be between 2+ and 6+`;
+  }
+  return undefined;
+}
+
+/** Y of Anti-X Y+ as typed in the pop-up: 2 to 6, with or without "+". */
+export function antiValueError(text: string, label: string): string | undefined {
+  if (text.trim() === '') return `${label}: Y is required`;
+  return parseAntiValue(text) === null ? `${label}: Y must be between 2+ and 6+` : undefined;
+}
+
+/**
+ * X of Sustained Hits / Blast / Cleave: a dice expression like A and D, whose highest roll
+ * is at most LIMITS.abilityValue.max (keeps the exact engine's attack distribution small).
+ */
+export function abilityValueError(expr: string, label: string): string | undefined {
+  const syntax = dice(expr, label);
+  if (syntax) return syntax;
+  const max = LIMITS.abilityValue.max;
+  const parsed = tryParseDice(expr);
+  return parsed && maxValue(parsed) > max ? `${label}: X can roll at most ${max}` : undefined;
 }
 
 /** A live attack row: models in range, a weapon chosen, and that weapon valid. */

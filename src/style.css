@@ -325,6 +325,14 @@ select[aria-invalid='true'] {
   text-transform: uppercase;
 }
 
+/* An Anti ability that applies to the current defender's keywords. */
+.row-abilities .ability-active {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -406,6 +414,82 @@ select[aria-invalid='true'] {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   gap: 8px;
+}
+
+/* Keyword toggles (for Anti-X Y+): a checkbox per keyword, shown as a small pill. */
+.keyword-group {
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.keyword-group legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.keyword-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.keyword-toggle {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.keyword-toggle .keyword-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.keyword-toggle span {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  user-select: none;
+}
+
+.keyword-toggle:hover span {
+  background: var(--surface-2);
+}
+
+.keyword-input:checked + span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.keyword-toggle:hover .keyword-input:checked + span {
+  background: var(--accent-hover);
+}
+
+.keyword-input:focus-visible {
+  outline: none;
+}
+
+.keyword-input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ---------- Buttons ---------- */
@@ -893,9 +977,57 @@ dialog.modal::backdrop {
 }
 
 .ability-editor {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Pop-up asking for the X of Sustained Hits / Blast / Cleave, placed by abilityValuePopover.ts. */
+.ability-popover {
+  position: absolute;
+  z-index: 10;
+  box-sizing: border-box;
+  width: 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+/* Room for two lines even when empty, so an error appearing doesn't resize (or move) the pop-up. */
+.ability-popover-error {
+  margin: 0;
+  min-height: calc(2 * 1.3em);
+  color: var(--danger);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.ability-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* The label of a chip with an X: click to change X. */
+.ability-edit {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ability-edit:hover,
+.ability-edit:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .field--abilities select {

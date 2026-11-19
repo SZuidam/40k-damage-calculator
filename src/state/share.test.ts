@@ -14,7 +14,7 @@ import {
 
 const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
 const lascannon = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: noAbilities() });
-const meq = () => ({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 });
+const meq = () => ({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] });
 const stats = ({ id: _, ...weapon }: StoredWeapon) => weapon;
 
 function sourceState(): ShareState {
@@ -66,6 +66,45 @@ describe('buildShareFile', () => {
   });
 });
 
+describe('keywords and Anti', () => {
+  function antiState(): ShareState {
+    const state = sourceState();
+    state.library[0].abilities = { ...noAbilities(), devastatingWounds: true, anti: { vehicle: 4, monster: 4 } };
+    state.defenderPresets[0].defender.keywords = ['vehicle', 'monster'];
+    return state;
+  }
+
+  it('exports defender keywords and weapon Anti abilities as readable JSON', () => {
+    const source = antiState();
+    const json = serializeShareFile(buildShareFile(source, everything(source)));
+    const file = JSON.parse(json);
+    expect(file.defenders[0].defender.keywords).toEqual(['vehicle', 'monster']);
+    expect(file.weapons[0].abilities.anti).toEqual({ vehicle: 4, monster: 4 });
+  });
+
+  it('imports them back unchanged', () => {
+    const source = antiState();
+    const data = roundTrip(source);
+    expect(data.defenders[0].defender.keywords).toEqual(['vehicle', 'monster']);
+    expect(data.weapons[0].abilities.anti).toEqual({ vehicle: 4, monster: 4 });
+    const target = emptyState();
+    applyImport(data, planImport(data, target), target, 'rename');
+    expect(target.defenderPresets[0].defender.keywords).toEqual(['vehicle', 'monster']);
+    expect(target.library[0].abilities.anti).toEqual({ vehicle: 4, monster: 4 });
+    // The import doesn't share arrays with the parsed data.
+    expect(target.defenderPresets[0].defender.keywords).not.toBe(data.defenders[0].defender.keywords);
+  });
+
+  it('a defender or weapon differing only in keywords or Anti is a conflict', () => {
+    const data = roundTrip(antiState());
+    const target = sourceState();
+    const plan = planImport(data, target).map((i) => [i.kind, i.name, i.status]);
+    expect(plan).toContainEqual(['defenders', 'MEQ', 'conflict']);
+    expect(plan).toContainEqual(['weapons', 'Bolt rifle', 'conflict']);
+    expect(planImport(data, antiState()).find((i) => i.kind === 'defenders')?.status).toBe('duplicate');
+  });
+});
+
 describe('parseShareText', () => {
   const error = (text: string) => {
     const result = parseShareText(text);
@@ -90,7 +129,8 @@ describe('parseShareText', () => {
     });
     const result = parseShareText(text);
     if (!result.ok) throw new Error(result.error);
-    expect(result.data.defenders).toEqual([{ name: 'Terminators', defender: { models: 5, toughness: 5, save: 2, invuln: 4, wounds: 3 } }]);
+    // Files from before keywords and Anti existed load with none.
+    expect(result.data.defenders).toEqual([{ name: 'Terminators', defender: { models: 5, toughness: 5, save: 2, invuln: 4, wounds: 3, keywords: [] } }]);
     expect(result.data.weapons).toHaveLength(1);
     expect(result.data.weapons[0]).toMatchObject({ name: 'Old gun', abilities: noAbilities(), id: expect.any(String) });
     expect(result.data.units[0].name).toHaveLength(40);

@@ -1,6 +1,6 @@
 import type { DefenderProfile, WeaponProfile } from '../types';
-import { convolve, diceDistribution } from './dice';
-import { createAttackContext, unsavedDistribution } from './rules';
+import { convolve, diceDistribution, diceSumDistribution } from './dice';
+import { attacksPerModel, createAttackContext, unsavedDistribution } from './rules';
 
 /**
  * Exact (noise-free) expectation of the attack sequence.
@@ -41,7 +41,7 @@ export function weaponKernel(weapon: WeaponProfile, defender: DefenderProfile): 
   const perAttack = unsavedDistribution(ctx);
   const cap = defender.models * defender.wounds;
 
-  const perModel = diceDistribution(ctx.attacks);
+  const perModel = diceSumDistribution(attacksPerModel(ctx));
   let attacks = [1];
   for (let i = 0; i < weapon.models; i++) attacks = convolve(attacks, perModel);
 

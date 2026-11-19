@@ -2,7 +2,7 @@ import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
 import { uid } from './state/ids';
-import { findWeapon, materialiseRows, resolveRows, sameDefender, sameSnapshot, snapshotRows } from './state/presets';
+import { copyDefender, findWeapon, materialiseRows, resolveRows, sameDefender, sameSnapshot, snapshotRows } from './state/presets';
 import { loadState, saveState } from './state/storage';
 import { AttackList } from './ui/attackList';
 import { renderDefenderForm } from './ui/defenderForm';
@@ -46,7 +46,8 @@ function inputsValid(): boolean {
 
 function onInputsChanged(): void {
   saveState(state);
-  // The Blast / Cleave extra attacks on the A chips depend on the defender's model count.
+  // The Blast / Cleave extra attacks on the A chips depend on the defender's model count,
+  // the Anti markers on its keywords.
   attackList.refreshStats();
   if (!reordering) reorderNote = '';
   simulateButton.disabled = !inputsValid();
@@ -127,7 +128,7 @@ function runSimulation(): void {
   // Let the status paint before the (synchronous) simulation blocks the thread.
   window.setTimeout(() => {
     const weapons = resolveRows(state.rows, state.library);
-    const defender = { ...state.defender };
+    const defender = copyDefender(state.defender);
     const started = performance.now();
     const result = simulate(weapons, defender, state.iterations);
     const ms = Math.round(performance.now() - started);
@@ -144,7 +145,7 @@ const attackList = new AttackList($('weapons'), state.rows, {
   library: state.library,
   onChange: onInputsChanged,
   onLibraryChange: onLibraryChanged,
-  defenderModels: () => state.defender.models,
+  defender: () => state.defender,
 });
 const defenderForm = renderDefenderForm($('defender'), state.defender, onInputsChanged);
 
@@ -214,7 +215,7 @@ const defenderBar = new PresetBar({
     state.activeDefenderPresetId = id;
     const preset = state.defenderPresets.find((p) => p.id === id);
     if (preset) {
-      Object.assign(state.defender, preset.defender);
+      Object.assign(state.defender, copyDefender(preset.defender));
       defenderForm.setValues();
     }
     onInputsChanged();
@@ -222,12 +223,12 @@ const defenderBar = new PresetBar({
   onSave: (id) => {
     const preset = state.defenderPresets.find((p) => p.id === id);
     if (!preset) return;
-    preset.defender = { ...state.defender };
+    preset.defender = copyDefender(state.defender);
     state.activeDefenderPresetId = id;
     onInputsChanged();
   },
   onSaveAs: (name) => {
-    const preset = { id: uid('defender'), name, defender: { ...state.defender } };
+    const preset = { id: uid('defender'), name, defender: copyDefender(state.defender) };
     state.defenderPresets.push(preset);
     state.activeDefenderPresetId = preset.id;
     onInputsChanged();

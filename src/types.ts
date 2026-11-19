@@ -1,6 +1,18 @@
+/** Defender keywords that weapon abilities can target. The array order is the display order. */
+export const DEFENDER_KEYWORDS = ['vehicle', 'monster', 'psyker', 'infantry', 'fly'] as const;
+export type DefenderKeyword = (typeof DEFENDER_KEYWORDS)[number];
+
+export const KEYWORD_NAMES: Record<DefenderKeyword, string> = {
+  vehicle: 'Vehicle',
+  monster: 'Monster',
+  psyker: 'Psyker',
+  infantry: 'Infantry',
+  fly: 'Fly',
+};
+
 /**
  * Weapon abilities that change the attack sequence. A critical hit / wound is an
- * unmodified roll of 6.
+ * unmodified roll of 6 (Anti-X Y+ lowers the critical wound to Y+ against keyword X).
  */
 export interface WeaponAbilities {
   /** Lethal Hits: a critical hit wounds automatically (no wound roll). */
@@ -9,14 +21,27 @@ export interface WeaponAbilities {
   sustainedHits: string | null;
   /** Devastating Wounds: a critical wound can't be saved (armour or invulnerable). */
   devastatingWounds: boolean;
-  /** Blast X: X extra attacks per model for every 5 models in the target unit; null for none. */
-  blast: number | null;
+  /**
+   * Blast X: X extra attacks per model for every 5 models in the target unit, as a dice
+   * expression rolled per block of 5 and per attacking model; null for none.
+   */
+  blast: string | null;
   /** Cleave X: Blast X for melee weapons. Ranged and melee aren't told apart, so it works the same as Blast. */
-  cleave: number | null;
+  cleave: string | null;
+  /**
+   * Anti-X Y+: Y (2–6) per keyword X. Against a target with keyword X, an unmodified wound
+   * roll of Y+ is a critical wound (it always wounds). E.g. `{ vehicle: 4, monster: 4 }`.
+   */
+  anti: Partial<Record<DefenderKeyword, number>>;
 }
 
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {} };
+}
+
+/** A copy that shares no objects with `a`. */
+export function copyAbilities(a: WeaponAbilities): WeaponAbilities {
+  return { ...a, anti: { ...a.anti } };
 }
 
 /** The stats of a weapon profile, without the number of models firing it. */
@@ -100,6 +125,8 @@ export interface DefenderProfile {
   invuln: number | null;
   /** Wounds per model. */
   wounds: number;
+  /** Keywords of the unit (Vehicle, Monster, …), in DEFENDER_KEYWORDS order without duplicates. */
+  keywords: DefenderKeyword[];
 }
 
 /** Average values per step of the attack sequence. */

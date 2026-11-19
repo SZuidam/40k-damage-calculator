@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { WeaponAbilities } from '../types';
 import {
   IMPOSSIBLE,
+  antiCriticalWound,
+  attacksPerModel,
   bonusAttacks,
   createAttackContext,
   hitChance,
@@ -12,10 +14,11 @@ import {
   saveTarget,
   unsavedDistribution,
   unsavedPerAttack,
+  unsavedPerWoundRoll,
   woundChance,
   woundTarget,
 } from './rules';
-import { weapon } from './testFixtures';
+import { defender, weapon } from './testFixtures';
 
 describe('woundTarget', () => {
   it.each([
@@ -60,7 +63,7 @@ describe('rollSucceeds', () => {
 });
 
 describe('step chances', () => {
-  const ctx = createAttackContext(weapon('Bolt rifle', 10, '2', 3, 4, -1, '1'), { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 });
+  const ctx = createAttackContext(weapon('Bolt rifle', 10, '2', 3, 4, -1, '1'), { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] });
 
   it('computes each step from the six die faces', () => {
     expect(hitChance(ctx)).toBeCloseTo(4 / 6);
@@ -76,7 +79,7 @@ describe('step chances', () => {
 
 describe('abilities', () => {
   // BS 3+, S4 vs T4 (4+), Sv 3+ with AP 0: a hit that rolls to wound is unsaved with q = 1/2 · 1/3 = 1/6.
-  const marines = { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 };
+  const marines = { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] };
   const ctxWith = (abilities: Partial<WeaponAbilities>) => createAttackContext(weapon('Gun', 1, '1', 3, 4, 0, '1', abilities), marines);
 
   it('treats only a successful unmodified 6 as critical', () => {
@@ -121,21 +124,92 @@ describe('abilities', () => {
   it('Blast X: X extra attacks per model for every 5 models in the target unit, rounded down', () => {
     const gun = (abilities: Partial<WeaponAbilities>) => weapon('Gun', 3, 'D6', 3, 4, 0, '1', abilities);
     const unit = (models: number) => ({ ...marines, models });
-    expect(createAttackContext(gun({ blast: 1 }), unit(4)).attacks).toEqual({ count: 1, sides: 6, bonus: 0 });
-    expect(createAttackContext(gun({ blast: 1 }), unit(5)).attacks).toEqual({ count: 1, sides: 6, bonus: 1 });
-    expect(createAttackContext(gun({ blast: 1 }), unit(14)).bonusAttacks).toBe(2);
-    expect(createAttackContext(gun({ blast: 2 }), unit(10)).attacks.bonus).toBe(4);
-    expect(bonusAttacks(gun({}), unit(20))).toBe(0);
+    expect(createAttackContext(gun({ blast: '1' }), unit(4)).bonusAttacks).toEqual([]);
+    expect(createAttackContext(gun({ blast: '1' }), unit(5)).bonusAttacks).toEqual([{ count: 0, sides: 0, bonus: 1 }]);
+    expect(createAttackContext(gun({ blast: '1' }), unit(14)).bonusAttacks).toEqual([{ count: 0, sides: 0, bonus: 2 }]);
+    expect(createAttackContext(gun({ blast: '2' }), unit(10)).bonusAttacks).toEqual([{ count: 0, sides: 0, bonus: 4 }]);
+    expect(bonusAttacks(gun({}), unit(20))).toEqual([]);
   });
 
-  it('Cleave X works the same as Blast X, and the two add up', () => {
+  it('keeps the base attacks apart from the Blast extra attacks', () => {
+    const ctx = createAttackContext(weapon('Gun', 3, 'D6', 3, 4, 0, '1', { blast: '1' }), { ...marines, models: 10 });
+    expect(ctx.attacks).toEqual({ count: 1, sides: 6, bonus: 0 });
+    expect(attacksPerModel(ctx)).toEqual([
+      { count: 1, sides: 6, bonus: 0 },
+      { count: 0, sides: 0, bonus: 2 },
+    ]);
+  });
+
+  it('Blast with dice rolls X separately for every block of 5 models', () => {
+    // Blast D6+2 into 10 models: two blocks, so 2D6+4 extra attacks per model.
+    expect(bonusAttacks(weapon('Frag', 1, '1', 3, 4, 0, '1', { blast: 'D6+2' }), { ...marines, models: 10 })).toEqual([{ count: 2, sides: 6, bonus: 4 }]);
+    expect(bonusAttacks(weapon('Frag', 1, '1', 3, 4, 0, '1', { blast: 'd3' }), { ...marines, models: 15 })).toEqual([{ count: 3, sides: 3, bonus: 0 }]);
+  });
+
+  it('Cleave X works the same as Blast X, and the two stack', () => {
     const unit = { ...marines, models: 10 };
-    expect(bonusAttacks(weapon('Axe', 1, '2', 3, 4, 0, '1', { cleave: 1 }), unit)).toBe(2);
-    expect(bonusAttacks(weapon('Axe', 1, '2', 3, 4, 0, '1', { blast: 1, cleave: 2 }), unit)).toBe(6);
+    expect(bonusAttacks(weapon('Axe', 1, '2', 3, 4, 0, '1', { cleave: '1' }), unit)).toEqual([{ count: 0, sides: 0, bonus: 2 }]);
+    expect(bonusAttacks(weapon('Axe', 1, '2', 3, 4, 0, '1', { blast: 'D3', cleave: '2' }), unit)).toEqual([
+      { count: 2, sides: 3, bonus: 0 },
+      { count: 0, sides: 0, bonus: 4 },
+    ]);
   });
 
   it('supports a dice expression for Sustained Hits', () => {
     // E[D3] = 2 extra hits per critical hit
     expect(unsavedPerAttack(ctxWith({ sustainedHits: 'D3' }))).toBeCloseTo((4 / 6) * (1 / 6) + (1 / 6) * 2 * (1 / 6), 12);
+  });
+});
+
+describe('Anti-X Y+', () => {
+  const faces = [1, 2, 3, 4, 5, 6];
+  // Sv 2+ with AP 0: a normal wound fails its save on a 1 only (1/6).
+  const vehicle = defender(1, 8, 2, 12, null, ['vehicle']);
+  const infantry = defender(1, 8, 2, 12, null, ['infantry']);
+  const gun = (strength: number, abilities: Partial<WeaponAbilities>) => weapon('Gun', 1, '1', 3, strength, 0, '1', abilities);
+
+  it('S4 vs T8 Vehicle with Anti-Vehicle 4+: wounds and is critical on 4+', () => {
+    const ctx = createAttackContext(gun(4, { anti: { vehicle: 4 } }), vehicle);
+    expect(ctx.woundTarget).toBe(6);
+    expect(ctx.criticalWound).toBe(4);
+    expect(woundChance(ctx)).toBeCloseTo(3 / 6);
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([4, 5, 6]);
+  });
+
+  it('does nothing against a target without the keyword', () => {
+    const ctx = createAttackContext(gun(4, { anti: { vehicle: 4 } }), infantry);
+    expect(ctx.criticalWound).toBe(6);
+    expect(woundChance(ctx)).toBeCloseTo(1 / 6);
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([6]);
+  });
+
+  it('S8 vs T4 (2+) with Anti 4+: the wound chance stays 5/6, criticals are 4-6', () => {
+    const ctx = createAttackContext(gun(8, { anti: { vehicle: 4 } }), { ...vehicle, toughness: 4 });
+    expect(woundChance(ctx)).toBeCloseTo(5 / 6);
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([4, 5, 6]);
+  });
+
+  it('an unmodified 1 still fails with Anti 2+', () => {
+    const ctx = createAttackContext(gun(4, { anti: { vehicle: 2 } }), vehicle);
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([2, 3, 4, 5, 6]);
+    expect(woundChance(ctx)).toBeCloseTo(5 / 6);
+  });
+
+  it('uses the lowest Y when several Anti keywords match', () => {
+    const both = defender(1, 8, 2, 12, null, ['vehicle', 'monster']);
+    expect(antiCriticalWound({ anti: { vehicle: 4, monster: 2 } }, both.keywords)).toBe(2);
+    expect(antiCriticalWound({ anti: { vehicle: 4, monster: 2 } }, ['vehicle'])).toBe(4);
+    expect(antiCriticalWound({ anti: { psyker: 3 } }, both.keywords)).toBeNull();
+    expect(antiCriticalWound({ anti: {} }, both.keywords)).toBeNull();
+    expect(createAttackContext(gun(4, { anti: { vehicle: 5, monster: 3 } }), both).criticalWound).toBe(3);
+  });
+
+  it('with Devastating Wounds, a critical wound on Y+ skips the save', () => {
+    // S4 vs T8: faces 4-6 are critical wounds, never saved.
+    expect(unsavedPerWoundRoll(createAttackContext(gun(4, { anti: { vehicle: 4 }, devastatingWounds: true }), vehicle))).toBeCloseTo(3 / 6, 12);
+    // Without Devastating Wounds they still have to get past the 2+ save.
+    expect(unsavedPerWoundRoll(createAttackContext(gun(4, { anti: { vehicle: 4 } }), vehicle))).toBeCloseTo((3 / 6) * (1 / 6), 12);
+    // Without the keyword only a 6 wounds, and it is the only critical wound.
+    expect(unsavedPerWoundRoll(createAttackContext(gun(4, { anti: { vehicle: 4 }, devastatingWounds: true }), infantry))).toBeCloseTo(1 / 6, 12);
   });
 });

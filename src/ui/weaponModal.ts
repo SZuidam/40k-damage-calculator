@@ -1,9 +1,26 @@
-import { ABILITY_CHOICES, activeAbilities, withoutAbility } from '../state/abilities';
+import {
+  ABILITY_CHOICES,
+  VALUE_ABILITY_NAMES,
+  activeAbilities,
+  antiName,
+  isAntiChoice,
+  isValueChoice,
+  parseAntiValue,
+  withAbilityValue,
+  withAntiValue,
+  withoutAbility,
+  withoutAnti,
+  type ValueAbilityKey,
+} from '../state/abilities';
 import { pickStats } from '../state/presets';
-import { noAbilities, type WeaponStats } from '../types';
+import { noAbilities, type DefenderKeyword, type WeaponStats } from '../types';
 import { AP_OPTIONS, SKILL_OPTIONS, field, h, numberValue, select, setFieldError } from './dom';
+import { openAbilityValuePopover } from './abilityValuePopover';
 import { openModal } from './modal';
-import { MAX_WEAPON_NAME, hasErrors, validateWeaponStats } from './validation';
+import { MAX_WEAPON_NAME, abilityValueError, antiValueError, hasErrors, validateWeaponStats } from './validation';
+
+/** `data-ability` of an Anti chip, used to focus it again after a change: "anti-vehicle-monster". */
+const antiChipId = (keywords: DefenderKeyword[]) => `anti-${keywords.join('-')}`;
 
 const NEW_WEAPON: WeaponStats = { name: '', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() };
 
@@ -74,21 +91,82 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
       bind(ap, () => (draft.ap = numberValue(ap)));
       bind(damage, () => (draft.damage = damage.value));
 
-      // Abilities: an "Add ability…" dropdown plus a removable chip per ability.
+      // Abilities: an "Add ability…" dropdown plus a removable chip per ability. Abilities
+      // with an X (Sustained Hits, Blast, Cleave) or a Y (Anti-X Y+) ask for it in a pop-up;
+      // their chip reopens it.
+      const abilityEditor = h('div', { class: 'ability-editor' });
+
+      const askValue = async (key: ValueAbilityKey, anchor: HTMLElement, initial: string, placeBy?: HTMLElement): Promise<boolean> => {
+        const label = VALUE_ABILITY_NAMES[key];
+        const value = await openAbilityValuePopover({
+          container: abilityEditor,
+          anchor,
+          placeBy,
+          title: `${label} X`,
+          initial,
+          validate: (x) => abilityValueError(x, label),
+        });
+        if (value === null) return false;
+        draft.abilities = withAbilityValue(draft.abilities, key, value);
+        renderAbilities();
+        validate();
+        return true;
+      };
+
+      /** Ask for Y of Anti-X Y+ and set it for every keyword in `keywords` (one chip). */
+      const askAnti = async (keywords: DefenderKeyword[], anchor: HTMLElement, initial: string, placeBy?: HTMLElement): Promise<boolean> => {
+        const label = antiName(keywords);
+        const value = await openAbilityValuePopover({
+          container: abilityEditor,
+          anchor,
+          placeBy,
+          title: `${label} Y+`,
+          initial,
+          placeholder: 'e.g. 4+',
+          validate: (y) => antiValueError(y, label),
+        });
+        const y = value === null ? null : parseAntiValue(value);
+        if (y === null) return false;
+        draft.abilities = withAntiValue(draft.abilities, keywords, y);
+        renderAbilities();
+        validate();
+        return true;
+      };
+
       const renderAbilities = () => {
         const active = activeAbilities(draft.abilities);
         abilityList.replaceChildren(
           ...(active.length === 0
             ? [h('li', { class: 'ability-empty' }, 'No abilities')]
-            : active.map(({ key, label, description }) => {
+            : active.map(({ key, label, description, valueKey, anti }) => {
                 const remove = h('button', { type: 'button', class: 'ability-remove', 'aria-label': `Remove ${label}`, title: 'Remove' }, '✕');
                 remove.addEventListener('click', () => {
-                  draft.abilities = withoutAbility(draft.abilities, key);
+                  draft.abilities = anti ? withoutAnti(draft.abilities, anti.keywords) : withoutAbility(draft.abilities, key);
                   renderAbilities();
                   validate();
                   abilitySelect.focus();
                 });
-                return h('li', { class: 'chip ability-chip', title: description }, h('span', {}, label), remove);
+                if (anti) {
+                  const edit = h('button', { type: 'button', class: 'ability-edit', 'data-ability': antiChipId(anti.keywords), title: 'Change Y', 'aria-label': `${label}: change Y` }, label);
+                  const chip = h('li', { class: 'chip ability-chip', title: description }, edit, remove);
+                  edit.addEventListener('click', async () => {
+                    if (await askAnti(anti.keywords, edit, `${anti.value}+`, chip)) {
+                      // A new Y may merge this chip with another one: focus the chip that now holds its first keyword.
+                      const group = activeAbilities(draft.abilities).find((a) => a.anti?.keywords.includes(anti.keywords[0]));
+                      if (group?.anti) abilityList.querySelector<HTMLButtonElement>(`.ability-edit[data-ability="${antiChipId(group.anti.keywords)}"]`)?.focus();
+                    }
+                  });
+                  return chip;
+                }
+                if (!valueKey) return h('li', { class: 'chip ability-chip', title: description }, h('span', {}, label), remove);
+                const edit = h('button', { type: 'button', class: 'ability-edit', 'data-ability': valueKey, title: 'Change X', 'aria-label': `${label}: change X` }, label);
+                const chip = h('li', { class: 'chip ability-chip', title: description }, edit, remove);
+                edit.addEventListener('click', async () => {
+                  if (await askValue(valueKey, edit, draft.abilities[valueKey] ?? '', chip)) {
+                    abilityList.querySelector<HTMLButtonElement>(`.ability-edit[data-ability="${valueKey}"]`)?.focus();
+                  }
+                });
+                return chip;
               })),
         );
         const choices = ABILITY_CHOICES.filter((c) => !c.isActive(draft.abilities));
@@ -99,15 +177,29 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
         abilitySelect.value = '';
         abilitySelect.disabled = choices.length === 0;
       };
-      abilitySelect.addEventListener('change', () => {
+      const focusAfterAdd = () => {
+        if (abilitySelect.disabled) abilityList.querySelector<HTMLButtonElement>('.ability-remove')?.focus();
+        else abilitySelect.focus();
+      };
+      abilitySelect.addEventListener('change', async () => {
         const choice = ABILITY_CHOICES.find((c) => c.value === abilitySelect.value);
         if (!choice) return;
+        if (isValueChoice(choice)) {
+          abilitySelect.value = '';
+          if (await askValue(choice.valueKey, abilitySelect, '')) focusAfterAdd();
+          return;
+        }
+        if (isAntiChoice(choice)) {
+          abilitySelect.value = '';
+          if (await askAnti([choice.keyword], abilitySelect, '')) focusAfterAdd();
+          return;
+        }
         draft.abilities = choice.apply(draft.abilities);
         renderAbilities();
         validate();
-        if (abilitySelect.disabled) abilityList.querySelector<HTMLButtonElement>('.ability-remove')?.focus();
-        else abilitySelect.focus();
+        focusAfterAdd();
       });
+      abilityEditor.append(field('Abilities', abilitySelect, 'field--abilities'), abilityList);
       renderAbilities();
 
       const form = h(
@@ -115,17 +207,16 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
         { class: 'modal-body', novalidate: true },
         field('Name', name, 'field--name'),
         h('div', { class: 'weapon-stats-grid' }, field('A', attacks), field('BS/WS', skill), field('S', strength), field('AP', ap), field('D', damage)),
-        h('div', { class: 'ability-editor' }, field('Abilities', abilitySelect, 'field--abilities'), abilityList),
+        abilityEditor,
         errors,
-        h('p', { class: 'modal-hint' }, 'A and D take dice expressions: 3, D3, D6, 2D6, D6+1.'),
+        h('p', { class: 'modal-hint' }, 'A, D and ability X take dice expressions: 3, D3, D6, 2D6, D6+1. Anti Y takes 2+ to 6+.'),
         h('div', { class: 'modal-actions' }, cancel, save),
       );
       form.addEventListener('submit', (event) => {
         event.preventDefault();
         nameTouched = true;
         if (hasErrors(validate())) return;
-        const sustainedHits = draft.abilities.sustainedHits?.trim() ?? null;
-        close({ ...draft, name: draft.name.trim(), attacks: draft.attacks.trim(), damage: draft.damage.trim(), abilities: { ...draft.abilities, sustainedHits } });
+        close({ ...draft, name: draft.name.trim(), attacks: draft.attacks.trim(), damage: draft.damage.trim() });
       });
       validate();
       return form;

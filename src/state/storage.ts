@@ -1,4 +1,4 @@
-import { noAbilities, type AttackPreset, type AttackRow, type DefenderPreset, type DefenderProfile, type RowSnapshot, type StoredWeapon, type UnitPreset, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, noAbilities, type AttackPreset, type DefenderKeyword, type AttackRow, type DefenderPreset, type DefenderProfile, type RowSnapshot, type StoredWeapon, type UnitPreset, type WeaponAbilities, type WeaponStats } from '../types';
 import { uid } from './ids';
 import { pickStats, sameCombatStats } from './presets';
 
@@ -24,7 +24,7 @@ export type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem'>;
 const DEFAULT_ITERATIONS = 10_000;
 
 export function defaultDefender(): DefenderProfile {
-  return { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 };
+  return { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] };
 }
 
 /** One "Bolt rifle" profile fired by 10 models into 10 MEQ, the same loadout as v1. */
@@ -174,16 +174,42 @@ function toAbilities(value: unknown): WeaponAbilities {
   if (!isRecord(value)) return a;
   return {
     lethalHits: value.lethalHits === true,
-    sustainedHits: typeof value.sustainedHits === 'string' && value.sustainedHits.trim() !== '' ? value.sustainedHits : a.sustainedHits,
+    sustainedHits: toAbilityDice(value.sustainedHits),
     devastatingWounds: value.devastatingWounds === true,
-    blast: toAbilityValue(value.blast),
-    cleave: toAbilityValue(value.cleave),
+    blast: toAbilityDice(value.blast),
+    cleave: toAbilityDice(value.cleave),
+    anti: toAnti(value.anti),
   };
 }
 
-/** A whole number of 1 or more, or null. The range is checked by ui/validation. */
-function toAbilityValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : null;
+/**
+ * Anti-X Y+ per keyword: known keywords with a finite Y. Weapons saved before Anti existed
+ * have none. Y out of range is kept, like other stats: ui/validation flags it.
+ */
+function toAnti(value: unknown): WeaponAbilities['anti'] {
+  const anti: WeaponAbilities['anti'] = {};
+  if (!isRecord(value)) return anti;
+  for (const keyword of DEFENDER_KEYWORDS) {
+    const y = value[keyword];
+    if (typeof y === 'number' && Number.isFinite(y)) anti[keyword] = y;
+  }
+  return anti;
+}
+
+/** Known keywords only, without duplicates, in display order. Defenders saved before keywords existed have none. */
+function toKeywords(value: unknown): DefenderKeyword[] {
+  if (!Array.isArray(value)) return [];
+  return DEFENDER_KEYWORDS.filter((k) => value.includes(k));
+}
+
+/**
+ * X of Sustained Hits / Blast / Cleave: a non-empty dice expression, or null. Blast and
+ * Cleave were saved as whole numbers before they took dice; those become "2". The
+ * expression itself is checked by ui/validation.
+ */
+function toAbilityDice(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() === '' ? null : value;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? String(value) : null;
 }
 
 function toStoredWeapon(value: unknown): StoredWeapon | null {
@@ -216,6 +242,7 @@ export function toDefender(value: unknown): DefenderProfile | null {
     save: num(value.save, d.save),
     invuln: typeof value.invuln === 'number' && Number.isFinite(value.invuln) ? value.invuln : null,
     wounds: num(value.wounds, d.wounds),
+    keywords: toKeywords(value.keywords),
   };
 }
 

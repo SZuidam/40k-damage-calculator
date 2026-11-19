@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diceDistribution, meanValue, parseDice, rollDice, tryParseDice } from './dice';
+import { diceDistribution, diceSumDistribution, formatDiceSum, meanValue, parseDice, repeatDice, rollDice, rollDiceSum, tryParseDice } from './dice';
 import { mulberry32 } from './rng';
 
 describe('parseDice', () => {
@@ -55,5 +55,56 @@ describe('rollDice', () => {
       sum += v;
     }
     expect(sum / n).toBeCloseTo(6, 1);
+  });
+});
+
+describe('repeatDice', () => {
+  it('adds up k independent rolls', () => {
+    expect(repeatDice(parseDice('D6+2'), 2)).toEqual({ count: 2, sides: 6, bonus: 4 });
+    expect(repeatDice(parseDice('3'), 3)).toEqual({ count: 0, sides: 0, bonus: 9 });
+    expect(repeatDice(parseDice('2D3'), 1)).toEqual({ count: 2, sides: 3, bonus: 0 });
+  });
+});
+
+describe('sums of dice expressions', () => {
+  it('D6 + D3 sums to 1 and has mean 5.5', () => {
+    const pmf = diceSumDistribution([parseDice('D6'), parseDice('D3')]);
+    expect(pmf.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(pmf.reduce((sum, p, v) => sum + p * v, 0)).toBeCloseTo(5.5, 12);
+    expect(pmf).toHaveLength(10);
+    expect(pmf[2]).toBeCloseTo(1 / 18, 12);
+    expect(pmf[9]).toBeCloseTo(1 / 18, 12);
+  });
+
+  it('an empty sum is always 0', () => {
+    expect(diceSumDistribution([])).toEqual([1]);
+  });
+
+  it('rollDiceSum stays within range and matches the mean', () => {
+    const rng = mulberry32(5);
+    const terms = [parseDice('D6'), parseDice('2D3+1')];
+    let sum = 0;
+    const n = 50_000;
+    for (let i = 0; i < n; i++) {
+      const v = rollDiceSum(terms, rng);
+      expect(v).toBeGreaterThanOrEqual(4);
+      expect(v).toBeLessThanOrEqual(13);
+      sum += v;
+    }
+    expect(sum / n).toBeCloseTo(8.5, 1);
+  });
+
+  it.each([
+    [['2D6+4'], '2D6+4'],
+    [['1', '2'], '3'],
+    [['D6+2', 'D6+2', 'D3'], '2D6+D3+4'],
+    [['2D3', 'D6'], 'D6+2D3'],
+  ])('formatDiceSum(%j) is %s', (exprs, expected) => {
+    expect(formatDiceSum(exprs.map(parseDice))).toBe(expected);
+  });
+
+  it('formatDiceSum merges dice with the same sides', () => {
+    expect(formatDiceSum([parseDice('D6'), repeatDice(parseDice('D6+2'), 2)])).toBe('3D6+4');
+    expect(formatDiceSum([])).toBe('0');
   });
 });

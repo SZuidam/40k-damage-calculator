@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type AttackPreset, type AttackRow, type StoredWeapon } from '../types';
+import { noAbilities, type AttackPreset, type AttackRow, type DefenderProfile, type StoredWeapon } from '../types';
 import {
+  copyDefender,
+  defenderSummary,
   materialiseRows,
+  pickStats,
   resolveRows,
   sameDefender,
   sameSnapshot,
@@ -100,10 +103,27 @@ describe('snapshots', () => {
   });
 
   it('compares defenders field by field', () => {
-    const d = { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 };
+    const d = { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] };
     expect(sameDefender(d, { ...d })).toBe(true);
     expect(sameDefender(d, { ...d, invuln: 4 })).toBe(false);
     expect(sameDefender(d, { ...d, wounds: 3 })).toBe(false);
+  });
+
+  it('compares defender keywords, whatever their order', () => {
+    const d: DefenderProfile = { models: 1, toughness: 10, save: 3, invuln: null, wounds: 12, keywords: ['vehicle'] };
+    expect(sameDefender(d, { ...d, keywords: ['vehicle'] })).toBe(true);
+    expect(sameDefender(d, { ...d, keywords: [] })).toBe(false);
+    expect(sameDefender(d, { ...d, keywords: ['monster'] })).toBe(false);
+    expect(sameDefender(d, { ...d, keywords: ['vehicle', 'fly'] })).toBe(false);
+    expect(sameDefender({ ...d, keywords: ['vehicle', 'fly'] }, { ...d, keywords: ['fly', 'vehicle'] })).toBe(true);
+  });
+
+  it('weapon with a different Anti is a different weapon', () => {
+    const bolt = boltRifle();
+    const anti = { ...bolt, abilities: { ...noAbilities(), anti: { vehicle: 4 } } };
+    const rows: AttackRow[] = [{ id: 'r1', models: 1, weaponId: 'w-bolt' }];
+    expect(sameSnapshot(snapshotRows(rows, [bolt]), snapshotRows(rows, [anti]))).toBe(false);
+    expect(sameSnapshot(snapshotRows(rows, [anti]), snapshotRows(rows, [{ ...anti, abilities: { ...noAbilities(), anti: { vehicle: 4 } } }]))).toBe(true);
   });
 });
 
@@ -179,5 +199,31 @@ describe('weaponUsage', () => {
     expect(weaponUsage('w-bolt', rows)).toBe(2);
     expect(weaponUsage('w-las', rows)).toBe(1);
     expect(weaponUsage('w-none', rows)).toBe(0);
+  });
+});
+
+describe('copies', () => {
+  it('pickStats and copyDefender share no objects with the original', () => {
+    const weapon = { ...boltRifle(), abilities: { ...noAbilities(), anti: { vehicle: 4 } } };
+    const copy = pickStats(weapon);
+    expect(copy.abilities).toEqual(weapon.abilities);
+    expect(copy.abilities).not.toBe(weapon.abilities);
+    expect(copy.abilities.anti).not.toBe(weapon.abilities.anti);
+    copy.abilities.anti.monster = 3;
+    expect(weapon.abilities.anti).toEqual({ vehicle: 4 });
+
+    const d: DefenderProfile = { models: 1, toughness: 10, save: 3, invuln: null, wounds: 12, keywords: ['vehicle'] };
+    const dc = copyDefender(d);
+    expect(dc).toEqual(d);
+    dc.keywords.push('fly');
+    expect(d.keywords).toEqual(['vehicle']);
+  });
+});
+
+describe('defenderSummary', () => {
+  it('lists the keywords when there are any', () => {
+    const d: DefenderProfile = { models: 1, toughness: 10, save: 3, invuln: null, wounds: 12, keywords: [] };
+    expect(defenderSummary(d)).toBe('1 model · T10 · Sv 3+ · W12');
+    expect(defenderSummary({ ...d, keywords: ['vehicle', 'monster'] })).toBe('1 model · T10 · Sv 3+ · W12 · Vehicle, Monster');
   });
 });

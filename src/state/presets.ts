@@ -1,10 +1,15 @@
-import type { AttackRow, DefenderProfile, RowSnapshot, StoredWeapon, WeaponProfile, WeaponStats } from '../types';
+import { KEYWORD_NAMES, copyAbilities, type AttackRow, type DefenderProfile, type RowSnapshot, type StoredWeapon, type WeaponProfile, type WeaponStats } from '../types';
 import { abilitiesSummary, sameAbilities } from './abilities';
 import { uid } from './ids';
 
 /** Copy only the WeaponStats fields (drops `id` and anything else). The abilities are copied too. */
 export function pickStats(w: WeaponStats): WeaponStats {
-  return { name: w.name, attacks: w.attacks, skill: w.skill, strength: w.strength, ap: w.ap, damage: w.damage, abilities: { ...w.abilities } };
+  return { name: w.name, attacks: w.attacks, skill: w.skill, strength: w.strength, ap: w.ap, damage: w.damage, abilities: copyAbilities(w.abilities) };
+}
+
+/** A copy of the defender that shares no arrays with `d`. */
+export function copyDefender(d: DefenderProfile): DefenderProfile {
+  return { ...d, keywords: [...d.keywords] };
 }
 
 /**
@@ -62,7 +67,9 @@ export function sameDefender(a: DefenderProfile, b: DefenderProfile): boolean {
     a.toughness === b.toughness &&
     a.save === b.save &&
     (a.invuln ?? null) === (b.invuln ?? null) &&
-    a.wounds === b.wounds
+    a.wounds === b.wounds &&
+    a.keywords.length === b.keywords.length &&
+    a.keywords.every((k) => b.keywords.includes(k))
   );
 }
 
@@ -130,9 +137,10 @@ export function rowsSummary(rows: RowSnapshot[]): string {
   return rows.map((r) => `${r.models}× ${r.weapon.name}`).join(', ');
 }
 
-/** "10 models · T4 · Sv 3+ · Inv 4+ · W2". */
+/** "10 models · T4 · Sv 3+ · Inv 4+ · W2", plus " · Vehicle, Monster" when it has keywords. */
 export function defenderSummary(d: DefenderProfile): string {
   const save = d.save >= 7 ? 'Sv –' : `Sv ${d.save}+`;
   const invuln = d.invuln === null ? '' : ` · Inv ${d.invuln}+`;
-  return `${d.models} model${d.models === 1 ? '' : 's'} · T${d.toughness} · ${save}${invuln} · W${d.wounds}`;
+  const keywords = d.keywords.length === 0 ? '' : ` · ${d.keywords.map((k) => KEYWORD_NAMES[k]).join(', ')}`;
+  return `${d.models} model${d.models === 1 ? '' : 's'} · T${d.toughness} · ${save}${invuln} · W${d.wounds}${keywords}`;
 }
