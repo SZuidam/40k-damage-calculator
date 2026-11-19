@@ -46,6 +46,8 @@ function inputsValid(): boolean {
 
 function onInputsChanged(): void {
   saveState(state);
+  // The Blast / Cleave extra attacks on the A chips depend on the defender's model count.
+  attackList.refreshStats();
   if (!reordering) reorderNote = '';
   simulateButton.disabled = !inputsValid();
   runStatus.textContent = simulateButton.disabled ? 'Fix the highlighted fields to simulate.' : '';
@@ -142,6 +144,7 @@ const attackList = new AttackList($('weapons'), state.rows, {
   library: state.library,
   onChange: onInputsChanged,
   onLibraryChange: onLibraryChanged,
+  defenderModels: () => state.defender.models,
 });
 const defenderForm = renderDefenderForm($('defender'), state.defender, onInputsChanged);
 

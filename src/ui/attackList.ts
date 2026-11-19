@@ -1,3 +1,4 @@
+import { bonusAttacks } from '../engine/rules';
 import { activeAbilities } from '../state/abilities';
 import { uid } from '../state/ids';
 import { findWeapon, sortedLibrary } from '../state/presets';
@@ -19,6 +20,8 @@ export interface AttackListOptions {
   compact?: boolean;
   /** Rows that can't be removed below this count. Default 1. */
   minRows?: number;
+  /** Models in the defending unit, for the Blast / Cleave extra attacks shown on the A chip. */
+  defenderModels?: () => number;
 }
 
 export function newRow(weaponId: string | null, models = 1): AttackRow {
@@ -32,6 +35,8 @@ export function newRow(weaponId: string | null, models = 1): AttackRow {
 export class AttackList {
   private readonly list: HTMLOListElement;
   private readonly minRows: number;
+  /** Per rendered row: refresh its validation and stat chips. */
+  private updaters: (() => void)[] = [];
 
   constructor(
     container: HTMLElement,
@@ -61,7 +66,13 @@ export class AttackList {
   }
 
   render(): void {
+    this.updaters = [];
     this.list.replaceChildren(...this.rows.map((row, i) => this.row(row, i)));
+  }
+
+  /** Refresh the stat chips without re-rendering (keeps focus), e.g. after the defender changed. */
+  refreshStats(): void {
+    for (const update of this.updaters) update();
   }
 
   private focusRow(index: number, selector: string): void {
@@ -145,7 +156,7 @@ export class AttackList {
       }
       errors.textContent = Object.values(result).join(' · ');
       if (compact) return;
-      chips.replaceChildren(...statChips(weapon));
+      chips.replaceChildren(...statChips(weapon, this.options.defenderModels?.()));
       edit.disabled = !weapon;
       edit.setAttribute('aria-label', weapon ? `Edit ${weapon.name}` : 'Edit weapon profile');
     };
@@ -202,6 +213,7 @@ export class AttackList {
       );
     }
     update();
+    this.updaters.push(update);
     return li;
   }
 }
@@ -214,11 +226,17 @@ const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities'>; label: string
   { key: 'damage', label: 'D', title: 'Damage' },
 ];
 
-function statChips(weapon: WeaponStats | undefined): HTMLElement[] {
+function statChips(weapon: WeaponStats | undefined, defenderModels: number | undefined): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, label), ' ', format ? format(weapon) : String(weapon[key])),
   );
+  const bonus = attacksBonus(weapon, defenderModels);
+  if (bonus) {
+    // The A chip comes first: "A 4+2", with the Blast / Cleave extra attacks in blue.
+    chips[0].append(h('span', { class: 'chip-bonus' }, `+${bonus.value}`));
+    chips[0].title = `Attacks: ${weapon.attacks}, plus ${bonus.value} from ${bonus.sources} (${defenderModels} models in the target unit)`;
+  }
   const abilities = activeAbilities(weapon.abilities);
   if (abilities.length === 0) return chips;
   // Read-only here; abilities are edited in the weapon profile modal (✎).
@@ -228,4 +246,14 @@ function statChips(weapon: WeaponStats | undefined): HTMLElement[] {
     text.append(h('span', { title: description }, label));
   });
   return [...chips, text];
+}
+
+/** Blast / Cleave extra attacks per model against the current defender, or null when there are none. */
+function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined): { value: number; sources: string } | null {
+  if (defenderModels === undefined || !Number.isInteger(defenderModels) || defenderModels < 1) return null;
+  const value = bonusAttacks(weapon, { models: defenderModels });
+  if (value === 0) return null;
+  const { blast, cleave } = weapon.abilities;
+  const sources = [blast === null ? '' : `Blast ${blast}`, cleave === null ? '' : `Cleave ${cleave}`].filter(Boolean).join(' and ');
+  return { value, sources };
 }

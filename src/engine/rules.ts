@@ -60,7 +60,7 @@ export interface AttackContext {
  * (rounded down). The unit size is the one at the start of the attack, as when targets are
  * picked, so models destroyed by earlier weapons in the list don't lower it.
  */
-export function bonusAttacks(weapon: WeaponProfile, defender: DefenderProfile): number {
+export function bonusAttacks(weapon: Pick<WeaponProfile, 'abilities'>, defender: Pick<DefenderProfile, 'models'>): number {
   const perFive = (weapon.abilities.blast ?? 0) + (weapon.abilities.cleave ?? 0);
   return perFive * Math.floor(defender.models / 5);
 }
