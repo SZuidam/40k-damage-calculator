@@ -1,6 +1,6 @@
 import type { DefenderProfile, WeaponProfile } from '../types';
 import { convolve, diceDistribution } from './dice';
-import { createAttackContext, unsavedChance } from './rules';
+import { createAttackContext, unsavedDistribution } from './rules';
 
 /**
  * Exact (noise-free) expectation of the attack sequence.
@@ -8,15 +8,18 @@ import { createAttackContext, unsavedChance } from './rules';
  * The defender is a Markov chain over states (modelsLeft, woundsLeftOnCurrentModel),
  * plus one absorbing "all destroyed" state. Each unsaved wound is one transition
  * driven by the damage PMF. Per weapon, the number of unsaved wounds K has an exact
- * PMF (attack-count PMF thinned by P(unsaved)), so the state after a weapon is
- * Σ_k P(K = k) · T^k(state).
+ * PMF (the per-attack unsaved-wound PMF summed over the random number of attacks),
+ * so the state after a weapon is Σ_k P(K = k) · T^k(state).
  *
  * State vector layout: index 0 = all destroyed, index 1 + (m-1)·W + (w-1) = (m, w).
  */
 export type StateVector = Float64Array;
 
 export interface WeaponKernel {
-  /** unsaved[k] = P(exactly k unsaved wounds from this weapon). */
+  /**
+   * unsaved[k] = P(exactly k unsaved wounds from this weapon) for k below the cap
+   * (models × wounds, after which the unit is gone); the last entry holds P(K ≥ cap).
+   */
   unsaved: number[];
   /** tail[k] = P(at least k unsaved wounds). */
   tail: number[];
@@ -35,33 +38,37 @@ const EPSILON = 1e-15;
 
 export function weaponKernel(weapon: WeaponProfile, defender: DefenderProfile): WeaponKernel {
   const ctx = createAttackContext(weapon, defender);
-  const p = unsavedChance(ctx);
+  const perAttack = unsavedDistribution(ctx);
+  const cap = defender.models * defender.wounds;
 
   const perModel = diceDistribution(ctx.attacks);
   let attacks = [1];
   for (let i = 0; i < weapon.models; i++) attacks = convolve(attacks, perModel);
 
-  // K | N ~ Binomial(N, p); build binomial rows incrementally over N.
-  const unsaved = new Array<number>(attacks.length).fill(0);
+  // K | N = sum of N per-attack counts; build row_n = row_{n-1} * perAttack incrementally.
+  // Anything at or above the cap is lumped into the cap: it destroys the unit either way.
+  let unsaved = [0];
   let row = [1];
   for (let n = 0; n < attacks.length; n++) {
-    if (n > 0) {
-      const next = new Array<number>(n + 1).fill(0);
-      for (let k = 0; k < n; k++) {
-        next[k] += row[k] * (1 - p);
-        next[k + 1] += row[k] * p;
-      }
-      row = next;
-    }
-    const pn = attacks[n];
-    if (pn === 0) continue;
-    for (let k = 0; k <= n; k++) unsaved[k] += pn * row[k];
+    if (n > 0) row = convolveCapped(row, perAttack, cap);
+    if (attacks[n] === 0) continue;
+    if (row.length > unsaved.length) unsaved = [...unsaved, ...new Array<number>(row.length - unsaved.length).fill(0)];
+    for (let k = 0; k < row.length; k++) unsaved[k] += attacks[n] * row[k];
   }
 
   const tail = new Array<number>(unsaved.length + 1).fill(0);
   for (let k = unsaved.length - 1; k >= 0; k--) tail[k] = tail[k + 1] + unsaved[k];
 
   return { unsaved, tail, damage: diceDistribution(ctx.damage) };
+}
+
+/** convolve(a, b) with every value at or above `cap` added into index `cap`. */
+function convolveCapped(a: number[], b: number[], cap: number): number[] {
+  const full = convolve(a, b);
+  if (full.length <= cap + 1) return full;
+  const out = full.slice(0, cap + 1);
+  for (let i = cap + 1; i < full.length; i++) out[cap] += full[i];
+  return out;
 }
 
 export function stateSize(defender: DefenderProfile): number {

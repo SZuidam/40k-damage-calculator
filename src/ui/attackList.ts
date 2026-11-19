@@ -1,3 +1,4 @@
+import { activeAbilities } from '../state/abilities';
 import { uid } from '../state/ids';
 import { findWeapon, sortedLibrary } from '../state/presets';
 import type { AttackRow, StoredWeapon, WeaponStats } from '../types';
@@ -205,7 +206,7 @@ export class AttackList {
   }
 }
 
-const CHIP_LABELS: { key: keyof WeaponStats; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
+const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities'>; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
   { key: 'attacks', label: 'A', title: 'Attacks' },
   { key: 'skill', label: 'BS', title: 'Ballistic / Weapon Skill', format: (w) => `${w.skill}+` },
   { key: 'strength', label: 'S', title: 'Strength' },
@@ -215,7 +216,16 @@ const CHIP_LABELS: { key: keyof WeaponStats; label: string; title: string; forma
 
 function statChips(weapon: WeaponStats | undefined): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
-  return CHIP_LABELS.map(({ key, label, title, format }) =>
+  const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, label), ' ', format ? format(weapon) : String(weapon[key])),
   );
+  const abilities = activeAbilities(weapon.abilities);
+  if (abilities.length === 0) return chips;
+  // Read-only here; abilities are edited in the weapon profile modal (✎).
+  const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
+  abilities.forEach(({ label, description }, i) => {
+    if (i > 0) text.append(', ');
+    text.append(h('span', { title: description }, label));
+  });
+  return [...chips, text];
 }

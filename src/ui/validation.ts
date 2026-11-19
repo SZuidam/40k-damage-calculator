@@ -38,6 +38,7 @@ export function validateWeaponStats(w: WeaponStats): FieldErrors<WeaponStats> {
     strength: intInRange(w.strength, LIMITS.strength, 'Strength'),
     ap: intInRange(w.ap, LIMITS.ap, 'AP'),
     damage: dice(w.damage, 'Damage'),
+    abilities: w.abilities.sustainedHits === null ? undefined : dice(w.abilities.sustainedHits, 'Sustained Hits'),
   };
   return prune(errors);
 }

@@ -1,13 +1,14 @@
 import type { AttackRow, DefenderProfile, RowSnapshot, StoredWeapon, WeaponProfile, WeaponStats } from '../types';
+import { abilitiesSummary, sameAbilities } from './abilities';
 import { uid } from './ids';
 
-/** Copy only the WeaponStats fields (drops `id` and anything else). */
+/** Copy only the WeaponStats fields (drops `id` and anything else). The abilities are copied too. */
 export function pickStats(w: WeaponStats): WeaponStats {
-  return { name: w.name, attacks: w.attacks, skill: w.skill, strength: w.strength, ap: w.ap, damage: w.damage };
+  return { name: w.name, attacks: w.attacks, skill: w.skill, strength: w.strength, ap: w.ap, damage: w.damage, abilities: { ...w.abilities } };
 }
 
 /**
- * Whether two weapons fire the same: every stat except the name. A renamed library
+ * Whether two weapons fire the same: every stat and ability except the name. A renamed library
  * profile is still the same weapon, so it neither makes a preset dirty nor duplicates
  * itself when a preset is loaded.
  */
@@ -17,7 +18,8 @@ export function sameCombatStats(a: WeaponStats, b: WeaponStats): boolean {
     a.skill === b.skill &&
     a.strength === b.strength &&
     a.ap === b.ap &&
-    a.damage.trim().toUpperCase() === b.damage.trim().toUpperCase()
+    a.damage.trim().toUpperCase() === b.damage.trim().toUpperCase() &&
+    sameAbilities(a.abilities, b.abilities)
   );
 }
 
@@ -117,9 +119,10 @@ export function sortedLibrary(library: StoredWeapon[]): StoredWeapon[] {
   return [...library].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 }
 
-/** Short stats line: "A 2 · BS 3+ · S 4 · AP -1 · D 1". */
+/** Short stats line: "A 2 · BS 3+ · S 4 · AP -1 · D 1", plus " · Lethal Hits, …" when it has abilities. */
 export function statsSummary(w: WeaponStats): string {
-  return `A ${w.attacks} · BS ${w.skill}+ · S ${w.strength} · AP ${w.ap} · D ${w.damage}`;
+  const abilities = abilitiesSummary(w.abilities);
+  return `A ${w.attacks} · BS ${w.skill}+ · S ${w.strength} · AP ${w.ap} · D ${w.damage}${abilities ? ` · ${abilities}` : ''}`;
 }
 
 /** "10× Bolt rifle, 1× Plasma gun". */

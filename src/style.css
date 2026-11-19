@@ -298,6 +298,26 @@ select[aria-invalid='true'] {
   font-size: 0.82rem;
 }
 
+/* Read-only ability keywords under the stat chips. */
+.row-abilities {
+  flex-basis: 100%;
+  padding-left: 2px;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .row-actions {
   display: flex;
   gap: 4px;
@@ -856,7 +876,60 @@ dialog.modal::backdrop {
   gap: 8px;
 }
 
+.ability-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field--abilities select {
+  max-width: 240px;
+}
+
+.ability-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ability-chip {
+  align-items: center;
+  gap: 4px;
+  padding-right: 3px;
+}
+
+.ability-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.ability-remove:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.ability-empty {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 @media (max-width: 480px) {
+  .field--abilities select {
+    max-width: none;
+  }
   .weapon-stats-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

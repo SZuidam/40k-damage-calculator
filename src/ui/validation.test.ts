@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { StoredWeapon, WeaponStats } from '../types';
+import { noAbilities, type StoredWeapon, type WeaponStats } from '../types';
 import { validateRow, validateWeaponStats } from './validation';
 
-const stats: WeaponStats = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' };
+const stats: WeaponStats = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
 const library: StoredWeapon[] = [
   { ...stats, id: 'w-ok' },
   { ...stats, id: 'w-bad', name: 'Broken', attacks: 'D7' },
@@ -19,8 +19,13 @@ describe('validateWeaponStats', () => {
   });
 
   it('flags each invalid stat', () => {
-    const errors = validateWeaponStats({ name: 'X', attacks: '', skill: 7, strength: 31, ap: 1, damage: '2D' });
-    expect(Object.keys(errors).sort()).toEqual(['ap', 'attacks', 'damage', 'skill', 'strength']);
+    const abilities = { ...noAbilities(), sustainedHits: 'D7' };
+    const errors = validateWeaponStats({ name: 'X', attacks: '', skill: 7, strength: 31, ap: 1, damage: '2D', abilities });
+    expect(Object.keys(errors).sort()).toEqual(['abilities', 'ap', 'attacks', 'damage', 'skill', 'strength']);
+  });
+
+  it('accepts abilities with a valid Sustained Hits value', () => {
+    expect(validateWeaponStats({ ...stats, abilities: { lethalHits: true, sustainedHits: '2', devastatingWounds: true } })).toEqual({});
   });
 });
 

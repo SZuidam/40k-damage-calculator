@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AttackPreset, AttackRow, StoredWeapon } from '../types';
+import { noAbilities, type AttackPreset, type AttackRow, type StoredWeapon } from '../types';
 import {
   materialiseRows,
   resolveRows,
@@ -9,8 +9,9 @@ import {
   weaponUsage,
 } from './presets';
 
-const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' });
-const lascannon = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1' });
+const none = noAbilities();
+const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
+const lascannon = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: noAbilities() });
 
 function setup() {
   const library = [boltRifle(), lascannon()];
@@ -26,9 +27,9 @@ describe('resolveRows', () => {
   it('turns rows into engine profiles with the row id and the library name', () => {
     const { library, rows } = setup();
     expect(resolveRows(rows, library)).toEqual([
-      { id: 'r1', name: 'Bolt rifle', models: 10, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' },
-      { id: 'r2', name: 'Lascannon', models: 1, attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1' },
-      { id: 'r3', name: 'Bolt rifle', models: 5, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' },
+      { id: 'r1', name: 'Bolt rifle', models: 10, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none },
+      { id: 'r2', name: 'Lascannon', models: 1, attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: none },
+      { id: 'r3', name: 'Bolt rifle', models: 5, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none },
     ]);
   });
 
@@ -47,7 +48,7 @@ describe('snapshots', () => {
   it('round trips: a snapshot materialises back into the same attack and library', () => {
     const { library, rows } = setup();
     const snap = snapshotRows(rows, library);
-    expect(snap[0]).toEqual({ models: 10, weaponId: 'w-bolt', weapon: { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' } });
+    expect(snap[0]).toEqual({ models: 10, weaponId: 'w-bolt', weapon: { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none } });
     expect(snap[0].weapon).not.toHaveProperty('id');
 
     const loaded = materialiseRows(snap, library, 'Intercessors');
@@ -76,6 +77,19 @@ describe('snapshots', () => {
     expect(sameSnapshot(snapshotRows([{ ...rows[0], models: 9 }, rows[1], rows[2]], library), saved)).toBe(false);
     expect(sameSnapshot(snapshotRows([rows[1], rows[0], rows[2]], library), saved)).toBe(false);
     expect(sameSnapshot(snapshotRows(rows.slice(0, 2), library), saved)).toBe(false);
+  });
+
+  it('treats an ability change as a change, and keeps the preset copy of the abilities', () => {
+    const { library, rows } = setup();
+    const saved = snapshotRows(rows, library);
+    library[0].abilities.lethalHits = true;
+    expect(saved[0].weapon.abilities.lethalHits).toBe(false);
+    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
+    library[0].abilities = { ...none, sustainedHits: '1' };
+    const sustained = snapshotRows(rows, library);
+    expect(sameSnapshot(sustained, saved)).toBe(false);
+    library[0].abilities = { ...none, sustainedHits: ' 1 ' };
+    expect(sameSnapshot(snapshotRows(rows, library), sustained)).toBe(true);
   });
 
   it('ignores a rename of the library profile', () => {

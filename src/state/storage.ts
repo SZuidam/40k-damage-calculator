@@ -1,4 +1,4 @@
-import type { AttackPreset, AttackRow, DefenderPreset, DefenderProfile, RowSnapshot, StoredWeapon, UnitPreset, WeaponStats } from '../types';
+import { noAbilities, type AttackPreset, type AttackRow, type DefenderPreset, type DefenderProfile, type RowSnapshot, type StoredWeapon, type UnitPreset, type WeaponAbilities, type WeaponStats } from '../types';
 import { uid } from './ids';
 import { pickStats, sameCombatStats } from './presets';
 
@@ -29,7 +29,7 @@ export function defaultDefender(): DefenderProfile {
 
 /** One "Bolt rifle" profile fired by 10 models into 10 MEQ, the same loadout as v1. */
 export function defaultState(): StoredState {
-  const boltRifle: StoredWeapon = { id: uid('weapon'), name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' };
+  const boltRifle: StoredWeapon = { id: uid('weapon'), name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
   return {
     library: [boltRifle],
     rows: [{ id: uid('row'), models: 10, weaponId: boltRifle.id }],
@@ -157,7 +157,26 @@ function toWeaponStats(value: unknown): WeaponStats | null {
   if (!isRecord(value)) return null;
   const { name, attacks, damage } = value;
   if (typeof name !== 'string' || typeof attacks !== 'string' || typeof damage !== 'string') return null;
-  return pickStats({ name, attacks, damage, skill: num(value.skill, 3), strength: num(value.strength, 4), ap: num(value.ap, 0) });
+  return pickStats({
+    name,
+    attacks,
+    damage,
+    skill: num(value.skill, 3),
+    strength: num(value.strength, 4),
+    ap: num(value.ap, 0),
+    abilities: toAbilities(value.abilities),
+  });
+}
+
+/** Weapons saved before abilities existed (and v1 weapons) have none. */
+function toAbilities(value: unknown): WeaponAbilities {
+  const a = noAbilities();
+  if (!isRecord(value)) return a;
+  return {
+    lethalHits: value.lethalHits === true,
+    sustainedHits: typeof value.sustainedHits === 'string' && value.sustainedHits.trim() !== '' ? value.sustainedHits : a.sustainedHits,
+    devastatingWounds: value.devastatingWounds === true,
+  };
 }
 
 function toStoredWeapon(value: unknown): StoredWeapon | null {

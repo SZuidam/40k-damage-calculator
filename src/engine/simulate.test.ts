@@ -62,6 +62,35 @@ describe('simulate', () => {
     14,
   );
   compareWithExact('mixed loadout into a vehicle', [plasma, multiMelta, lascannon], defender(1, 10, 3, 12), 15);
+
+  it('counts Sustained Hits extra hits and Lethal Hits auto-wounds in the step averages', () => {
+    // 10 attacks, BS 3+, S4 vs T4: hits = 4/6 + 1/6 extra; wounds = 3/6 · 1/2 + 1/6 (auto) + 1/6 · 1/2 (extra hit)
+    const sim = simulate(
+      [weapon('Gun', 10, '1', 3, 4, 0, '1', { lethalHits: true, sustainedHits: '1' })],
+      defender(20, 4, 3, 1),
+      ITERATIONS,
+      mulberry32(21),
+    );
+    expectClose(sim.total.hits, 10 * (5 / 6));
+    expectClose(sim.total.wounds, 10 * ((3 / 6) * (1 / 2) + 1 / 6 + (1 / 6) * (1 / 2)));
+  });
+
+  it('Devastating Wounds ignores even a 2+ invulnerable save on a critical wound', () => {
+    const sim = simulate([weapon('Gun', 10, '1', 2, 4, 0, '1', { devastatingWounds: true })], defender(20, 4, 2, 1, 2), ITERATIONS, mulberry32(22));
+    // hit 5/6; wound faces 4 and 5 are saved on 2+ (fail 1/6); face 6 is never saved
+    expectClose(sim.total.unsaved, 10 * (5 / 6) * ((2 / 6) * (1 / 6) + 1 / 6));
+  });
+
+  compareWithExact('Lethal Hits', [weapon('Lethal', 5, '3', 4, 4, -1, '2', { lethalHits: true })], defender(5, 8, 3, 3), 16);
+  compareWithExact('Sustained Hits 2', [weapon('Sustained', 5, '2', 3, 5, 0, 'D3', { sustainedHits: '2' })], defender(10, 4, 3, 2), 17);
+  compareWithExact('Devastating Wounds', [weapon('Devastating', 3, 'D6', 3, 6, -1, '2', { devastatingWounds: true })], defender(5, 6, 2, 3, 4), 18);
+  compareWithExact(
+    'all three abilities with carry-over',
+    [weapon('All', 4, '3', 3, 4, -1, 'D3', { lethalHits: true, sustainedHits: '1', devastatingWounds: true }), heavyBolter, lascannon],
+    gravis,
+    19,
+  );
+  compareWithExact('Sustained Hits D3', [weapon('Sustained D3', 4, '2', 4, 4, 0, '1', { sustainedHits: 'D3' })], defender(10, 4, 4, 1), 20);
 });
 
 describe('atLeast', () => {

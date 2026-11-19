@@ -1,3 +1,20 @@
+/**
+ * Weapon abilities that change the attack sequence. A critical hit / wound is an
+ * unmodified roll of 6.
+ */
+export interface WeaponAbilities {
+  /** Lethal Hits: a critical hit wounds automatically (no wound roll). */
+  lethalHits: boolean;
+  /** Sustained Hits X: a critical hit scores X extra hits, as a dice expression; null for none. */
+  sustainedHits: string | null;
+  /** Devastating Wounds: a critical wound can't be saved (armour or invulnerable). */
+  devastatingWounds: boolean;
+}
+
+export function noAbilities(): WeaponAbilities {
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false };
+}
+
 /** The stats of a weapon profile, without the number of models firing it. */
 export interface WeaponStats {
   name: string;
@@ -10,6 +27,7 @@ export interface WeaponStats {
   ap: number;
   /** Damage per unsaved wound, as a dice expression. */
   damage: string;
+  abilities: WeaponAbilities;
 }
 
 /** A weapon profile in the user's library. */
@@ -66,6 +84,7 @@ export interface WeaponProfile {
   ap: number;
   /** Damage per unsaved wound, as a dice expression. */
   damage: string;
+  abilities: WeaponAbilities;
 }
 
 export interface DefenderProfile {

@@ -14,10 +14,27 @@ describe('weaponKernel', () => {
   });
 
   it('handles random attack counts', () => {
-    // E[attacks] = 2 · 3.5 = 7; hit on 2+ (5/6), wound on 4+ (1/2), no save
-    const kernel = weaponKernel(weapon('Flamer', 2, 'D6', 2, 4, 0, '1'), defender(10, 4, 7, 1));
+    // E[attacks] = 2 · 3.5 = 7; hit on 2+ (5/6), wound on 4+ (1/2), no save. 20 wounds > 12 attacks: no cap.
+    const kernel = weaponKernel(weapon('Flamer', 2, 'D6', 2, 4, 0, '1'), defender(20, 4, 7, 1));
     const mean = kernel.unsaved.reduce((sum, p, k) => sum + p * k, 0);
     expect(mean).toBeCloseTo(7 * (5 / 6) * (1 / 2), 10);
+  });
+
+  it('lumps unsaved wounds at or above models × wounds into the last entry', () => {
+    // 10 attacks into 1×W2 (cap 2); each is unsaved with p = 5/6 · 5/6 (Sv 3+ with AP -6 always fails)
+    const kernel = weaponKernel(weapon('Overkill', 10, '1', 2, 20, -6, '1'), defender(1, 4, 3, 2));
+    const p = 25 / 36;
+    expect(kernel.unsaved).toHaveLength(3);
+    expect(kernel.unsaved[2]).toBeCloseTo(1 - (1 - p) ** 10 - 10 * p * (1 - p) ** 9, 12);
+    expect(kernel.unsaved.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+  });
+
+  it('includes Sustained Hits extra wounds', () => {
+    // 6 attacks; E[unsaved per attack] = 5/6 · 1/6 (see rules.test.ts)
+    const kernel = weaponKernel(weapon('Gun', 6, '1', 3, 4, 0, '1', { sustainedHits: '1' }), defender(20, 4, 3, 1));
+    const mean = kernel.unsaved.reduce((sum, p, k) => sum + p * k, 0);
+    expect(kernel.unsaved).toHaveLength(13);
+    expect(mean).toBeCloseTo(6 * (5 / 6) * (1 / 6), 12);
   });
 });
 

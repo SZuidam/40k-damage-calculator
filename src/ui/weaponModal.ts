@@ -1,10 +1,11 @@
+import { ABILITY_CHOICES, activeAbilities, withoutAbility } from '../state/abilities';
 import { pickStats } from '../state/presets';
-import type { WeaponStats } from '../types';
+import { noAbilities, type WeaponStats } from '../types';
 import { AP_OPTIONS, SKILL_OPTIONS, field, h, numberValue, select, setFieldError } from './dom';
 import { openModal } from './modal';
 import { MAX_WEAPON_NAME, hasErrors, validateWeaponStats } from './validation';
 
-const NEW_WEAPON: WeaponStats = { name: '', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1' };
+const NEW_WEAPON: WeaponStats = { name: '', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() };
 
 let modalCounter = 0;
 
@@ -30,8 +31,10 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
       const strength = h('input', { id: id('strength'), type: 'number', inputmode: 'numeric', min: 1, max: 30, value: draft.strength });
       const ap = select({ id: id('ap') }, AP_OPTIONS, draft.ap);
       const damage = h('input', { id: id('damage'), type: 'text', value: draft.damage, autocomplete: 'off', spellcheck: 'false', class: 'dice' });
+      const abilitySelect = h('select', { id: id('abilities'), class: 'ability-add' });
+      const abilityList = h('ul', { class: 'ability-list', 'aria-label': 'Abilities of this weapon' });
       const errors = h('p', { class: 'row-errors', id: id('errors'), 'aria-live': 'polite' });
-      const controls = { name, attacks, skill, strength, ap, damage };
+      const controls = { name, attacks, skill, strength, ap, damage, abilities: abilitySelect };
 
       const cancel = h('button', { type: 'button', class: 'button secondary' }, 'Cancel');
       const save = h('button', { type: 'submit', class: 'button primary' }, initial ? 'Save' : 'Create');
@@ -71,11 +74,48 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
       bind(ap, () => (draft.ap = numberValue(ap)));
       bind(damage, () => (draft.damage = damage.value));
 
+      // Abilities: an "Add ability…" dropdown plus a removable chip per ability.
+      const renderAbilities = () => {
+        const active = activeAbilities(draft.abilities);
+        abilityList.replaceChildren(
+          ...(active.length === 0
+            ? [h('li', { class: 'ability-empty' }, 'No abilities')]
+            : active.map(({ key, label, description }) => {
+                const remove = h('button', { type: 'button', class: 'ability-remove', 'aria-label': `Remove ${label}`, title: 'Remove' }, '✕');
+                remove.addEventListener('click', () => {
+                  draft.abilities = withoutAbility(draft.abilities, key);
+                  renderAbilities();
+                  validate();
+                  abilitySelect.focus();
+                });
+                return h('li', { class: 'chip ability-chip', title: description }, h('span', {}, label), remove);
+              })),
+        );
+        const choices = ABILITY_CHOICES.filter((c) => !c.isActive(draft.abilities));
+        abilitySelect.replaceChildren(
+          h('option', { value: '' }, choices.length > 0 ? 'Add ability…' : 'All abilities added'),
+          ...choices.map((c) => h('option', { value: c.value, title: c.description }, c.label)),
+        );
+        abilitySelect.value = '';
+        abilitySelect.disabled = choices.length === 0;
+      };
+      abilitySelect.addEventListener('change', () => {
+        const choice = ABILITY_CHOICES.find((c) => c.value === abilitySelect.value);
+        if (!choice) return;
+        draft.abilities = choice.apply(draft.abilities);
+        renderAbilities();
+        validate();
+        if (abilitySelect.disabled) abilityList.querySelector<HTMLButtonElement>('.ability-remove')?.focus();
+        else abilitySelect.focus();
+      });
+      renderAbilities();
+
       const form = h(
         'form',
         { class: 'modal-body', novalidate: true },
         field('Name', name, 'field--name'),
         h('div', { class: 'weapon-stats-grid' }, field('A', attacks), field('BS/WS', skill), field('S', strength), field('AP', ap), field('D', damage)),
+        h('div', { class: 'ability-editor' }, field('Abilities', abilitySelect, 'field--abilities'), abilityList),
         errors,
         h('p', { class: 'modal-hint' }, 'A and D take dice expressions: 3, D3, D6, 2D6, D6+1.'),
         h('div', { class: 'modal-actions' }, cancel, save),
@@ -84,7 +124,8 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
         event.preventDefault();
         nameTouched = true;
         if (hasErrors(validate())) return;
-        close({ ...draft, name: draft.name.trim(), attacks: draft.attacks.trim(), damage: draft.damage.trim() });
+        const sustainedHits = draft.abilities.sustainedHits?.trim() ?? null;
+        close({ ...draft, name: draft.name.trim(), attacks: draft.attacks.trim(), damage: draft.damage.trim(), abilities: { ...draft.abilities, sustainedHits } });
       });
       validate();
       return form;

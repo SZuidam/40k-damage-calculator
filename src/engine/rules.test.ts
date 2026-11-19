@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { IMPOSSIBLE, createAttackContext, hitChance, rollSucceeds, saveChance, saveTarget, unsavedChance, woundChance, woundTarget } from './rules';
+import type { WeaponAbilities } from '../types';
+import {
+  IMPOSSIBLE,
+  createAttackContext,
+  hitChance,
+  isCriticalHit,
+  isCriticalWound,
+  rollSucceeds,
+  saveChance,
+  saveTarget,
+  unsavedDistribution,
+  unsavedPerAttack,
+  woundChance,
+  woundTarget,
+} from './rules';
+import { weapon } from './testFixtures';
 
 describe('woundTarget', () => {
   it.each([
@@ -44,15 +59,66 @@ describe('rollSucceeds', () => {
 });
 
 describe('step chances', () => {
-  const ctx = createAttackContext(
-    { id: 'a', name: 'Bolt rifle', models: 10, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' },
-    { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 },
-  );
+  const ctx = createAttackContext(weapon('Bolt rifle', 10, '2', 3, 4, -1, '1'), { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 });
 
   it('computes each step from the six die faces', () => {
     expect(hitChance(ctx)).toBeCloseTo(4 / 6);
     expect(woundChance(ctx)).toBeCloseTo(3 / 6);
     expect(saveChance(ctx)).toBeCloseTo(3 / 6);
-    expect(unsavedChance(ctx)).toBeCloseTo((4 / 6) * (3 / 6) * (3 / 6));
+    const p = (4 / 6) * (3 / 6) * (3 / 6);
+    const pmf = unsavedDistribution(ctx);
+    expect(pmf).toHaveLength(2);
+    expect(pmf[0]).toBeCloseTo(1 - p, 12);
+    expect(pmf[1]).toBeCloseTo(p, 12);
+  });
+});
+
+describe('abilities', () => {
+  // BS 3+, S4 vs T4 (4+), Sv 3+ with AP 0: a hit that rolls to wound is unsaved with q = 1/2 · 1/3 = 1/6.
+  const marines = { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2 };
+  const ctxWith = (abilities: Partial<WeaponAbilities>) => createAttackContext(weapon('Gun', 1, '1', 3, 4, 0, '1', abilities), marines);
+
+  it('treats only a successful unmodified 6 as critical', () => {
+    const ctx = ctxWith({});
+    expect([1, 2, 3, 4, 5, 6].filter((r) => isCriticalHit(ctx, r))).toEqual([6]);
+    expect([1, 2, 3, 4, 5, 6].filter((r) => isCriticalWound(ctx, r))).toEqual([6]);
+  });
+
+  it('Lethal Hits: a critical hit skips the wound roll', () => {
+    // 3 normal hit faces · 1/6 + 1 critical face · P(save fails) 1/3
+    expect(unsavedPerAttack(ctxWith({ lethalHits: true }))).toBeCloseTo((3 / 6) * (1 / 6) + (1 / 6) * (1 / 3), 12);
+    expect(unsavedPerAttack(ctxWith({}))).toBeCloseTo((4 / 6) * (1 / 6), 12);
+  });
+
+  it('Devastating Wounds: a critical wound skips the save', () => {
+    // wound faces 4 and 5 → unsaved 1/3; face 6 → always unsaved
+    const q = (2 / 6) * (1 / 3) + 1 / 6;
+    expect(unsavedPerAttack(ctxWith({ devastatingWounds: true }))).toBeCloseTo((4 / 6) * q, 12);
+  });
+
+  it('Lethal Hits auto-wounds are not critical wounds, so Devastating Wounds does not trigger on them', () => {
+    const q = (2 / 6) * (1 / 3) + 1 / 6;
+    const expected = (3 / 6) * q + (1 / 6) * (1 / 3);
+    expect(unsavedPerAttack(ctxWith({ lethalHits: true, devastatingWounds: true }))).toBeCloseTo(expected, 12);
+  });
+
+  it('Sustained Hits 1: a critical hit adds one hit that rolls to wound', () => {
+    const pmf = unsavedDistribution(ctxWith({ sustainedHits: '1' }));
+    // A critical hit gives two independent q = 1/6 chances: P(2) = 1/6 · 1/36.
+    expect(pmf).toHaveLength(3);
+    expect(pmf[2]).toBeCloseTo(1 / 216, 12);
+    expect(pmf[1]).toBeCloseTo((3 / 6) * (1 / 6) + (1 / 6) * (10 / 36), 12);
+    expect(pmf.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(unsavedPerAttack(ctxWith({ sustainedHits: '1' }))).toBeCloseTo((5 / 6) * (1 / 6), 12);
+  });
+
+  it('Sustained Hits 2 with Lethal Hits: the critical hit auto-wounds and both extra hits roll to wound', () => {
+    const mean = unsavedPerAttack(ctxWith({ sustainedHits: '2', lethalHits: true }));
+    expect(mean).toBeCloseTo((3 / 6) * (1 / 6) + (1 / 6) * (1 / 3 + 2 * (1 / 6)), 12);
+  });
+
+  it('supports a dice expression for Sustained Hits', () => {
+    // E[D3] = 2 extra hits per critical hit
+    expect(unsavedPerAttack(ctxWith({ sustainedHits: 'D3' }))).toBeCloseTo((4 / 6) * (1 / 6) + (1 / 6) * 2 * (1 / 6), 12);
   });
 });

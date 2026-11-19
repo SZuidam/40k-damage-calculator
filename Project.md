@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (106 tests, about 3 s)
+- `npm test`: Vitest, run once (131 tests, about 3 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -35,6 +35,7 @@ src/
   state/                pure, DOM-free, unit-tested
     ids.ts              uid()
     storage.ts          loadState / saveState (key damage-calculator:v2), v1 migration, shape checks, defaults
+    abilities.ts        ability labels, "Add ability…" choices, sameAbilities
     presets.ts          resolveRows, snapshotRows, sameSnapshot, sameDefender, materialiseRows, weaponUsage, helpers
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
@@ -55,13 +56,18 @@ src/
 - **Wound:** S ≥ 2T → 2+, S > T → 3+, S = T → 4+, S < T → 5+, T ≥ 2S → 6+. An unmodified 1 always fails.
 - **Save:** armour target = Sv + |AP| (AP is entered as 0 or a negative number). Effective target = min(armour, Inv), and AP does not affect Inv. A target above 6 fails automatically (`IMPOSSIBLE = 7`). Sv 7 means no armour save. An unmodified 1 always fails.
 - **Damage:** rolled separately for each failed save. Applied damage = min(damage, wounds left on the current model), and any excess is lost. The next failed save goes to the next model, which has full wounds. A partly wounded model carries over between weapons.
+- **Critical hit / critical wound:** an unmodified roll of 6 that succeeds (`ctx.criticalHit` / `ctx.criticalWound`, both 6 for now).
+- **Lethal Hits:** a critical hit wounds automatically; there is no wound roll. That auto-wound is **not** a critical wound, so Devastating Wounds can't trigger on it.
+- **Sustained Hits X:** a critical hit scores X extra hits (X is stored as a dice expression; the UI offers 1 and 2 for now). The extra hits roll to wound normally. With Lethal Hits as well, the critical hit itself auto-wounds and only the extra hits roll.
+- **Devastating Wounds:** a critical wound skips the saving throw (armour and invulnerable). Damage is applied as normal (excess lost, no spill-over), as per the current rules rather than the old mortal-wounds version.
 - When every defending model is destroyed, damage stops being applied. Hits, wounds and unsaved wounds are still counted, so the per-step stats show the weapon's full output.
 - **Weapon order:** weapons resolve top to bottom. The user can reorder them, and the "Optimise order" button can reorder them for the user.
 
 ## Inputs
 
-- **Weapon profile** (library, edited in a modal): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression).
-- **Attack row:** models + a weapon picked from the library. The row's stats are read-only chips; ✎ edits the linked profile.
+- **Weapon profile** (library, edited in a modal): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression), abilities.
+- **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits: string | null, devastatingWounds }`): in the modal an "Add ability…" dropdown plus a removable chip per ability. Choosing another Sustained Hits value replaces the current one. The options live in `state/abilities.ts` (`ABILITY_CHOICES`, `SUSTAINED_HITS_VALUES = ['1', '2']`: extend there for D3/D6 and higher numbers; the engine already handles any dice expression).
+- **Attack row:** models + a weapon picked from the library. The row's stats are read-only chips with the abilities as read-only text below them; ✎ edits the linked profile.
 - **Defender:** models, T, Sv (2–6, or 7 for none), Inv (none or 2–6), W.
 - **Dice expressions:** `3`, `D3`, `D6`, `2D6`, `D6+1`, `2D3+2`. Case and spaces don't matter. Only **D3 and D6** are allowed, only a **`+` bonus** (no minus), at most 20 dice, and constants from 1 to 200.
 - **Limits** (`ui/validation.ts`): weapon models 1–50, S 1–30, defender models 1–40, T 1–20, W 1–40, **models × wounds ≤ 400** (keeps the exact engine responsive), iterations 100 to 1,000,000 (default 10,000).
@@ -72,7 +78,7 @@ src/
 - **simulate.ts:** each iteration rolls attacks per model, then hit, wound, save and damage per attack, and tracks `modelsLeft` and `woundsLeft`. It returns per-weapon and total averages, `killDistribution` (P(exactly k)) and `killAtLeast` (P(≥k)). It runs synchronously on the main thread (about 20 ms for 10k iterations). Move it to a Web Worker only if it gets slow.
 - **exact.ts:**
   - The defender is a Markov chain over (modelsLeft, woundsLeftOnCurrent), plus an absorbing "all destroyed" state. The state vector's index 0 is "all destroyed", and index `1 + (m-1)·W + (w-1)` is the state (m, w).
-  - For each weapon, the number of unsaved wounds K has an exact distribution: the attack-count distribution thinned binomially by P(unsaved).
+  - For each weapon, the number of unsaved wounds K has an exact distribution: the per-attack unsaved-wound PMF (`rules.unsavedDistribution`, which covers Lethal / Sustained / Devastating) summed over the random number of attacks. Values at or above models × W are lumped into the last entry (the unit is gone either way), which keeps the kernel at most 401 entries long.
   - The state after a weapon is Σ P(K=k)·T^k(state). The loop stops early once all probability is in the "destroyed" state or k ≥ models×W.
   - The results are noise-free, so the optimiser uses them, and the tests use them as an oracle for the simulation.
 - **optimise.ts:**
@@ -132,6 +138,13 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 **Session 2 (library and presets):** `npm test` 106/106 (the 77 engine tests unchanged, plus `state/presets.test.ts`, `state/storage.test.ts` and `ui/validation.test.ts`). `npm run build` is clean. Checked in Chrome: v1 → v2 migration with dedupe; "+ New weapon profile…" from a row select, with validation; ✎ updates every row using the profile; a saved preset turns "(modified)" after a library edit, and reloading it brings the old stats back as `Bolt rifles (Squad A)`; defender presets, including the discard prompt; a unit created from the current attack and appended; delete blocked for in-use profiles; Optimise order reorders rows; Simulate gives 20 / 13.33 / 6.67 / 3.33 for 10 bolt rifles into 10 MEQ, the same as v1; dark, light and 390px, including the modals; no console errors.
 
+## Weapon abilities (session 3, 2026-11-19)
+
+- `abilities` is a required field on `WeaponStats` and `WeaponProfile`. Storage fills in "no abilities" for weapons saved before (library, presets, v1 migration) and repairs malformed values, so the storage key stays `damage-calculator:v2`.
+- `sameCombatStats` compares abilities too: an ability change makes a preset "(modified)", and loading a preset whose weapon differs only in abilities creates a `Name (preset)` copy.
+- `statsSummary` (library modal) appends the abilities. Results count Sustained Hits extra hits under Hits, and Lethal Hits auto-wounds under Wounds.
+- `npm test` 131/131 (new: ability rules against hand calculations, sim vs exact for each ability and a combined loadout, the kernel cap, storage, presets, validation, `state/abilities.test.ts`). `npm run build` is clean. Checked in Chrome: add, replace (SH1 → SH2), remove, save, read-only row text, localStorage, and 10 bolt rifles with all three abilities into 10 MEQ: hits 16.67, wounds 9.97 (expected 10.0), unsaved 6.08 (expected 6.11); no console errors.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -139,7 +152,8 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## Ideas for next steps
 
-- Abilities through the `AttackContext` step functions: hit/wound modifiers, rerolls (1s or all), Lethal Hits, Sustained Hits, Devastating Wounds, Anti-X, Twin-linked, Torrent, Feel No Pain, damage reduction, cover.
+- More Sustained Hits values (3–6, D3, D6): only `SUSTAINED_HITS_VALUES` needs to grow.
+- More abilities through the `AttackContext` step functions: hit/wound modifiers, rerolls (1s or all), Anti-X (lowers `criticalWound`), Twin-linked, Torrent, Feel No Pain, damage reduction, cover.
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - Import/export of the library and presets as JSON (they only live in this browser's localStorage).

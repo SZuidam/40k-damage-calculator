@@ -1,7 +1,7 @@
 import { emptyStats, type DefenderProfile, type SimulationResult, type StepStats, type WeaponProfile } from '../types';
 import { rollDice } from './dice';
 import { d6, defaultRng, type Rng } from './rng';
-import { createAttackContext, hitSucceeds, saveSucceeds, woundSucceeds } from './rules';
+import { createAttackContext, hitSucceeds, isCriticalHit, isCriticalWound, saveSucceeds, woundSucceeds } from './rules';
 
 /**
  * Monte Carlo simulation of the attack sequence. Weapons resolve in the given
@@ -32,21 +32,37 @@ export function simulate(
         s.attacks += attacks;
 
         for (let a = 0; a < attacks; a++) {
-          if (!hitSucceeds(ctx, d6(rng))) continue;
-          s.hits++;
-          if (!woundSucceeds(ctx, d6(rng))) continue;
-          s.wounds++;
-          if (saveSucceeds(ctx, d6(rng))) continue;
-          s.unsaved++;
-          if (modelsLeft === 0) continue;
+          const hitRoll = d6(rng);
+          if (!hitSucceeds(ctx, hitRoll)) continue;
+          const critical = isCriticalHit(ctx, hitRoll);
+          // Sustained Hits: a critical hit scores extra hits, which roll to wound normally.
+          const extraHits = critical && ctx.sustainedHits !== null ? rollDice(ctx.sustainedHits, rng) : 0;
+          // Lethal Hits: the critical hit itself wounds automatically (not a critical wound).
+          const autoWounds = critical && ctx.lethalHits ? 1 : 0;
+          const hits = 1 + extraHits;
+          s.hits += hits;
 
-          const applied = Math.min(rollDice(ctx.damage, rng), woundsLeft);
-          s.damage += applied;
-          woundsLeft -= applied;
-          if (woundsLeft === 0) {
-            s.modelsDestroyed++;
-            modelsLeft--;
-            woundsLeft = defender.wounds;
+          for (let h = 0; h < hits; h++) {
+            let devastating = false;
+            if (h >= autoWounds) {
+              const woundRoll = d6(rng);
+              if (!woundSucceeds(ctx, woundRoll)) continue;
+              devastating = ctx.devastatingWounds && isCriticalWound(ctx, woundRoll);
+            }
+            s.wounds++;
+            // Devastating Wounds: no saving throw of any kind.
+            if (!devastating && saveSucceeds(ctx, d6(rng))) continue;
+            s.unsaved++;
+            if (modelsLeft === 0) continue;
+
+            const applied = Math.min(rollDice(ctx.damage, rng), woundsLeft);
+            s.damage += applied;
+            woundsLeft -= applied;
+            if (woundsLeft === 0) {
+              s.modelsDestroyed++;
+              modelsLeft--;
+              woundsLeft = defender.wounds;
+            }
           }
         }
       }
