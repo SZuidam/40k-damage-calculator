@@ -134,7 +134,8 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## Housekeeping
 
-- The git repo has its first commit (`81ecae2`). `bash.exe.stackdump` (a Git Bash crash dump) got committed by accident. Remove it and add `*.stackdump` to `.gitignore`.
+- The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
+- `.gitattributes` keeps text files on LF line endings on every OS. `.gitignore` covers `node_modules`, `dist`, `*.local`, `*.log` and `*.stackdump` (Git Bash crash dumps).
 
 ## Ideas for next steps
 
