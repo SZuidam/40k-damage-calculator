@@ -1,6 +1,6 @@
 import type { DefenderProfile, WeaponProfile } from '../types';
-import { convolve, diceDistribution, diceSumDistribution } from './dice';
-import { attacksPerModel, createAttackContext, unsavedDistribution } from './rules';
+import { convolve, diceSumDistribution } from './dice';
+import { attacksPerModel, createAttackContext, damagePerWound, unsavedDistribution } from './rules';
 
 /**
  * Exact (noise-free) expectation of the attack sequence.
@@ -23,7 +23,7 @@ export interface WeaponKernel {
   unsaved: number[];
   /** tail[k] = P(at least k unsaved wounds). */
   tail: number[];
-  /** damage[d] = P(damage roll = d). */
+  /** damage[d] = P(damage roll = d), Melta included. */
   damage: number[];
 }
 
@@ -59,7 +59,7 @@ export function weaponKernel(weapon: WeaponProfile, defender: DefenderProfile): 
   const tail = new Array<number>(unsaved.length + 1).fill(0);
   for (let k = unsaved.length - 1; k >= 0; k--) tail[k] = tail[k + 1] + unsaved[k];
 
-  return { unsaved, tail, damage: diceDistribution(ctx.damage) };
+  return { unsaved, tail, damage: diceSumDistribution(damagePerWound(ctx)) };
 }
 
 /** convolve(a, b) with every value at or above `cap` added into index `cap`. */

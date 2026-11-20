@@ -303,7 +303,7 @@ select[aria-invalid='true'] {
   font-weight: 600;
 }
 
-/* Blast / Cleave extra attacks against the current defender: "A 4+2". */
+/* Extra attacks (Blast / Cleave / Rapid Fire) on the A chip, "A 4+2", and Melta extra damage on the D chip, "D D6+2". */
 .chip-bonus {
   color: var(--accent);
   font-weight: 700;

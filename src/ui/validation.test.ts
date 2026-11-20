@@ -37,6 +37,14 @@ describe('validateWeaponStats', () => {
     expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), rapidFire: '3D6' } }).abilities).toBe('Rapid Fire: X can roll at most 12');
   });
 
+  it('checks the Melta value', () => {
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), melta: 'D3+1' } })).toEqual({});
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), melta: '2' } })).toEqual({});
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), melta: 'D4' } }).abilities).toBe('Melta: use 3, D3, D6, 2D6, D6+1, …');
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), melta: 'D6-1' } }).abilities).toBe('Melta: use 3, D3, D6, 2D6, D6+1, …');
+    expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), melta: '13' } }).abilities).toBe('Melta: X can roll at most 12');
+  });
+
   it.each(['3', 'D3', 'd6+2', '2D6', '2D3+1', 'D6+6'])('accepts ability X %j', (x) => {
     expect(abilityValueError(x, 'Blast')).toBeUndefined();
   });

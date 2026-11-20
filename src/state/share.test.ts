@@ -120,6 +120,18 @@ describe('Rapid Fire and Lance', () => {
   });
 });
 
+describe('Melta', () => {
+  it('survives export and import', () => {
+    const source = sourceState();
+    source.library[0].abilities = { ...noAbilities(), melta: 'D3' };
+    const data = roundTrip(source);
+    expect(data.weapons[0].abilities).toEqual({ ...noAbilities(), melta: 'D3' });
+    const target = emptyState();
+    applyImport(data, planImport(data, target), target, 'rename');
+    expect(target.library[0].abilities).toEqual({ ...noAbilities(), melta: 'D3' });
+  });
+});
+
 describe('Twin-linked', () => {
   it('survives export and import', () => {
     const source = sourceState();

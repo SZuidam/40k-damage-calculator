@@ -3,7 +3,7 @@ import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type AttackConditions, type DefenderK
 export type AbilityKey = keyof WeaponAbilities;
 
 /** The abilities that take an X (a dice expression) typed in by the user. */
-export type ValueAbilityKey = 'sustainedHits' | 'blast' | 'cleave' | 'rapidFire';
+export type ValueAbilityKey = 'sustainedHits' | 'blast' | 'cleave' | 'rapidFire' | 'melta';
 
 /** An ability a weapon has, as shown in the UI. */
 export interface ActiveAbility {
@@ -14,7 +14,7 @@ export interface ActiveAbility {
   valueKey?: ValueAbilityKey;
   /** Set for Anti-X Y+: the keywords that share this Y (one chip), in display order. */
   anti?: { keywords: DefenderKeyword[]; value: number };
-  /** Set for abilities that only work under an attack condition (Rapid Fire, Lance). */
+  /** Set for abilities that only work under an attack condition (Rapid Fire, Melta, Lance). */
   condition?: keyof AttackConditions;
 }
 
@@ -61,6 +61,7 @@ export const VALUE_ABILITY_NAMES: Record<ValueAbilityKey, string> = {
   blast: 'Blast',
   cleave: 'Cleave',
   rapidFire: 'Rapid Fire',
+  melta: 'Melta',
 };
 
 const attacksPerFive = (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model for every 5 models in the target unit`;
@@ -73,12 +74,13 @@ const DESCRIPTIONS = {
   cleave: (x: string) => `${attacksPerFive(x)} (melee only; works the same as Blast here).`,
   anti: (keywords: string, y: string) => `An unmodified wound roll of ${y} against a ${keywords} target is a critical wound (it always wounds).`,
   rapidFire: (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model when the target is within half range.`,
+  melta: (x: string) => `Adds ${x} to the Damage characteristic when the target is within half range.`,
   lance: 'Adds 1 to the wound roll if the bearer charged this turn.',
   twinLinked: 'A failed wound roll is re-rolled once.',
 };
 
 /** The attack condition each conditional ability needs. */
-const CONDITIONS: Partial<Record<keyof WeaponAbilities, keyof AttackConditions>> = { rapidFire: 'halfRange', lance: 'charged' };
+const CONDITIONS: Partial<Record<keyof WeaponAbilities, keyof AttackConditions>> = { rapidFire: 'halfRange', melta: 'halfRange', lance: 'charged' };
 
 /** "Vehicle", "Vehicle or Monster", "Vehicle, Monster or Fly". */
 function keywordList(keywords: DefenderKeyword[]): string {
@@ -128,6 +130,7 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
   valueChoice('blast', 'blast', DESCRIPTIONS.blast('X')),
   valueChoice('cleave', 'cleave', DESCRIPTIONS.cleave('X')),
   valueChoice('rapidFire', 'rapid-fire', DESCRIPTIONS.rapidFire('X')),
+  valueChoice('melta', 'melta', DESCRIPTIONS.melta('X')),
   {
     value: 'lance',
     label: 'Lance',
@@ -166,6 +169,7 @@ export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   if (a.blast !== null) withValue('blast', a.blast);
   if (a.cleave !== null) withValue('cleave', a.cleave);
   if (a.rapidFire !== null) withValue('rapidFire', a.rapidFire);
+  if (a.melta !== null) withValue('melta', a.melta);
   if (a.lance) out.push({ key: 'lance', label: 'Lance', description: DESCRIPTIONS.lance, condition: 'charged' });
   if (a.twinLinked) out.push({ key: 'twinLinked', label: 'Twin-linked', description: DESCRIPTIONS.twinLinked });
   return out;
@@ -230,6 +234,7 @@ export function sameAbilities(a: WeaponAbilities, b: WeaponAbilities): boolean {
     sameValue('blast') &&
     sameValue('cleave') &&
     sameValue('rapidFire') &&
+    sameValue('melta') &&
     DEFENDER_KEYWORDS.every((k) => a.anti[k] === b.anti[k])
   );
 }

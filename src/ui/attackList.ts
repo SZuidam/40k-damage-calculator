@@ -1,5 +1,5 @@
 import { formatDiceSum, tryParseDice } from '../engine/dice';
-import { bonusAttacks } from '../engine/rules';
+import { bonusAttacks, bonusDamage } from '../engine/rules';
 import { activeAbilities, normaliseDice } from '../state/abilities';
 import { uid } from '../state/ids';
 import { findWeapon, sortedLibrary } from '../state/presets';
@@ -26,7 +26,10 @@ export interface AttackListOptions {
    * its keywords to mark Anti abilities that apply.
    */
   defender?: () => Pick<DefenderProfile, 'models' | 'keywords'>;
-  /** The attack conditions: Rapid Fire adds to the A chip within half range, and conditional abilities are outlined while on. */
+  /**
+   * The attack conditions: within half range Rapid Fire adds to the A chip and Melta to the D chip,
+   * and conditional abilities are outlined while on.
+   */
   conditions?: () => AttackConditions;
 }
 
@@ -249,6 +252,13 @@ function statChips(weapon: WeaponStats | undefined, defender: Pick<DefenderProfi
     chips[0].append(h('span', { class: 'chip-bonus' }, `+${bonus.value}`));
     chips[0].title = `Attacks: ${weapon.attacks}, plus ${bonus.value} from ${bonus.sources}`;
   }
+  const extraDamage = damageBonus(weapon, conditions);
+  if (extraDamage) {
+    // The D chip comes last: "D D6+2", with the Melta extra damage in blue.
+    const chip = chips[chips.length - 1];
+    chip.append(h('span', { class: 'chip-bonus' }, `+${extraDamage.value}`));
+    chip.title = `Damage: ${weapon.damage}, plus ${extraDamage.value} from ${extraDamage.sources}`;
+  }
   const abilities = activeAbilities(weapon.abilities);
   if (abilities.length === 0) return chips;
   // Read-only here; abilities are edited in the weapon profile modal (✎).
@@ -256,7 +266,7 @@ function statChips(weapon: WeaponStats | undefined, defender: Pick<DefenderProfi
   abilities.forEach(({ label, description, anti, condition }, i) => {
     if (i > 0) text.append(', ');
     // An Anti ability is outlined when the current defender has one of its keywords, a
-    // conditional ability (Rapid Fire, Lance) while its attack condition is on.
+    // conditional ability (Rapid Fire, Melta, Lance) while its attack condition is on.
     let active: string | null = null;
     const matched = anti && defender ? anti.keywords.filter((k) => defender.keywords.includes(k)) : [];
     if (matched.length > 0) {
@@ -291,4 +301,16 @@ function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined, c
   if (perFive.length > 0) sources.push(`${perFive.join(' and ')} (${models} models in the target unit)`);
   if (rapidFire !== null && conditions.halfRange) sources.push(`Rapid Fire ${normaliseDice(rapidFire)} (within half range)`);
   return { value: formatDiceSum(terms), sources: sources.join(' and ') };
+}
+
+/**
+ * Melta extra damage per unsaved wound under the current conditions ("D3"), with its source
+ * for the tooltip, or null when there is none or X is invalid (the row shows that error instead).
+ */
+function damageBonus(weapon: WeaponStats, conditions: AttackConditions): { value: string; sources: string } | null {
+  const { melta } = weapon.abilities;
+  if (melta === null || !tryParseDice(melta)) return null;
+  const terms = bonusDamage({ abilities: weapon.abilities, conditions });
+  if (terms.length === 0) return null;
+  return { value: formatDiceSum(terms), sources: `Melta ${normaliseDice(melta)} (within half range)` };
 }

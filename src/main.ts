@@ -48,7 +48,7 @@ function inputsValid(): boolean {
 function onInputsChanged(): void {
   saveState(state);
   // The Blast / Cleave extra attacks on the A chips depend on the defender's model count,
-  // the Anti markers on its keywords, Rapid Fire and Lance on the attack conditions.
+  // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions.
   attackList.refreshStats();
   if (!reordering) reorderNote = '';
   simulateButton.disabled = !inputsValid();

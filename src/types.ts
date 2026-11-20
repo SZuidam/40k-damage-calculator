@@ -38,6 +38,11 @@ export interface WeaponAbilities {
    * (`AttackConditions.halfRange`), as a dice expression rolled per attacking model; null for none.
    */
   rapidFire: string | null;
+  /**
+   * Melta X: the Damage characteristic is increased by X while the target is within half range
+   * (`AttackConditions.halfRange`), as a dice expression rolled per damage roll; null for none.
+   */
+  melta: string | null;
   /** Lance: +1 to the wound roll while the bearer charged this turn (`AttackConditions.charged`). */
   lance: boolean;
   /**
@@ -48,7 +53,7 @@ export interface WeaponAbilities {
 }
 
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, lance: false, twinLinked: false };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false };
 }
 
 /**
@@ -56,7 +61,7 @@ export function noAbilities(): WeaponAbilities {
  * in the attack and are part of the live state only (not of presets, units or exports).
  */
 export interface AttackConditions {
-  /** The target is within half range: Rapid Fire X adds its attacks. */
+  /** The target is within half range: Rapid Fire X adds its attacks, Melta X its damage. */
   halfRange: boolean;
   /** The attacking unit made a Charge move this turn: Lance adds 1 to the wound roll. */
   charged: boolean;

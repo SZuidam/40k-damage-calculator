@@ -1,7 +1,7 @@
 import { emptyStats, type DefenderProfile, type SimulationResult, type StepStats, type WeaponProfile } from '../types';
 import { rollDice, rollDiceSum } from './dice';
 import { d6, defaultRng, type Rng } from './rng';
-import { attacksPerModel, createAttackContext, hitSucceeds, isCriticalHit, isCriticalWound, saveSucceeds, woundSucceeds } from './rules';
+import { attacksPerModel, createAttackContext, damagePerWound, hitSucceeds, isCriticalHit, isCriticalWound, saveSucceeds, woundSucceeds } from './rules';
 
 /**
  * Monte Carlo simulation of the attack sequence. Weapons resolve in the given
@@ -28,6 +28,7 @@ export function simulate(
       const s = sums[wi];
 
       const perModel = attacksPerModel(ctx);
+      const perWound = damagePerWound(ctx);
       for (let m = 0; m < ctx.weapon.models; m++) {
         const attacks = rollDiceSum(perModel, rng);
         s.attacks += attacks;
@@ -58,7 +59,7 @@ export function simulate(
             s.unsaved++;
             if (modelsLeft === 0) continue;
 
-            const applied = Math.min(rollDice(ctx.damage, rng), woundsLeft);
+            const applied = Math.min(rollDiceSum(perWound, rng), woundsLeft);
             s.damage += applied;
             woundsLeft -= applied;
             if (woundsLeft === 0) {

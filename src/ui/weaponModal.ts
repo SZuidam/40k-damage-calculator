@@ -92,7 +92,7 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
       bind(damage, () => (draft.damage = damage.value));
 
       // Abilities: an "Add ability…" dropdown plus a removable chip per ability. Abilities
-      // with an X (Sustained Hits, Blast, Cleave) or a Y (Anti-X Y+) ask for it in a pop-up;
+      // with an X (Sustained Hits, Blast, Cleave, Rapid Fire, Melta) or a Y (Anti-X Y+) ask for it in a pop-up;
       // their chip reopens it.
       const abilityEditor = h('div', { class: 'ability-editor' });
 

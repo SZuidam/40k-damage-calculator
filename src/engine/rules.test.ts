@@ -5,7 +5,9 @@ import {
   antiCriticalWound,
   attacksPerModel,
   bonusAttacks,
+  bonusDamage,
   createAttackContext,
+  damagePerWound,
   hitChance,
   isCriticalHit,
   isCriticalWound,
@@ -239,6 +241,33 @@ describe('Rapid Fire X', () => {
       { count: 1, sides: 3, bonus: 0 },
     ]);
     expect(bonusAttacks(rifle({ rapidFire: 'D3', blast: '1' }, false), marines)).toEqual([{ count: 0, sides: 0, bonus: 2 }]);
+  });
+});
+
+describe('Melta X', () => {
+  const meltagun = (melta: string | null, halfRange: boolean) => weapon('Meltagun', 1, '1', 3, 9, -4, 'D6', { melta }, { halfRange });
+
+  it('adds X to the damage only while the target is within half range', () => {
+    expect(bonusDamage(meltagun('2', false))).toEqual([]);
+    expect(bonusDamage(meltagun('2', true))).toEqual([{ count: 0, sides: 0, bonus: 2 }]);
+    expect(bonusDamage(meltagun(null, true))).toEqual([]);
+    expect(damagePerWound(createAttackContext(meltagun('2', true), defender(1, 10, 3, 12)))).toEqual([
+      { count: 1, sides: 6, bonus: 0 },
+      { count: 0, sides: 0, bonus: 2 },
+    ]);
+    expect(damagePerWound(createAttackContext(meltagun('2', false), defender(1, 10, 3, 12)))).toEqual([{ count: 1, sides: 6, bonus: 0 }]);
+  });
+
+  it('takes a dice expression for X', () => {
+    expect(bonusDamage(meltagun('D3+1', true))).toEqual([{ count: 1, sides: 3, bonus: 1 }]);
+  });
+
+  it('changes neither the attacks nor the rolls', () => {
+    const vehicle = defender(1, 10, 3, 12);
+    const near = createAttackContext(meltagun('2', true), vehicle);
+    const far = createAttackContext(meltagun('2', false), vehicle);
+    expect(attacksPerModel(near)).toEqual(attacksPerModel(far));
+    expect(unsavedDistribution(near)).toEqual(unsavedDistribution(far));
   });
 });
 

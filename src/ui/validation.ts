@@ -11,7 +11,7 @@ export const LIMITS = {
   defenderModels: { min: 1, max: 40 },
   toughness: { min: 1, max: 20 },
   wounds: { min: 1, max: 40 },
-  /** Highest possible roll of X for Sustained Hits X / Blast X / Cleave X / Rapid Fire X (2D6, D6+6). */
+  /** Highest possible roll of X for Sustained Hits X / Blast X / Cleave X / Rapid Fire X / Melta X (2D6, D6+6). */
   abilityValue: { min: 1, max: 12 },
   iterations: { min: 100, max: 1_000_000 },
 } as const;
@@ -52,6 +52,7 @@ function abilityError(a: WeaponAbilities): string | undefined {
     (a.blast === null ? undefined : abilityValueError(a.blast, 'Blast')) ??
     (a.cleave === null ? undefined : abilityValueError(a.cleave, 'Cleave')) ??
     (a.rapidFire === null ? undefined : abilityValueError(a.rapidFire, 'Rapid Fire')) ??
+    (a.melta === null ? undefined : abilityValueError(a.melta, 'Melta')) ??
     antiError(a)
   );
 }
@@ -72,8 +73,8 @@ export function antiValueError(text: string, label: string): string | undefined 
 }
 
 /**
- * X of Sustained Hits / Blast / Cleave / Rapid Fire: a dice expression like A and D, whose highest roll
- * is at most LIMITS.abilityValue.max (keeps the exact engine's attack distribution small).
+ * X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta: a dice expression like A and D, whose highest roll
+ * is at most LIMITS.abilityValue.max (keeps the exact engine's attack and damage distributions small).
  */
 export function abilityValueError(expr: string, label: string): string | undefined {
   const syntax = dice(expr, label);

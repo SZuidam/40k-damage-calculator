@@ -148,6 +148,22 @@ describe('simulate', () => {
     expect(simulate(rifles(true), defender(10, 4, 3, 2), 200, mulberry32(33)).total.attacks).toBe(30);
   });
 
+  it('Melta 2: D6 damage becomes D6+2 within half range', () => {
+    // 10 attacks, BS 2+, S9 vs T10 (5+), Sv 3+ at AP-4 fails: 10 * 5/6 * 2/6 unsaved, each worth D6 (3.5) or D6+2 (5.5).
+    const melta = (halfRange: boolean) => [weapon('Meltaguns', 10, '1', 2, 9, -4, 'D6', { melta: '2' }, { halfRange })];
+    const tank = defender(1, 10, 3, 400);
+    const unsaved = 10 * (5 / 6) * (2 / 6);
+    expectClose(simulate(melta(false), tank, ITERATIONS, mulberry32(38)).total.damage, unsaved * 3.5);
+    expectClose(simulate(melta(true), tank, ITERATIONS, mulberry32(38)).total.damage, unsaved * 5.5);
+    expectClose(exactResult(melta(true), tank).expectedDamage, unsaved * 5.5);
+  });
+  compareWithExact(
+    'Melta D3 within half range, carrying over to the next weapon',
+    [weapon('Multi-melta', 2, '2', 3, 9, -4, 'D6', { melta: 'D3' }, { halfRange: true }), heavyBolter],
+    defender(3, 6, 3, 8),
+    39,
+  );
+
   it('Twin-linked: S4 into T4 wounds 3/4 of the time', () => {
     const twin = (twinLinked: boolean) => [weapon('Twin', 10, '1', 2, 4, 0, '1', { twinLinked })];
     expectClose(simulate(twin(false), defender(20, 4, 3, 1), ITERATIONS, mulberry32(35)).total.wounds, 10 * (5 / 6) * (3 / 6));

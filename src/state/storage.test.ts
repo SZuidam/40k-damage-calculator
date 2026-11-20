@@ -178,6 +178,22 @@ describe('loadState', () => {
     expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual({ ...noAbilities(), rapidFire: '1' });
   });
 
+  it('round trips Melta, gives weapons saved before it none, and turns a whole number into text', () => {
+    const storage = memoryStorage();
+    const state = defaultState();
+    state.library[0].abilities = { ...noAbilities(), melta: 'D3+1' };
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
+
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    delete saved.library[0].abilities.melta;
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual(noAbilities());
+    saved.library[0].abilities = { melta: 2 };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual({ ...noAbilities(), melta: '2' });
+    saved.library[0].abilities = { melta: '  ' };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual(noAbilities());
+  });
+
   it('round trips Twin-linked, and gives weapons saved before it none', () => {
     const storage = memoryStorage();
     const state = defaultState();

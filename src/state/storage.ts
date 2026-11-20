@@ -190,6 +190,7 @@ function toAbilities(value: unknown): WeaponAbilities {
     cleave: toAbilityDice(value.cleave),
     anti: toAnti(value.anti),
     rapidFire: toAbilityDice(value.rapidFire),
+    melta: toAbilityDice(value.melta),
     lance: value.lance === true,
     twinLinked: value.twinLinked === true,
   };
@@ -216,7 +217,7 @@ function toKeywords(value: unknown): DefenderKeyword[] {
 }
 
 /**
- * X of Sustained Hits / Blast / Cleave / Rapid Fire: a non-empty dice expression, or null. Blast and
+ * X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta: a non-empty dice expression, or null. Blast and
  * Cleave were saved as whole numbers before they took dice; those become "2". The
  * expression itself is checked by ui/validation.
  */

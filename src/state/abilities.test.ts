@@ -40,12 +40,13 @@ describe('ability choices', () => {
       'Blast X…',
       'Cleave X…',
       'Rapid Fire X…',
+      'Melta X…',
       'Lance',
       'Twin-linked',
     ]);
     expect(ABILITY_CHOICES.filter(isAntiChoice).map((c) => c.keyword)).toEqual(['vehicle', 'monster', 'psyker', 'infantry', 'fly']);
     expect(ABILITY_CHOICES.filter(isAntiChoice).every((c) => !isValueChoice(c))).toBe(true);
-    expect(ABILITY_CHOICES.filter(isValueChoice).map((c) => c.valueKey)).toEqual(['sustainedHits', 'blast', 'cleave', 'rapidFire']);
+    expect(ABILITY_CHOICES.filter(isValueChoice).map((c) => c.valueKey)).toEqual(['sustainedHits', 'blast', 'cleave', 'rapidFire', 'melta']);
   });
 
   it('adds abilities without changing the input', () => {
@@ -91,7 +92,7 @@ describe('activeAbilities', () => {
   });
 
   it('marks the abilities with an X as editable', () => {
-    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, lance: false, twinLinked: false };
+    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false };
     expect(activeAbilities(all).map((a) => a.valueKey)).toEqual([undefined, 'sustainedHits', undefined, 'blast', 'cleave']);
     expect(activeAbilities(all).find((a) => a.key === 'blast')?.description).toBe('Adds D3 attacks per model for every 5 models in the target unit.');
     expect(activeAbilities(all).find((a) => a.key === 'cleave')?.description).toMatch(/^Adds 1 attack per model/);
@@ -134,6 +135,34 @@ describe('Rapid Fire and Lance', () => {
     expect(sameAbilities({ ...none, rapidFire: '1' }, { ...none, blast: '1' })).toBe(false);
     expect(sameAbilities({ ...none, lance: true }, none)).toBe(false);
     expect(sameAbilities({ ...none, lance: true }, { ...none, lance: true })).toBe(true);
+  });
+});
+
+describe('Melta', () => {
+  it('asks for X and stores it normalised', () => {
+    expect(valued('melta').name).toBe('Melta');
+    expect(valued('melta').label).toBe('Melta X…');
+    const melta = withAbilityValue(noAbilities(), 'melta', ' d3 + 1 ');
+    expect(melta.melta).toBe('D3+1');
+    expect(valued('melta').isActive(melta)).toBe(true);
+    expect(valued('melta').isActive(noAbilities())).toBe(false);
+  });
+
+  it('is listed after Rapid Fire, needs the target within half range, and its chip changes X', () => {
+    const active = activeAbilities({ ...noAbilities(), rapidFire: '1', melta: '2', lance: true });
+    expect(active.map((a) => a.label)).toEqual(['Rapid Fire 1', 'Melta 2', 'Lance']);
+    expect(active[1]).toMatchObject({ key: 'melta', valueKey: 'melta', condition: 'halfRange' });
+    expect(active[1].description).toBe('Adds 2 to the Damage characteristic when the target is within half range.');
+    expect(abilitiesSummary({ ...noAbilities(), melta: 'd3' })).toBe('Melta D3');
+  });
+
+  it('is removed and compared like the other X abilities', () => {
+    const none = noAbilities();
+    expect(withoutAbility({ ...none, melta: '2', lance: true }, 'melta')).toEqual({ ...none, lance: true });
+    expect(sameAbilities({ ...none, melta: ' d3' }, { ...none, melta: 'D3' })).toBe(true);
+    expect(sameAbilities({ ...none, melta: '2' }, { ...none, melta: '4' })).toBe(false);
+    expect(sameAbilities({ ...none, melta: '2' }, { ...none, rapidFire: '2' })).toBe(false);
+    expect(sameAbilities({ ...none, melta: '2' }, none)).toBe(false);
   });
 });
 

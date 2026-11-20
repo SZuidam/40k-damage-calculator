@@ -38,7 +38,10 @@ export interface AttackContext {
   defender: DefenderProfile;
   /** The weapon's own attacks per model (A), without Blast / Cleave / Rapid Fire. */
   attacks: DiceExpr;
+  /** The weapon's own Damage characteristic (D), without Melta. */
   damage: DiceExpr;
+  /** Extra damage per unsaved wound from Melta, rolled on top of `damage`. */
+  bonusDamage: DiceExpr[];
   hitTarget: number;
   woundTarget: number;
   saveTarget: number;
@@ -85,6 +88,15 @@ export function bonusAttacks(weapon: Pick<WeaponProfile, 'abilities' | 'conditio
   return terms;
 }
 
+/**
+ * Extra damage per unsaved wound on top of D: Melta X while the target is within half range,
+ * rolled for every damage roll. Returns one term when it applies, or none.
+ */
+export function bonusDamage(weapon: Pick<WeaponProfile, 'abilities' | 'conditions'>): DiceExpr[] {
+  const { melta } = weapon.abilities;
+  return melta !== null && weapon.conditions.halfRange ? [parseDice(melta)] : [];
+}
+
 /** The wound roll modifier: +1 for Lance while charging, capped at -1 / +1. */
 export function woundModifier(weapon: Pick<WeaponProfile, 'abilities' | 'conditions'>): number {
   const total = weapon.abilities.lance && weapon.conditions.charged ? 1 : 0;
@@ -109,6 +121,11 @@ export function attacksPerModel(ctx: AttackContext): DiceExpr[] {
   return [ctx.attacks, ...ctx.bonusAttacks];
 }
 
+/** Everything rolled for the damage of one unsaved wound: D plus Melta. */
+export function damagePerWound(ctx: AttackContext): DiceExpr[] {
+  return [ctx.damage, ...ctx.bonusDamage];
+}
+
 export function createAttackContext(weapon: WeaponProfile, defender: DefenderProfile): AttackContext {
   const { abilities } = weapon;
   return {
@@ -116,6 +133,7 @@ export function createAttackContext(weapon: WeaponProfile, defender: DefenderPro
     defender,
     attacks: parseDice(weapon.attacks),
     damage: parseDice(weapon.damage),
+    bonusDamage: bonusDamage(weapon),
     hitTarget: weapon.skill,
     woundTarget: woundTarget(weapon.strength, defender.toughness),
     saveTarget: saveTarget(defender.save, weapon.ap, defender.invuln),
