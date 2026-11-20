@@ -59,6 +59,8 @@ export interface AttackContext {
    * roll against the S vs T target only: critical wounds use the unmodified roll.
    */
   woundModifier: number;
+  /** Twin-linked: a failed wound roll is re-rolled once; the re-roll stands, pass or fail. */
+  rerollFailedWounds: boolean;
 }
 
 /** A hit or wound roll can be modified by at most -1 / +1 in total. */
@@ -124,6 +126,7 @@ export function createAttackContext(weapon: WeaponProfile, defender: DefenderPro
     devastatingWounds: abilities.devastatingWounds,
     bonusAttacks: bonusAttacks(weapon, defender),
     woundModifier: woundModifier(weapon),
+    rerollFailedWounds: abilities.twinLinked,
   };
 }
 
@@ -161,19 +164,38 @@ function chance(ctx: AttackContext, step: (ctx: AttackContext, roll: number) => 
 }
 
 export const hitChance = (ctx: AttackContext) => chance(ctx, hitSucceeds);
-export const woundChance = (ctx: AttackContext) => chance(ctx, woundSucceeds);
 export const saveChance = (ctx: AttackContext) => chance(ctx, saveSucceeds);
 
 /**
- * P(a hit that rolls to wound becomes an unsaved wound). With Devastating Wounds a
- * critical wound skips the save.
+ * Probability that a hit's wound roll ends on each face after re-rolls: faces[roll - 1].
+ * Without a re-roll every face is 1/6. Twin-linked re-rolls a failed roll once, and the
+ * re-rolled die is the one that counts (as an unmodified roll, so it can be a critical wound):
+ *   P(face f) = [f wounds] · 1/6 + P(first roll fails) · 1/6.
+ * The faces sum to 1 either way.
+ */
+export function woundRollFaces(ctx: AttackContext): number[] {
+  const first = new Array<number>(6).fill(1 / 6);
+  if (!ctx.rerollFailedWounds) return first;
+  const failed = 1 - chance(ctx, woundSucceeds);
+  return first.map((p, i) => (woundSucceeds(ctx, i + 1) ? p : 0) + failed / 6);
+}
+
+/** P(a hit that rolls to wound wounds), re-rolls included. */
+export function woundChance(ctx: AttackContext): number {
+  return woundRollFaces(ctx).reduce((sum, p, i) => sum + (woundSucceeds(ctx, i + 1) ? p : 0), 0);
+}
+
+/**
+ * P(a hit that rolls to wound becomes an unsaved wound), re-rolls included. With
+ * Devastating Wounds a critical wound skips the save.
  */
 export function unsavedPerWoundRoll(ctx: AttackContext): number {
   const failSave = 1 - saveChance(ctx);
+  const faces = woundRollFaces(ctx);
   let p = 0;
   for (let roll = 1; roll <= 6; roll++) {
     if (!woundSucceeds(ctx, roll)) continue;
-    p += (ctx.devastatingWounds && isCriticalWound(ctx, roll) ? 1 : failSave) / 6;
+    p += faces[roll - 1] * (ctx.devastatingWounds && isCriticalWound(ctx, roll) ? 1 : failSave);
   }
   return p;
 }

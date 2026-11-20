@@ -120,6 +120,18 @@ describe('Rapid Fire and Lance', () => {
   });
 });
 
+describe('Twin-linked', () => {
+  it('survives export and import', () => {
+    const source = sourceState();
+    source.library[0].abilities = { ...noAbilities(), twinLinked: true };
+    const data = roundTrip(source);
+    expect(data.weapons[0].abilities).toEqual({ ...noAbilities(), twinLinked: true });
+    const target = emptyState();
+    applyImport(data, planImport(data, target), target, 'rename');
+    expect(target.library[0].abilities).toEqual({ ...noAbilities(), twinLinked: true });
+  });
+});
+
 describe('parseShareText', () => {
   const error = (text: string) => {
     const result = parseShareText(text);

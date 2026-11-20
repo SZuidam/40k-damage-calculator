@@ -40,10 +40,15 @@ export interface WeaponAbilities {
   rapidFire: string | null;
   /** Lance: +1 to the wound roll while the bearer charged this turn (`AttackConditions.charged`). */
   lance: boolean;
+  /**
+   * Twin-linked: a failed wound roll is re-rolled once. The re-roll counts as the unmodified
+   * roll, so it can be a critical wound. Lethal Hits auto-wounds make no wound roll to re-roll.
+   */
+  twinLinked: boolean;
 }
 
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, lance: false };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, lance: false, twinLinked: false };
 }
 
 /**

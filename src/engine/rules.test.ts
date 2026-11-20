@@ -16,6 +16,7 @@ import {
   unsavedPerAttack,
   unsavedPerWoundRoll,
   woundChance,
+  woundRollFaces,
   woundTarget,
 } from './rules';
 import { defender, weapon } from './testFixtures';
@@ -285,5 +286,62 @@ describe('Lance', () => {
     const ctx6 = createAttackContext(lance(4, true, { anti: { vehicle: 6 } }), vehicle);
     expect(woundChance(ctx6)).toBeCloseTo(2 / 6);
     expect(faces.filter((r) => isCriticalWound(ctx6, r))).toEqual([6]);
+  });
+});
+
+describe('Twin-linked', () => {
+  const faces = [1, 2, 3, 4, 5, 6];
+  const twin = (strength: number, abilities: Partial<WeaponAbilities> = {}, charged = false) =>
+    weapon('Twin', 1, '1', 3, strength, 0, '1', { twinLinked: true, ...abilities }, { charged });
+
+  it('re-rolls a failed wound roll once: P = p + (1 - p) · p', () => {
+    for (const [toughness, p] of [
+      [2, 5 / 6],
+      [3, 4 / 6],
+      [4, 3 / 6],
+      [5, 2 / 6],
+      [8, 1 / 6],
+    ]) {
+      const ctx = createAttackContext(twin(4), defender(1, toughness, 3, 2));
+      expect(ctx.rerollFailedWounds).toBe(true);
+      expect(woundChance(ctx)).toBeCloseTo(p + (1 - p) * p, 12);
+    }
+    expect(createAttackContext(weapon('Single', 1, '1', 3, 4, 0, '1'), defender(1, 4, 3, 2)).rerollFailedWounds).toBe(false);
+  });
+
+  it('only failed faces are re-rolled, and the final faces sum to 1', () => {
+    // S4 vs T4: 1-3 fail (1/2), so every face gains 1/12 and 4-6 keep their first 1/6.
+    const ctx = createAttackContext(twin(4), defender(1, 4, 3, 2));
+    const final = woundRollFaces(ctx);
+    [1, 2, 3].forEach((f) => expect(final[f - 1]).toBeCloseTo(1 / 12, 12));
+    [4, 5, 6].forEach((f) => expect(final[f - 1]).toBeCloseTo(1 / 6 + 1 / 12, 12));
+    expect(final.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    // Without Twin-linked every face is 1/6.
+    expect(woundRollFaces(createAttackContext(weapon('Single', 1, '1', 3, 4, 0, '1'), defender(1, 4, 3, 2)))).toEqual(new Array(6).fill(1 / 6));
+  });
+
+  it('a re-rolled 6 is a critical wound for Devastating Wounds', () => {
+    // S4 vs T8 (6+), Sv 2+: every wound is a 6, unsaved; 6 on the first roll or on the re-roll.
+    const ctx = createAttackContext(twin(4, { devastatingWounds: true }), defender(1, 8, 2, 2));
+    expect(faces.filter((r) => isCriticalWound(ctx, r))).toEqual([6]);
+    expect(unsavedPerWoundRoll(ctx)).toBeCloseTo(1 / 6 + (5 / 6) * (1 / 6), 12);
+  });
+
+  it('re-rolls against the Anti-X Y+ critical threshold', () => {
+    // S4 vs T8 Vehicle with Anti-Vehicle 4+: 4+ wounds, a failed 1-3 is re-rolled.
+    const ctx = createAttackContext(twin(4, { anti: { vehicle: 4 } }), defender(1, 8, 2, 12, null, ['vehicle']));
+    expect(woundChance(ctx)).toBeCloseTo(3 / 6 + (3 / 6) * (3 / 6), 12);
+  });
+
+  it('re-rolls with the Lance modifier applied', () => {
+    // S4 vs T4 after a charge: 3+, so a 1-2 is re-rolled.
+    const ctx = createAttackContext(twin(4, { lance: true }, true), defender(1, 4, 3, 2));
+    expect(woundChance(ctx)).toBeCloseTo(4 / 6 + (2 / 6) * (4 / 6), 12);
+  });
+
+  it('Lethal Hits auto-wounds make no wound roll; only normal hits benefit', () => {
+    // BS 3+, S4 vs T4, no save: normal hits (3/6) wound on 4+ with a re-roll (3/4), critical hits (1/6) always.
+    const ctx = createAttackContext(twin(4, { lethalHits: true }), defender(1, 4, 7, 2));
+    expect(unsavedPerAttack(ctx)).toBeCloseTo((3 / 6) * (3 / 4) + 1 / 6, 12);
   });
 });

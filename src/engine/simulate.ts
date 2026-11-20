@@ -46,7 +46,9 @@ export function simulate(
           for (let h = 0; h < hits; h++) {
             let devastating = false;
             if (h >= autoWounds) {
-              const woundRoll = d6(rng);
+              let woundRoll = d6(rng);
+              // Twin-linked: a failed wound roll is re-rolled once, and the re-roll stands.
+              if (ctx.rerollFailedWounds && !woundSucceeds(ctx, woundRoll)) woundRoll = d6(rng);
               if (!woundSucceeds(ctx, woundRoll)) continue;
               devastating = ctx.devastatingWounds && isCriticalWound(ctx, woundRoll);
             }

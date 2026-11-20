@@ -191,6 +191,7 @@ function toAbilities(value: unknown): WeaponAbilities {
     anti: toAnti(value.anti),
     rapidFire: toAbilityDice(value.rapidFire),
     lance: value.lance === true,
+    twinLinked: value.twinLinked === true,
   };
 }
 

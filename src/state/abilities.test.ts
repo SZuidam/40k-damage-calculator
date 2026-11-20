@@ -41,6 +41,7 @@ describe('ability choices', () => {
       'Cleave X…',
       'Rapid Fire X…',
       'Lance',
+      'Twin-linked',
     ]);
     expect(ABILITY_CHOICES.filter(isAntiChoice).map((c) => c.keyword)).toEqual(['vehicle', 'monster', 'psyker', 'infantry', 'fly']);
     expect(ABILITY_CHOICES.filter(isAntiChoice).every((c) => !isValueChoice(c))).toBe(true);
@@ -90,7 +91,7 @@ describe('activeAbilities', () => {
   });
 
   it('marks the abilities with an X as editable', () => {
-    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, lance: false };
+    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, lance: false, twinLinked: false };
     expect(activeAbilities(all).map((a) => a.valueKey)).toEqual([undefined, 'sustainedHits', undefined, 'blast', 'cleave']);
     expect(activeAbilities(all).find((a) => a.key === 'blast')?.description).toBe('Adds D3 attacks per model for every 5 models in the target unit.');
     expect(activeAbilities(all).find((a) => a.key === 'cleave')?.description).toMatch(/^Adds 1 attack per model/);
@@ -133,6 +134,26 @@ describe('Rapid Fire and Lance', () => {
     expect(sameAbilities({ ...none, rapidFire: '1' }, { ...none, blast: '1' })).toBe(false);
     expect(sameAbilities({ ...none, lance: true }, none)).toBe(false);
     expect(sameAbilities({ ...none, lance: true }, { ...none, lance: true })).toBe(true);
+  });
+});
+
+describe('Twin-linked', () => {
+  it('is added straight away and listed last, without a condition', () => {
+    const twin = flag('twin-linked').apply(noAbilities());
+    expect(twin).toEqual({ ...noAbilities(), twinLinked: true });
+    expect(flag('twin-linked').isActive(twin)).toBe(true);
+    expect(flag('twin-linked').isActive(noAbilities())).toBe(false);
+    const active = activeAbilities({ ...twin, lance: true, lethalHits: true });
+    expect(active.map((a) => a.label)).toEqual(['Lethal Hits', 'Lance', 'Twin-linked']);
+    expect(active[2]).toEqual({ key: 'twinLinked', label: 'Twin-linked', description: 'A failed wound roll is re-rolled once.' });
+  });
+
+  it('is removed and compared like the other flags', () => {
+    const none = noAbilities();
+    expect(withoutAbility({ ...none, twinLinked: true, lance: true }, 'twinLinked')).toEqual({ ...none, lance: true });
+    expect(sameAbilities({ ...none, twinLinked: true }, none)).toBe(false);
+    expect(sameAbilities({ ...none, twinLinked: true }, { ...none, twinLinked: true })).toBe(true);
+    expect(abilitiesSummary({ ...none, twinLinked: true })).toBe('Twin-linked');
   });
 });
 

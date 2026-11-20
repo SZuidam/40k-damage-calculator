@@ -74,6 +74,7 @@ const DESCRIPTIONS = {
   anti: (keywords: string, y: string) => `An unmodified wound roll of ${y} against a ${keywords} target is a critical wound (it always wounds).`,
   rapidFire: (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model when the target is within half range.`,
   lance: 'Adds 1 to the wound roll if the bearer charged this turn.',
+  twinLinked: 'A failed wound roll is re-rolled once.',
 };
 
 /** The attack condition each conditional ability needs. */
@@ -134,6 +135,13 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
     isActive: (a) => a.lance,
     apply: (a) => ({ ...a, lance: true }),
   },
+  {
+    value: 'twin-linked',
+    label: 'Twin-linked',
+    description: DESCRIPTIONS.twinLinked,
+    isActive: (a) => a.twinLinked,
+    apply: (a) => ({ ...a, twinLinked: true }),
+  },
 ];
 
 /** The abilities with X of `key` set (or replaced), stored normalised: " d6 + 2 " → "D6+2". */
@@ -159,6 +167,7 @@ export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   if (a.cleave !== null) withValue('cleave', a.cleave);
   if (a.rapidFire !== null) withValue('rapidFire', a.rapidFire);
   if (a.lance) out.push({ key: 'lance', label: 'Lance', description: DESCRIPTIONS.lance, condition: 'charged' });
+  if (a.twinLinked) out.push({ key: 'twinLinked', label: 'Twin-linked', description: DESCRIPTIONS.twinLinked });
   return out;
 }
 
@@ -216,6 +225,7 @@ export function sameAbilities(a: WeaponAbilities, b: WeaponAbilities): boolean {
     a.lethalHits === b.lethalHits &&
     a.devastatingWounds === b.devastatingWounds &&
     a.lance === b.lance &&
+    a.twinLinked === b.twinLinked &&
     sameValue('sustainedHits') &&
     sameValue('blast') &&
     sameValue('cleave') &&

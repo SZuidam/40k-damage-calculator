@@ -178,6 +178,20 @@ describe('loadState', () => {
     expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual({ ...noAbilities(), rapidFire: '1' });
   });
 
+  it('round trips Twin-linked, and gives weapons saved before it none', () => {
+    const storage = memoryStorage();
+    const state = defaultState();
+    state.library[0].abilities = { ...noAbilities(), twinLinked: true };
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
+
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    delete saved.library[0].abilities.twinLinked;
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual(noAbilities());
+    saved.library[0].abilities = { twinLinked: 'yes' };
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) })).library[0].abilities).toEqual(noAbilities());
+  });
+
   it('defaults, repairs and round trips the attack conditions', () => {
     expect(defaultState().conditions).toEqual(noConditions());
 

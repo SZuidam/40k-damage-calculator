@@ -148,6 +148,24 @@ describe('simulate', () => {
     expect(simulate(rifles(true), defender(10, 4, 3, 2), 200, mulberry32(33)).total.attacks).toBe(30);
   });
 
+  it('Twin-linked: S4 into T4 wounds 3/4 of the time', () => {
+    const twin = (twinLinked: boolean) => [weapon('Twin', 10, '1', 2, 4, 0, '1', { twinLinked })];
+    expectClose(simulate(twin(false), defender(20, 4, 3, 1), ITERATIONS, mulberry32(35)).total.wounds, 10 * (5 / 6) * (3 / 6));
+    expectClose(simulate(twin(true), defender(20, 4, 3, 1), ITERATIONS, mulberry32(35)).total.wounds, 10 * (5 / 6) * (3 / 4));
+  });
+  compareWithExact(
+    'Twin-linked with Devastating Wounds and Sustained Hits',
+    [weapon('Twin', 5, '2', 3, 4, -1, 'D3', { twinLinked: true, devastatingWounds: true, sustainedHits: '1' }), heavyBolter],
+    defender(10, 5, 3, 2),
+    36,
+  );
+  compareWithExact(
+    'Twin-linked with Lethal Hits and Anti',
+    [weapon('Twin anti', 4, '3', 4, 4, 0, '2', { twinLinked: true, lethalHits: true, anti: { vehicle: 4 } })],
+    defender(3, 9, 3, 6, null, ['vehicle']),
+    37,
+  );
+
   it('Lance: S4 into T4 wounds on 3+ after a charge', () => {
     const lance = (charged: boolean) => [weapon('Lance', 10, '1', 2, 4, 0, '1', { lance: true }, { charged })];
     expectClose(simulate(lance(false), defender(20, 4, 3, 1), ITERATIONS, mulberry32(34)).total.wounds, 10 * (5 / 6) * (3 / 6));
