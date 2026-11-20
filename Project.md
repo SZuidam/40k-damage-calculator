@@ -270,6 +270,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
 - `.gitattributes` keeps text files on LF line endings on every OS. `.gitignore` covers `node_modules`, `dist`, `*.local`, `*.log` and `*.stackdump` (Git Bash crash dumps).
+- **GitHub Pages:** `.github/workflows/deploy.yml` runs `npm ci`, `npm test` and `npm run build` on every push to `master` (or by hand) and deploys `dist` with `actions/deploy-pages`. The repo's Pages source must be set to "GitHub Actions"; "Deploy from a branch" serves the raw `index.html`, whose `/src/main.ts` the browser can't run. `vite.config.ts` sets `base: './'` so the built asset URLs are relative and work under `https://szuidam.github.io/40k-damage-calculator/`.
 
 ## Ideas for next steps
 
