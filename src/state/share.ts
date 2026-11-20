@@ -1,8 +1,10 @@
-import type { AttackPreset, DefenderPreset, DefenderProfile, RowSnapshot, StoredWeapon, UnitPreset } from '../types';
+import type { AttackProfile, DefenderPreset, DefenderProfile, RowSnapshot, StoredWeapon } from '../types';
 import { MAX_WEAPON_NAME, validateDefender, validateRow, validateWeaponStats } from '../ui/validation';
 import { uid } from './ids';
-import { copyDefender, pickStats, sameCombatStats, sameDefender, sameSnapshot } from './presets';
+import { copyDefender, materialiseRows, pickStats, sameCombatStats, sameDefender, sameSnapshot, snapshotRows, uniqueName } from './presets';
 import { isRecord, list, toDefender, toSnapshot, toWeaponStats } from './storage';
+
+export { uniqueName };
 
 /** Marks a JSON document as a share file of this app. */
 export const SHARE_FORMAT = 'damage-calculator-share';
@@ -10,8 +12,8 @@ export const SHARE_VERSION = 1;
 /** Refuse pasted text or files above this many characters. */
 export const MAX_SHARE_LENGTH = 1_000_000;
 
-export type ShareKind = 'attacks' | 'units' | 'defenders' | 'weapons';
-export const SHARE_KINDS: readonly ShareKind[] = ['attacks', 'units', 'defenders', 'weapons'];
+export type ShareKind = 'attacks' | 'defenders' | 'weapons';
+export const SHARE_KINDS: readonly ShareKind[] = ['attacks', 'defenders', 'weapons'];
 
 export interface SharedRowsPreset {
   name: string;
@@ -23,12 +25,14 @@ export interface SharedDefenderPreset {
   defender: DefenderProfile;
 }
 
-/** The shareable content. Presets travel without their ids: the importer assigns new ones. */
+/**
+ * The shareable content. Attacks and defenders travel without their ids (the importer
+ * assigns new ones); attack rows carry a copy of their weapon, so a file is self-contained.
+ */
 export interface ShareData {
   attacks: SharedRowsPreset[];
-  units: SharedRowsPreset[];
   defenders: SharedDefenderPreset[];
-  /** Library weapon profiles. Their ids travel along so preset rows link back to them on import. */
+  /** Library weapon profiles. Their ids travel along so attack rows link back to them on import. */
   weapons: StoredWeapon[];
 }
 
@@ -41,8 +45,7 @@ export interface ShareFile extends ShareData {
 /** The parts of the app state that can be exported and imported. Arrays are mutated in place on import. */
 export interface ShareState {
   library: StoredWeapon[];
-  attackPresets: AttackPreset[];
-  unitPresets: UnitPreset[];
+  attacks: AttackProfile[];
   defenderPresets: DefenderPreset[];
 }
 
@@ -51,16 +54,13 @@ export type ShareSelection = Record<ShareKind, readonly string[]>;
 
 // ---------- export ----------
 
-const copyRows = (rows: RowSnapshot[]): RowSnapshot[] => rows.map((r) => ({ models: r.models, weaponId: r.weaponId, weapon: pickStats(r.weapon) }));
-
 export function buildShareFile(state: ShareState, selection: ShareSelection, now = new Date()): ShareFile {
   const pick = <T extends { id: string }>(items: T[], ids: readonly string[]) => items.filter((item) => ids.includes(item.id));
   return {
     format: SHARE_FORMAT,
     version: SHARE_VERSION,
     exportedAt: now.toISOString(),
-    attacks: pick(state.attackPresets, selection.attacks).map((p) => ({ name: p.name, rows: copyRows(p.rows) })),
-    units: pick(state.unitPresets, selection.units).map((p) => ({ name: p.name, rows: copyRows(p.rows) })),
+    attacks: pick(state.attacks, selection.attacks).map((p) => ({ name: p.name, rows: snapshotRows(p.rows, state.library) })),
     defenders: pick(state.defenderPresets, selection.defenders).map((p) => ({ name: p.name, defender: copyDefender(p.defender) })),
     weapons: pick(state.library, selection.weapons).map((w) => ({ id: w.id, ...pickStats(w) })),
   };
@@ -93,9 +93,9 @@ export function parseShareText(text: string): ParseResult {
   if (!isRecord(raw) || raw.format !== SHARE_FORMAT) return fail('This is not an export of the Damage Calculator.');
   if (typeof raw.version !== 'number' || raw.version > SHARE_VERSION) return fail('This export was made by a newer version of the app.');
 
+  // Files from builds that had units may carry a `units` key: it is ignored.
   const data: ShareData = {
     attacks: list(raw.attacks, toSharedRows),
-    units: list(raw.units, toSharedRows),
     defenders: list(raw.defenders, toSharedDefender),
     weapons: list(raw.weapons, toSharedWeapon),
   };
@@ -175,8 +175,8 @@ export function planImport(data: ShareData, state: ShareState): ImportItem[] {
     items.push(problem ? { kind, index, name, status, problem } : { kind, index, name, status });
   };
 
-  data.attacks.forEach((p, i) => classify('attacks', i, p.name, rowsProblem(p.rows), state.attackPresets, (e) => sameSnapshot(e.rows, p.rows)));
-  data.units.forEach((p, i) => classify('units', i, p.name, rowsProblem(p.rows), state.unitPresets, (e) => sameSnapshot(e.rows, p.rows)));
+  const sameRows = (e: { rows: AttackProfile['rows'] }, rows: RowSnapshot[]) => sameSnapshot(snapshotRows(e.rows, state.library), rows);
+  data.attacks.forEach((p, i) => classify('attacks', i, p.name, rowsProblem(p.rows), state.attacks, (e) => sameRows(e, p.rows)));
   data.defenders.forEach((p, i) => classify('defenders', i, p.name, firstError(validateDefender(p.defender)), state.defenderPresets, (e) => sameDefender(e.defender, p.defender)));
   data.weapons.forEach((w, i) => classify('weapons', i, w.name, firstError(validateWeaponStats(w)), state.library, (e) => sameCombatStats(e, w)));
   return items;
@@ -195,21 +195,14 @@ export interface ImportSummary {
   replaced: number;
 }
 
-/** `Name (2)`, `Name (3)`, … cut so the result stays within the name limit. */
-export function uniqueName(taken: string[], name: string): string {
-  const used = new Set(taken.map((t) => t.toLowerCase()));
-  if (!used.has(name.toLowerCase())) return name;
-  for (let n = 2; ; n += 1) {
-    const suffix = ` (${n})`;
-    const candidate = `${name.slice(0, MAX_WEAPON_NAME - suffix.length).trimEnd()}${suffix}`;
-    if (!used.has(candidate.toLowerCase())) return candidate;
-  }
-}
-
 /**
  * Add the chosen items to the state, mutating its arrays in place. Invalid and duplicate
  * items are skipped. A conflict is replaced or added under a new name per `policy`; a
  * replaced weapon keeps its library id, so rows using it now fire the imported stats.
+ * Imported attack rows are linked to the library with `materialiseRows`: to the
+ * weapon of the same file wherever it ended up (added, renamed, replaced or already saved)
+ * when its stats match, otherwise to a matching saved weapon, otherwise their weapon copy is
+ * added to the library.
  */
 export function applyImport(data: ShareData, items: ImportItem[], state: ShareState, policy: ConflictPolicy): ImportSummary {
   const summary: ImportSummary = { added: 0, renamed: 0, replaced: 0 };
@@ -232,25 +225,45 @@ export function applyImport(data: ShareData, items: ImportItem[], state: ShareSt
     return name;
   };
 
-  // Weapons first, so preset rows imported in the same go link to them when loaded.
+  // Weapons first, so attack rows imported in the same go link to them.
   const ordered = [...items].sort((a, b) => Number(b.kind === 'weapons') - Number(a.kind === 'weapons'));
+  // Where each weapon of the file ended up in the library (its id in the file → library id), so
+  // rows of the same file link to it even when it was renamed, replaced or already saved.
+  const weaponIds = new Map<string, string>();
   for (const item of ordered) {
-    if (item.status === 'invalid' || item.status === 'duplicate') continue;
+    if (item.status === 'invalid') continue;
     if (item.kind === 'weapons') {
       const weapon = data.weapons[item.index];
-      const name = place(item, state.library, (target) => Object.assign(target, pickStats(weapon)));
+      if (item.status === 'duplicate') {
+        const saved = byName(state.library, item.name);
+        if (saved) weaponIds.set(weapon.id, saved.id);
+        continue;
+      }
+      const name = place(item, state.library, (target) => {
+        Object.assign(target, pickStats(weapon));
+        weaponIds.set(weapon.id, target.id);
+      });
       if (name === null) continue;
       const id = state.library.some((w) => w.id === weapon.id) ? uid('weapon') : weapon.id;
       state.library.push({ ...pickStats(weapon), id, name });
+      weaponIds.set(weapon.id, id);
+    } else if (item.status === 'duplicate') {
+      continue;
     } else if (item.kind === 'defenders') {
       const preset = data.defenders[item.index];
       const name = place(item, state.defenderPresets, (target) => (target.defender = copyDefender(preset.defender)));
       if (name !== null) state.defenderPresets.push({ id: uid('defender'), name, defender: copyDefender(preset.defender) });
     } else {
-      const preset = data[item.kind][item.index];
-      const target = item.kind === 'attacks' ? state.attackPresets : state.unitPresets;
-      const name = place(item, target, (t) => (t.rows = copyRows(preset.rows)));
-      if (name !== null) target.push({ id: uid(item.kind === 'attacks' ? 'attack' : 'unit'), name, rows: copyRows(preset.rows) });
+      const preset = data.attacks[item.index];
+      const target = state.attacks;
+      const link = (name: string) => {
+        const snapshots = preset.rows.map((r) => ({ ...r, weaponId: weaponIds.get(r.weaponId) ?? r.weaponId }));
+        const linked = materialiseRows(snapshots, state.library, name);
+        state.library.splice(0, state.library.length, ...linked.library);
+        return linked.rows;
+      };
+      const name = place(item, target, (t) => (t.rows = link(t.name)));
+      if (name !== null) target.push({ id: uid('attack'), name, rows: link(name) });
     }
   }
   return summary;

@@ -1,10 +1,8 @@
-import { formatDiceSum, tryParseDice } from '../engine/dice';
-import { bonusAttacks, bonusDamage } from '../engine/rules';
-import { activeAbilities, normaliseDice } from '../state/abilities';
 import { uid } from '../state/ids';
 import { findWeapon, sortedLibrary } from '../state/presets';
-import { KEYWORD_NAMES, noConditions, type AttackConditions, type AttackRow, type DefenderProfile, type StoredWeapon, type WeaponStats } from '../types';
+import { noConditions, type AttackConditions, type AttackRow, type StoredWeapon } from '../types';
 import { field, h, numberValue, setFieldError } from './dom';
+import { statChips, type ChipDefender } from './statChips';
 import { validateRow } from './validation';
 import { openWeaponModal } from './weaponModal';
 
@@ -17,15 +15,13 @@ export interface AttackListOptions {
   onChange: () => void;
   /** This list created or edited a library profile; other views showing the library should refresh. */
   onLibraryChange: () => void;
-  /** Compact mode (unit editor): models + weapon + remove only. */
-  compact?: boolean;
   /** Rows that can't be removed below this count. Default 1. */
   minRows?: number;
   /**
    * The defending unit: its models for the Blast / Cleave extra attacks shown on the A chip,
    * its keywords to mark Anti abilities that apply.
    */
-  defender?: () => Pick<DefenderProfile, 'models' | 'keywords'>;
+  defender?: () => ChipDefender;
   /**
    * The attack conditions: within half range Rapid Fire adds to the A chip and Melta to the D chip,
    * and conditional abilities are outlined while on.
@@ -38,23 +34,32 @@ export function newRow(weaponId: string | null, models = 1): AttackRow {
 }
 
 /**
- * Reorderable list of attack rows. Each row picks a weapon from the library and shows
- * its stats read-only, with ✎ to edit the profile. Edits mutate `rows` in place.
+ * Reorderable list of attack rows (the attack editor). Each row picks a
+ * weapon from the library and shows its stats read-only, with ✎ to edit the profile. Edits
+ * mutate the `rows` array in place; `setRows` switches to another array.
  */
 export class AttackList {
   private readonly list: HTMLOListElement;
+  private readonly empty: HTMLParagraphElement;
   private readonly minRows: number;
   /** Per rendered row: refresh its validation and stat chips. */
   private updaters: (() => void)[] = [];
 
   constructor(
     container: HTMLElement,
-    private readonly rows: AttackRow[],
-    private readonly options: AttackListOptions,
+    private rows: AttackRow[],
+    private readonly options: AttackListOptions & { emptyText?: string },
   ) {
     this.minRows = options.minRows ?? 1;
-    this.list = h('ol', { class: `weapon-list${options.compact ? ' weapon-list--compact' : ''}` });
-    container.append(this.list);
+    this.list = h('ol', { class: 'weapon-list' });
+    this.empty = h('p', { class: 'list-empty' }, options.emptyText ?? 'No weapons yet.');
+    container.append(this.list, this.empty);
+    this.render();
+  }
+
+  /** Edit another array of rows (another attack). Doesn't call `onChange`. */
+  setRows(rows: AttackRow[]): void {
+    this.rows = rows;
     this.render();
   }
 
@@ -77,6 +82,7 @@ export class AttackList {
   render(): void {
     this.updaters = [];
     this.list.replaceChildren(...this.rows.map((row, i) => this.row(row, i)));
+    this.empty.hidden = this.rows.length > 0;
   }
 
   /** Refresh the stat chips without re-rendering (keeps focus), e.g. after the defender changed. */
@@ -102,9 +108,11 @@ export class AttackList {
   }
 
   private remove(index: number): void {
+    const wasFocused = this.list.contains(document.activeElement);
     this.rows.splice(index, 1);
     this.render();
     if (this.rows.length > 0) this.focusRow(Math.min(index, this.rows.length - 1), '.row-models');
+    else if (wasFocused) this.list.closest('[role="tabpanel"], dialog')?.querySelector<HTMLElement>('.list-add')?.focus();
     this.options.onChange();
   }
 
@@ -143,7 +151,6 @@ export class AttackList {
   }
 
   private row(row: AttackRow, index: number): HTMLLIElement {
-    const { compact } = this.options;
     const id = (name: string) => `${row.id}-${name}`;
 
     const models = h('input', { id: id('models'), class: 'row-models', type: 'number', inputmode: 'numeric', min: 1, max: 50, value: row.models });
@@ -164,7 +171,6 @@ export class AttackList {
         else control.removeAttribute('aria-describedby');
       }
       errors.textContent = Object.values(result).join(' · ');
-      if (compact) return;
       chips.replaceChildren(...statChips(weapon, this.options.defender?.(), this.options.conditions?.() ?? noConditions()));
       edit.disabled = !weapon;
       edit.setAttribute('aria-label', weapon ? `Edit ${weapon.name}` : 'Edit weapon profile');
@@ -198,119 +204,26 @@ export class AttackList {
     );
     remove.addEventListener('click', () => this.remove(index));
 
-    let li: HTMLLIElement;
-    if (compact) {
-      li = h('li', { class: 'weapon-row weapon-row--compact' }, field('Models', models), field('Weapon', weaponSelect, 'field--weapon'), h('div', { class: 'row-actions' }, remove), errors);
-    } else {
-      const up = h('button', { type: 'button', class: 'icon-button move-up', 'aria-label': `Move ${label} up`, title: 'Move up', disabled: index === 0 }, '↑');
-      const down = h(
-        'button',
-        { type: 'button', class: 'icon-button move-down', 'aria-label': `Move ${label} down`, title: 'Move down', disabled: index === this.rows.length - 1 },
-        '↓',
-      );
-      up.addEventListener('click', () => this.move(index, -1, 'move-up'));
-      down.addEventListener('click', () => this.move(index, 1, 'move-down'));
-      li = h(
-        'li',
-        { class: 'weapon-row' },
-        h('span', { class: 'row-index', 'aria-hidden': 'true' }, String(index + 1)),
-        field('Models', models, 'field--models'),
-        field('Weapon', weaponSelect, 'field--weapon'),
-        chips,
-        h('div', { class: 'row-actions' }, edit, h('span', { class: 'row-actions-sep', 'aria-hidden': 'true' }), up, down, remove),
-        errors,
-      );
-    }
+    const up = h('button', { type: 'button', class: 'icon-button move-up', 'aria-label': `Move ${label} up`, title: 'Move up', disabled: index === 0 }, '↑');
+    const down = h(
+      'button',
+      { type: 'button', class: 'icon-button move-down', 'aria-label': `Move ${label} down`, title: 'Move down', disabled: index === this.rows.length - 1 },
+      '↓',
+    );
+    up.addEventListener('click', () => this.move(index, -1, 'move-up'));
+    down.addEventListener('click', () => this.move(index, 1, 'move-down'));
+    const li = h(
+      'li',
+      { class: 'weapon-row' },
+      h('span', { class: 'row-index', 'aria-hidden': 'true' }, String(index + 1)),
+      field('Models', models, 'field--models'),
+      field('Weapon', weaponSelect, 'field--weapon'),
+      chips,
+      h('div', { class: 'row-actions' }, edit, h('span', { class: 'row-actions-sep', 'aria-hidden': 'true' }), up, down, remove),
+      errors,
+    );
     update();
     this.updaters.push(update);
     return li;
   }
-}
-
-const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities'>; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
-  { key: 'attacks', label: 'A', title: 'Attacks' },
-  { key: 'skill', label: 'BS', title: 'Ballistic / Weapon Skill', format: (w) => `${w.skill}+` },
-  { key: 'strength', label: 'S', title: 'Strength' },
-  { key: 'ap', label: 'AP', title: 'Armour penetration' },
-  { key: 'damage', label: 'D', title: 'Damage' },
-];
-
-/** Why an attack condition makes an ability active, for its tooltip. */
-const CONDITION_REASONS: Record<keyof AttackConditions, string> = {
-  halfRange: 'the target is within half range',
-  charged: 'the bearer charged this turn',
-};
-
-function statChips(weapon: WeaponStats | undefined, defender: Pick<DefenderProfile, 'models' | 'keywords'> | undefined, conditions: AttackConditions): HTMLElement[] {
-  if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
-  const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
-    h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, label), ' ', format ? format(weapon) : String(weapon[key])),
-  );
-  const bonus = attacksBonus(weapon, defender?.models, conditions);
-  if (bonus) {
-    // The A chip comes first: "A 4+2" or "A D6+2D6+4", with the Blast / Cleave / Rapid Fire extra attacks in blue.
-    chips[0].append(h('span', { class: 'chip-bonus' }, `+${bonus.value}`));
-    chips[0].title = `Attacks: ${weapon.attacks}, plus ${bonus.value} from ${bonus.sources}`;
-  }
-  const extraDamage = damageBonus(weapon, conditions);
-  if (extraDamage) {
-    // The D chip comes last: "D D6+2", with the Melta extra damage in blue.
-    const chip = chips[chips.length - 1];
-    chip.append(h('span', { class: 'chip-bonus' }, `+${extraDamage.value}`));
-    chip.title = `Damage: ${weapon.damage}, plus ${extraDamage.value} from ${extraDamage.sources}`;
-  }
-  const abilities = activeAbilities(weapon.abilities);
-  if (abilities.length === 0) return chips;
-  // Read-only here; abilities are edited in the weapon profile modal (✎).
-  const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
-  abilities.forEach(({ label, description, anti, condition }, i) => {
-    if (i > 0) text.append(', ');
-    // An Anti ability is outlined when the current defender has one of its keywords, a
-    // conditional ability (Rapid Fire, Melta, Lance) while its attack condition is on.
-    let active: string | null = null;
-    const matched = anti && defender ? anti.keywords.filter((k) => defender.keywords.includes(k)) : [];
-    if (matched.length > 0) {
-      const names = matched.map((k) => KEYWORD_NAMES[k]).join(' and ');
-      active = `Active: the target has the ${names} keyword${matched.length === 1 ? '' : 's'}.`;
-    } else if (condition && conditions[condition]) {
-      active = `Active: ${CONDITION_REASONS[condition]}.`;
-    }
-    if (active === null) {
-      text.append(h('span', { title: description }, label));
-      return;
-    }
-    text.append(h('span', { class: 'ability-active', title: `${description} ${active}` }, label, h('span', { class: 'visually-hidden' }, ' (active)')));
-  });
-  return [...chips, text];
-}
-
-/**
- * Blast / Cleave / Rapid Fire extra attacks per model against the current defender and
- * under the current conditions ("2D6+4"), with their sources for the tooltip, or null when
- * there are none or an X is invalid (the row shows that error instead).
- */
-function attacksBonus(weapon: WeaponStats, defenderModels: number | undefined, conditions: AttackConditions): { value: string; sources: string } | null {
-  const { blast, cleave, rapidFire } = weapon.abilities;
-  if ([blast, cleave, rapidFire].some((x) => x !== null && !tryParseDice(x))) return null;
-  // Without a valid model count Blast / Cleave add nothing here; Rapid Fire still can.
-  const models = defenderModels !== undefined && Number.isInteger(defenderModels) && defenderModels >= 1 ? defenderModels : 0;
-  const terms = bonusAttacks({ abilities: weapon.abilities, conditions }, { models });
-  if (terms.length === 0) return null;
-  const perFive = models >= 5 ? [blast === null ? '' : `Blast ${normaliseDice(blast)}`, cleave === null ? '' : `Cleave ${normaliseDice(cleave)}`].filter(Boolean) : [];
-  const sources: string[] = [];
-  if (perFive.length > 0) sources.push(`${perFive.join(' and ')} (${models} models in the target unit)`);
-  if (rapidFire !== null && conditions.halfRange) sources.push(`Rapid Fire ${normaliseDice(rapidFire)} (within half range)`);
-  return { value: formatDiceSum(terms), sources: sources.join(' and ') };
-}
-
-/**
- * Melta extra damage per unsaved wound under the current conditions ("D3"), with its source
- * for the tooltip, or null when there is none or X is invalid (the row shows that error instead).
- */
-function damageBonus(weapon: WeaponStats, conditions: AttackConditions): { value: string; sources: string } | null {
-  const { melta } = weapon.abilities;
-  if (melta === null || !tryParseDice(melta)) return null;
-  const terms = bonusDamage({ abilities: weapon.abilities, conditions });
-  if (terms.length === 0) return null;
-  return { value: formatDiceSum(terms), sources: `Melta ${normaliseDice(melta)} (within half range)` };
 }
