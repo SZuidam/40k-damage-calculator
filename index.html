@@ -7,14 +7,13 @@
     <title>Damage Calculator</title>
   </head>
   <body>
-    <header class="app-header">
-      <div class="app-title">
-        <h1>Damage Calculator</h1>
-        <p class="subtitle">Monte Carlo simulation of the attack sequence: hit, wound, save, damage.</p>
-      </div>
-      <div class="header-actions">
-        <button type="button" id="open-import" class="button secondary small">Import…</button>
-        <button type="button" id="open-export" class="button secondary small">Export…</button>
+    <header class="app-bar">
+      <div class="app-bar-inner">
+        <div class="app-title">
+          <h1>Damage Calculator</h1>
+          <p class="subtitle">Monte Carlo simulation of the attack sequence: hit, wound, save, damage.</p>
+        </div>
+        <button type="button" id="open-config" class="icon-button app-bar-menu" aria-label="Open configuration" title="Configuration" aria-haspopup="dialog">☰</button>
       </div>
     </header>
 
@@ -25,23 +24,16 @@
             <h2 id="attacker-title">Attacker</h2>
             <p class="panel-hint">Weapons resolve top to bottom. A wounded model carries over to the next weapon.</p>
           </div>
-          <div id="attack-presets"></div>
-          <div id="attack-conditions"></div>
-          <div id="weapons"></div>
-          <div class="panel-actions">
-            <div class="panel-actions-group">
-              <button type="button" id="add-weapon" class="button secondary">+ Add weapon</button>
-              <select id="add-unit" class="button-select" aria-label="Append a saved unit to the attack"></select>
-              <button type="button" id="open-library" class="button secondary">Weapon profiles…</button>
-              <button type="button" id="open-units" class="button secondary">Units…</button>
+          <div class="preset-bar">
+            <div class="field preset-field">
+              <label for="attack-select">Attack</label>
+              <select id="attack-select" class="preset-select"></select>
             </div>
-            <div class="optimise">
-              <button type="button" id="optimise" class="button secondary" aria-describedby="optimise-status">
-                Optimise order <span class="badge" id="optimise-badge" hidden></span>
-              </button>
-              <p id="optimise-status" class="optimise-status" aria-live="polite"></p>
-            </div>
+            <button type="button" id="edit-attack" class="button secondary small">✎ Edit attack</button>
           </div>
+          <div id="attack-conditions"></div>
+          <div id="attack-roster"></div>
+          <p id="optimise-hint" class="optimise-hint" hidden></p>
         </section>
 
         <section class="panel defender" aria-labelledby="defender-title">
@@ -54,17 +46,13 @@
         </section>
 
         <div class="run-bar">
-          <div class="field">
-            <label for="iterations">Iterations</label>
-            <input id="iterations" type="number" inputmode="numeric" min="100" max="1000000" step="1000" />
-          </div>
           <button type="submit" id="simulate" class="button primary">Simulate</button>
           <p id="run-status" class="run-status" aria-live="polite"></p>
         </div>
       </form>
 
       <section id="results" class="results" aria-label="Results">
-        <p class="empty">Enter a loadout and press Simulate.</p>
+        <p class="empty">Pick an attack and a defender, then press Simulate.</p>
       </section>
     </main>
 

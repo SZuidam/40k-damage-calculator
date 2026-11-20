@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (258 tests, about 6 s)
+- `npm test`: Vitest, run once (281 tests, about 4 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -18,11 +18,11 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 ## Layout
 
 ```
-index.html              static shell: attacker panel, defender panel, run bar, results section
+index.html              static shell: sticky app bar (☰), attacker panel (attack picker, ✎ Edit attack, conditions, roster), defender panel, run bar, results section
 src/
-  main.ts               app state, wiring of views and preset bars, optimiser debounce, simulate button
-  style.css             design tokens on :root, dark mode, layout, chart, preset bar and dialog styles
-  types.ts              WeaponStats, WeaponAbilities (+ copyAbilities), AttackConditions (+ noConditions), DEFENDER_KEYWORDS / KEYWORD_NAMES, StoredWeapon, AttackRow, RowSnapshot, *Preset, WeaponProfile (engine input), DefenderProfile, results
+  main.ts               app state, active attack, wiring of the main page, the drawer and its tabs, optimiser debounce, simulate button
+  style.css             design tokens on :root, dark mode, app bar, drawer + tabs, ⋯ menus, roster, rows (container queries), chart, dialog styles
+  types.ts              WeaponStats, WeaponAbilities (+ copyAbilities), AttackConditions (+ noConditions), DEFENDER_KEYWORDS / KEYWORD_NAMES, StoredWeapon, AttackRow, AttackProfile, RowSnapshot (export format), DefenderPreset, WeaponProfile (engine input), DefenderProfile, results
   engine/
     rng.ts              Rng type, mulberry32(seed), rollDie, d6 (default rng = Math.random)
     dice.ts             tryParseDice/parseDice, rollDice, diceDistribution (exact PMF), convolve, repeatDice, sums of expressions (rollDiceSum, diceSumDistribution, formatDiceSum)
@@ -34,21 +34,25 @@ src/
     *.test.ts           tests next to each module
   state/                pure, DOM-free, unit-tested
     ids.ts              uid()
-    storage.ts          loadState / saveState (key damage-calculator:v2), v1 migration, shape checks, defaults (incl. the attack conditions)
+    storage.ts          loadState / saveState (key damage-calculator:v3), v2 → v3 and v1 → v3 migration, shape checks, defaults (incl. the attack conditions)
     abilities.ts        ability labels, "Add ability…" choices, withAbilityValue, withAntiValue / withoutAnti, parseAntiValue, sameAbilities
-    presets.ts          pickStats, copyDefender, resolveRows, snapshotRows, sameSnapshot, sameDefender, materialiseRows, weaponUsage, helpers
-    share.ts            export file (build/serialise), parseShareText, planImport, applyImport, uniqueName
+    presets.ts          pickStats, copyDefender, resolveRows, snapshotRows, sameSnapshot, sameDefender, materialiseRows, weaponUsage, copyRows, uniqueName, byName, summaries
+    share.ts            export file (build/serialise), parseShareText, planImport, applyImport (re-exports uniqueName)
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateRow / validateDefender / validateIterations, abilityValueError, antiValueError, LIMITS
     modal.ts            openModal() around a native <dialog>, confirmDialog(), promptName()
+    drawer.ts           Drawer class: the configuration <dialog> sliding in from the right, ARIA tabs (Attacks · Weapons · Settings), open(tab?)
+    menu.ts             Menu class: ⋯ button + menu (arrow keys, Esc, click outside, disabled items with a reason)
     weaponModal.ts      openWeaponModal(initial?): create or edit a weapon profile
     abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta or the Y of Anti-X Y+
-    libraryModal.ts     "Weapon profiles…": list, create, edit, delete (blocked while in use)
-    attackList.ts       AttackList class: Models + weapon select + read-only stat chips (active Anti / Rapid Fire / Melta / Lance outlined) + ✎; add / remove / move / reorder; compact mode
-    presetBar.ts        PresetBar class: [Preset ▾] [Save] [Save as…] [Delete] with dirty detection
-    unitModal.ts        "Units…": list, create, edit, delete attacking unit presets
-    shareModal.ts       "Export…" (pick items, Copy / Download) and "Import…" (paste or file, review, import)
+    statChips.ts        statChips(): read-only stat chips + ability text (Blast / Rapid Fire / Melta bonuses, active Anti / condition outlines), shared by roster and editor
+    attackRoster.ts     AttackRoster class: the main page's read-only list of the active attack
+    attackEditor.ts     AttackEditor class (Attacks tab): attack select + ⋯ (New / Rename / Duplicate / Delete), rows, + Add weapon, Optimise order
+    attackList.ts       AttackList class: editable rows (Models + weapon select + chips + ✎ ↑ ↓ ✕), setRows()
+    weaponsPanel.ts     WeaponsPanel class (Weapons tab): list, create, edit, delete (blocked while an attack uses it)
+    presetBar.ts        PresetBar class: [Preset ▾] [⋯ Save / Save as… / Delete] with dirty detection (defender only)
+    shareModal.ts       "Export…" (pick items, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
     defenderForm.ts     renderDefenderForm() → { setValues() }: stats plus the keyword toggles
     conditionsForm.ts   renderAttackConditions() → { setValues() }: the "Within half range" / "Charged this turn" toggles
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
@@ -72,14 +76,14 @@ src/
 - **Lance:** while the attack condition *Charged this turn* is on, +1 to the wound roll (`woundModifier`). S4 vs T4 goes from 4+ to 3+, S4 vs T8 from 6+ to 5+, a 2+ still fails on a 1. Lance never makes a critical wound on its own: Devastating Wounds and Anti still use the unmodified roll.
 - **Twin-linked:** a failed wound roll is re-rolled once, and the re-roll stands whether it passes or fails (a die is never re-rolled twice). Only failed rolls are re-rolled, so a successful non-critical wound is never re-rolled to fish for a Devastating Wounds 6. The re-rolled die counts as an unmodified roll: it gets the same Lance modifier, and a re-rolled 6 (or Y+ with Anti) is a critical wound. Lethal Hits auto-wounds make no wound roll, so there is nothing to re-roll. In the maths, `woundRollFaces(ctx)` gives the probability of each final face, P(f) = [f wounds]/6 + P(first roll fails)/6, and `woundChance` / `unsavedPerWoundRoll` weigh the faces with it; S4 vs T4 goes from 1/2 to 3/4, in general p + (1 − p)·p.
 - When every defending model is destroyed, damage stops being applied. Hits, wounds and unsaved wounds are still counted, so the per-step stats show the weapon's full output.
-- **Weapon order:** weapons resolve top to bottom. The user can reorder them, and the "Optimise order" button can reorder them for the user.
+- **Weapon order:** weapons resolve top to bottom. The user can reorder them in the attack editor, and its "Optimise order" button can reorder them for the user.
 
 ## Inputs
 
 - **Weapon profile** (library, edited in a modal): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression), abilities.
 - **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits, devastatingWounds, blast, cleave, anti, rapidFire, melta, lance, twinLinked }`, the X fields `string | null` dice expressions, `anti` a `Partial<Record<DefenderKeyword, number>>` of Y per keyword, e.g. `{ vehicle: 4, monster: 4 }`): in the modal an "Add ability…" dropdown with one entry per ability (`ABILITY_CHOICES` in `state/abilities.ts`) plus a removable chip per ability. Picking `Sustained Hits X…`, `Blast X…`, `Cleave X…`, `Rapid Fire X…` or `Melta X…` opens a small pop-up beside the dropdown (`ui/abilityValuePopover.ts`) with a text input that takes the same dice expressions as A and D; OK is disabled while the value is invalid, Enter confirms without submitting the weapon form, Esc / Cancel / a click outside closes only the pop-up. Clicking the label of an X chip reopens the pop-up prefilled to change X. Values are stored normalised (`withAbilityValue`: ` d6 + 2 ` → `D6+2`). Validation (`abilityValueError`): the expression must parse and its highest roll must be at most 12 (`LIMITS.abilityValue.max`, allows 2D6 / D6+6 and keeps the exact engine's attack PMF small).
-- **Attack conditions** (`AttackConditions` = `{ halfRange, charged }`): two pill toggles, "Within half range" and "Charged this turn", in their own segment of the Attacker panel between the attack profile bar and the weapons. They apply to every weapon and are situational: saved with the live state (`StoredState.conditions`) but not in presets, units or exports, so toggling one never marks a preset "(modified)".
-- **Attack row:** models + a weapon picked from the library. The row's stats are read-only chips with the abilities as read-only text below them; ✎ edits the linked profile.
+- **Attack conditions** (`AttackConditions` = `{ halfRange, charged }`): two pill toggles, "Within half range" and "Charged this turn", in their own segment of the Attacker panel between the attack picker and the roster. They apply to every weapon and are situational: saved with the page state (`StoredState.conditions`) but not in attacks or exports.
+- **Attack row:** models + a weapon picked from the library, edited in the attack editor (drawer). The row's stats are read-only chips with the abilities as read-only text below them; ✎ edits the linked profile. The main page shows the same rows read-only.
 - **Defender:** models, T, Sv (2–6, or 7 for none), Inv (none or 2–6), W, and keywords (Vehicle, Monster, Psyker, Infantry, Fly; `DefenderProfile.keywords`, always in `DEFENDER_KEYWORDS` order without duplicates) as pill-shaped checkbox toggles under the stats.
 - **Dice expressions:** `3`, `D3`, `D6`, `2D6`, `D6+1`, `2D3+2`. Case and spaces don't matter. Only **D3 and D6** are allowed, only a **`+` bonus** (no minus), at most 20 dice, and constants from 1 to 200.
 - **Limits** (`ui/validation.ts`): weapon models 1–50, S 1–30, defender models 1–40, T 1–20, W 1–40, **models × wounds ≤ 400** (keeps the exact engine responsive), iterations 100 to 1,000,000 (default 10,000).
@@ -105,10 +109,10 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## UI behaviour
 
-- Edits mutate the state objects in place and call `onInputsChanged()`. That function saves to `localStorage` (key `damage-calculator:v2`), enables or disables Simulate, marks old results as stale, refreshes both preset bars (their dirty state can change) and schedules the optimiser. State arrays (`library`, `rows`, presets) are always mutated in place (`splice`), because the views hold references to them.
-- All pop-ups are native `<dialog>`s through `ui/modal.ts` (Esc and backdrop click cancel, nested dialogs stack). Don't use `window.confirm`/`prompt`: they block browser automation.
+- Edits mutate the state objects in place and call `onInputsChanged()`. That function saves to `localStorage` (key `damage-calculator:v3`), redraws the roster, refreshes the editor's chips, enables or disables Simulate (the run status says why it is disabled), marks old results as stale, refreshes the defender preset bar (its dirty state can change) and schedules the optimiser. State arrays (`library`, `attacks`, `defenderPresets`) are always mutated in place (`splice`), because the views hold references to them. When an attack's `rows` array is replaced (import with Replace), call `editor.setAttack()` so the editor edits the new array.
+- All pop-ups are native `<dialog>`s through `ui/modal.ts` (Esc and backdrop click cancel, nested dialogs stack), and so is the configuration drawer (`ui/drawer.ts`). Don't use `window.confirm`/`prompt`: they block browser automation.
 - Invalid fields get `aria-invalid` and an error line under their row. Simulate is disabled until every field is valid.
-- **Optimise order** is disabled with fewer than two weapons or while inputs are invalid. It gets the amber `.is-recommended` style and a badge (`+0.12 models`) when it would help. The status line explains the result, and the tooltip lists the best order. Clicking it applies `bestOrder`. When the gain is below the threshold, it only moves weapons if that applies more damage without changing kills.
+- **Optimise order** (attack editor) is disabled with fewer than two weapons or while inputs are invalid. It gets the amber `.is-recommended` style and a badge (`+0.12 models`) when it would help. The status line explains the result, and the tooltip lists the best order. Clicking it applies `bestOrder`. When the gain is below the threshold, it only moves weapons if that applies more damage without changing kills. While it would help, the main page shows a read-only amber hint with an "Edit attack" link that opens the drawer.
 - **Results:**
   - A headline average kills figure, plus stat tiles for damage applied, unsaved wounds and P(unit wiped out).
   - The "Average per step" table (one row per weapon plus a Total row).
@@ -117,6 +121,8 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - **Theme:** tokens on `:root`, dark mode through `prefers-color-scheme` and `:root[data-theme='dark']`. The layout works at 390px wide with no sideways scrolling.
 
 ## Weapon library and presets (session 2, 2026-11-19)
+
+> Superseded for attacks and units by the profile rework (session 11): attacks and units are now linked profiles, there is no live workspace and no attack Save / "(modified)". Defender presets still work as described here.
 
 **Data model** (`types.ts`):
 
@@ -213,6 +219,53 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - **Attack row:** within half range the D chip reads `D D6+2` with the `+2` in the accent blue (`.chip-bonus`, like the A chip), tooltip "Damage: D6, plus 2 from Melta 2 (within half range)" (`damageBonus` in `ui/attackList.ts`); nothing is shown while X is invalid. `ActiveAbility.condition` is `halfRange`, so the ability is outlined while the condition is on.
 - `npm test` 258/258 (new: `bonusDamage` / `damagePerWound` only within half range and with dice X, rolls and attacks unchanged; sim and exact damage 10·5/6·2/6 × 3.5 vs × 5.5 for Melta 2 on D6; sim vs exact for Melta D3 with carry-over; choices, labels, condition, `withoutAbility`, `sameAbilities`; storage round trip, missing field and number repair; share round trip; validation). `npm run build` is clean. Checked in Chrome: `d6+7` shows "Melta X: X can roll at most 12" and blocks OK, `d3 + 1` + Enter gives chip "Melta D3+1" without submitting; localStorage holds `melta: "D3+1"`; within half range the D chip reads `D 1+D3+1` with the tooltip and the ability is outlined, both gone when the toggle is off; 10 bolt rifles with Melta D3+1 into 10 MEQ (W2) give 3.32 kills and 6.65 damage (expected 3.33 / 6.67); no console errors.
 
+## Profile rework (session 11, 2026-11-20)
+
+> Units, as described in this section (`UnitProfile`, the Units tab, "+ Add unit", `units` in storage and exports), were removed in session 12; see "Units removed" below.
+
+**Goal:** a mostly read-only main page (pick an attack, see it, toggle conditions, edit the defender, simulate) and all creating / editing / deleting of attacks, weapons and units in a configuration drawer.
+
+**Data model** (`types.ts`):
+
+- `AttackProfile` / `UnitProfile` = `{ id, name, rows: AttackRow[] }`. Rows link to the library by `weaponId`, like the old live rows. **Editing a weapon profile changes every attack and unit that uses it** (intended: profiles no longer hold frozen copies).
+- **Attack profiles are the attack.** There is no live workspace: the main page shows the active attack (`StoredState.activeAttackId`, always valid) and the editor changes it directly, so there is no Save / Save as / "(modified)" for attacks. Defender presets keep the workspace model (the form is the workspace, the ⋯ menu saves it).
+- `RowSnapshot` only remains as the export / import format (and to read v2 presets during migration).
+
+**Storage v3** (`state/storage.ts`, key `damage-calculator:v3`): `{ library, attacks, activeAttackId, units, defender, defenderPresets, activeDefenderPresetId, conditions, iterations }`.
+
+- `loadState`: v3 → `normalise`; else v2 → `migrateV2`; else v1 → `migrateV1` (v1 → a v2-shaped state → the same conversion). Old keys are left in place.
+- `normalise`: rows pointing at a missing weapon → `weaponId: null` (attacks and units); empty library → the default library (and the default attack if there are no attacks); no attacks → one attack "Attack" with 1× the first weapon; stale `activeAttackId` → the first attack; stale defender preset id → null.
+- **v2 → v3** (`fromV2`): attack and unit presets become linked profiles (same ids and names) through `materialiseRows`, which reuses library entries with the same stats, adds a changed weapon once as `Name (preset)` and restores a deleted one under its own id. The live rows: when the active attack preset is clean (no unlinked row and `sameSnapshot`, the same check v2's "(modified)" used), that preset keeps the live rows as is and becomes active; otherwise a new attack `Preset (modified)` (cut to 40 characters) or `Current attack` (unique name) holds the live rows and becomes active, so no work is lost.
+- Default: one "Bolt rifle", one attack "Bolt rifles" (10× Bolt rifle), 10 MEQ.
+
+**Share** (`state/share.ts`, file format and `SHARE_VERSION` unchanged): `ShareState` = `{ library, attacks, units, defenderPresets }`. Export snapshots the linked rows (`snapshotRows(profile.rows, library)`), so files stay self-contained. The review compares `snapshotRows(saved.rows, library)` with the file, so a saved attack whose weapon changed in the library is now a "Name in use" conflict rather than "Already saved". Apply imports weapons first and records where each file weapon ended up (added, renamed, replaced or already saved); attack and unit rows are remapped to those ids and linked with `materialiseRows`, so they link to the renamed `Bolt rifle (2)` instead of creating `Bolt rifle (Gunline)`. A row whose weapon wasn't imported brings its copy into the library.
+
+**UI:**
+
+- **App bar:** sticky, title + subtitle (hidden ≤ 600px) and ☰ ("Open configuration"). Import / Export moved to the Settings tab.
+- **Attacker panel:** attack select (shared with the editor), **✎ Edit attack** (opens the drawer on Attacks), conditions, the read-only roster (`ui/attackRoster.ts`: `1  10× Bolt rifle  [A 2] [BS 3+] …` with abilities and bonuses from `ui/statChips.ts`; invalid rows get a red edge and their error; an empty attack says to add weapons with ✎), and the optimiser hint.
+- **Defender panel:** preset select + ⋯ menu (Save, Save as…, Delete; disabled items show why), then the form. Behaviour (dirty, discard prompt, overwrite prompt) unchanged.
+- **Run bar:** Simulate + status only (iterations moved to Settings).
+- **Drawer** (`ui/drawer.ts`): one persistent `<dialog class="drawer">`, `showModal()` (focus trap, Esc, backdrop click; weapon / confirm dialogs stack on top), slides in from the right with `@starting-style` + `transition-behavior: allow-discrete` (off under `prefers-reduced-motion`), `width: min(560px, 100%)`, full height, only the panel area scrolls. ARIA tablist with roving tabindex, arrow keys / Home / End switch tabs; `open(tab?)` reopens the last tab; focus returns to the opener on close. Tabs keep their state while closed (a half-edited unit stays open).
+  - **Attacks** (`ui/attackEditor.ts`): attack select + ⋯ (New attack… starts empty, Rename…, Duplicate as `Name (2)` with new row ids, Delete with confirm, blocked for the last attack); `AttackList` with `minRows: 0`; + Add weapon; + Add unit (appends `copyRows` of the unit); Optimise order with badge and status.
+  - **Weapons** (`ui/weaponsPanel.ts`): the old library modal as a panel. Usage counts rows across attacks and units (`weaponUsage(id, [...attacks, ...units])`); a used weapon shows "Used by Gunline, Devastators (unit)" and can't be deleted.
+  - **Units** (`ui/unitsPanel.ts`): list + editor on a draft copy of the rows (Back discards); "Copy rows from current attack" copies the active attack with new row ids; units save linked rows.
+  - **Settings:** Iterations, Import… / Export….
+- **⋯ menus** (`ui/menu.ts`): `aria-haspopup="menu"`, ↓ / ↑ on the button open it on the first / last item, arrow keys / Home / End move, Esc closes only the menu (stops propagation so the drawer stays open) and refocuses ⋯, Tab and a click outside close it. Disabled items keep focus but use `aria-disabled` and a reason tooltip.
+- **Rows:** `.weapon-list` and `.roster` are inline-size containers; the editor rows have three layouts by container width (> 680px one line; ≤ 680px actions beside the weapon and chips on their own line, as in the drawer; ≤ 440px models + weapon, chips, actions), the roster wraps chips below the name at ≤ 520px.
+
+**Verification:** `npm test` 277/277 (storage rewritten for v3: round trip, repair, v2 → v3 with clean / modified / no active preset, unlinked live row, name clash and 40-character cut, units, library dedupe with a changed and a deleted weapon, v1 → v3, old keys kept; share: linked export snapshots, import links to imported / saved weapons and to renamed copies, replace keeps the unit object; presets: `weaponUsage` across profiles, `copyRows`, `rowsSummary` / `snapshotsSummary`, `uniqueName`, `byName`). Engine tests unchanged. `npm run build` is clean. Checked in Chrome: a v2 save with a modified active preset migrates to "Gunline (modified)" (active, live rows) next to "Gunline" and "Bolters", the unit linked, no duplicate weapons, the v2 key kept; ✎ opens the drawer on Attacks; Optimise order reorders and the main roster and hint follow; Rename / Duplicate / Delete (confirm stacks over the drawer) keep both selects in sync; + Add unit and + Add weapon; editing Bolt rifle in the Weapons tab updates the roster; delete blocked with "Used by …"; a unit created from the current attack; iterations 50 blocks Simulate with a Settings hint; Export lists attacks with linked summaries; importing a file with a conflicting Bolt rifle links the new attack to "Bolt rifle (2)" and restores the Meltagun; defender ⋯ Save as / "(modified)" / Save / Delete; Esc closes the menu, then the drawer (focus back on ✎ Edit attack); backdrop click closes it; tab arrow keys; 10 bolt rifles into 10 MEQ give 20.00 / 13.35 / 6.67 / 3.32 (expected 20 / 13.33 / 6.67 / 3.33); dark and light; 390px in a same-origin iframe (the window can't be resized) with no sideways scroll on the page or in the full-width drawer; no console errors.
+
+## Units removed (session 12, 2026-11-20)
+
+**Why:** after the profile rework an attack and a unit had the same shape (`{ id, name, rows }`) and only differed in that a unit's rows could be appended to an attack with "+ Add unit". Two names for one thing confused more than it helped, so there is now one concept: **an attack is the complete attack of a unit**. To build a variant, Duplicate an attack and edit it.
+
+**Removed:** `UnitProfile`, `ui/unitsPanel.ts` and the Units drawer tab (tabs are now Attacks · Weapons · Settings), "+ Add unit" in the Attacks tab, `AttackList`'s compact mode, `StoredState.units`, `units` in `ShareKind` / `ShareData` / `ShareState` / the export picker, and the CSS that only served them (`.unit-editor*`, `.weapon-row--compact`, `.button-select`). `weaponUsage` and "Used by …" in the Weapons tab count attacks only. `copyRows` stays (Duplicate uses it).
+
+**Existing unit data is dropped silently** (user decision): v2 `unitPresets` are not migrated (so a weapon that only lived in a unit preset is not restored into the library), a v3 save's `units` key is ignored on load and disappears on the next save, and `units` in an export file are ignored on import (a file with only units says "This export contains nothing to import."). The storage key stays `damage-calculator:v3` and `SHARE_VERSION` stays 1: v3 with units was never released, and a file without `units` still parses in older builds.
+
+**Verification:** `npm test` 281/281 (unit cases removed or moved to attacks; new: a v3 save with `units` loads without them and saves without them, v2 unit presets are dropped without restoring their weapon, an export has no `units` key, a units-only file has nothing to import, a file with attacks + units imports only the attacks). `npm run build` is clean. Checked in Chrome: a v3 save with a `units` key loads and the key is gone from localStorage; the drawer shows Attacks · Weapons · Settings with arrow / End keys wrapping; the Attacks tab has + Add weapon and Optimise order only; Duplicate and Delete work; Weapons shows "Used by Bolt rifles, Gunline" and blocks delete; Export lists Attacks and Weapon profiles only; importing a file with attacks + units imports the attack and its weapon ("Imported 2 items") and ignores the unit; 10 bolt rifles into 10 MEQ give 20.00 / 13.34 / 6.68 / 3.34 (expected 20 / 13.33 / 6.67 / 3.33); no console errors.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -224,4 +277,4 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - A share link (export encoded in the URL hash) next to Copy / Download.
-- A "Revert" button on the preset bar instead of the detach-and-reselect workaround.
+- Undo for attack edits (attacks now change directly, without Save).

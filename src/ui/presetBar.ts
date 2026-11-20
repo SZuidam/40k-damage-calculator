@@ -1,4 +1,6 @@
+import { byName } from '../state/presets';
 import { h } from './dom';
+import { Menu } from './menu';
 import { confirmDialog, promptName } from './modal';
 
 export interface PresetItem {
@@ -7,7 +9,7 @@ export interface PresetItem {
 }
 
 export interface PresetBarOptions {
-  /** Visible label, e.g. "Attack profile". */
+  /** Visible label, e.g. "Defender preset". */
   label: string;
   /** Prefix for element ids. */
   idPrefix: string;
@@ -26,57 +28,64 @@ export interface PresetBarOptions {
   onDelete: (id: string) => void;
 }
 
-/** `[Preset ▾] [Save] [Save as…] [Delete]` for one kind of preset. Call refresh() after state changes. */
+/**
+ * `[Preset ▾] [⋯]` for one kind of preset, the ⋯ menu holding Save, Save as… and Delete.
+ * The workspace (e.g. the defender form) is separate from the presets: the select shows
+ * `Name (modified)` while it differs from the active one. Call refresh() after state changes.
+ */
 export class PresetBar {
   readonly element: HTMLDivElement;
   private readonly select: HTMLSelectElement;
-  private readonly saveButton: HTMLButtonElement;
-  private readonly saveAsButton: HTMLButtonElement;
-  private readonly deleteButton: HTMLButtonElement;
+  private readonly menu: Menu;
 
   constructor(private readonly options: PresetBarOptions) {
     const selectId = `${options.idPrefix}-select`;
     this.select = h('select', { id: selectId, class: 'preset-select' });
-    this.saveButton = h('button', { type: 'button', class: 'button secondary small' }, 'Save');
-    this.saveAsButton = h('button', { type: 'button', class: 'button secondary small' }, 'Save as…');
-    this.deleteButton = h('button', { type: 'button', class: 'button secondary small danger-text' }, 'Delete');
+    const fixFirst = () => (this.options.canSave?.() ?? true ? null : 'Fix the highlighted fields first');
+    this.menu = new Menu({
+      label: `${options.label} actions`,
+      items: [
+        {
+          label: 'Save',
+          disabledReason: () => {
+            const active = this.options.activeId();
+            if (!active) return 'Load or save a preset first';
+            if (!this.options.isDirty()) return 'No changes to save';
+            return fixFirst();
+          },
+          onSelect: () => {
+            const id = this.options.activeId();
+            if (id && this.options.isDirty()) this.options.onSave(id);
+            this.refresh();
+          },
+        },
+        { label: 'Save as…', disabledReason: fixFirst, onSelect: () => void this.saveAs() },
+        { label: 'Delete', danger: true, disabledReason: () => (this.options.activeId() ? null : 'No preset selected'), onSelect: () => void this.deleteActive() },
+      ],
+    });
 
     this.element = h(
       'div',
       { class: 'preset-bar' },
       h('div', { class: 'field preset-field' }, h('label', { for: selectId }, options.label), this.select),
-      h('div', { class: 'preset-buttons' }, this.saveButton, this.saveAsButton, this.deleteButton),
+      this.menu.element,
     );
 
     this.select.addEventListener('change', () => void this.changeSelection());
-    this.saveButton.addEventListener('click', () => {
-      const id = this.options.activeId();
-      if (id && this.options.isDirty()) this.options.onSave(id);
-    });
-    this.saveAsButton.addEventListener('click', () => void this.saveAs());
-    this.deleteButton.addEventListener('click', () => void this.deleteActive());
     this.refresh();
   }
 
   refresh(): void {
-    const { items, activeId, isDirty, canSave } = this.options;
+    const { items, activeId, isDirty } = this.options;
     const active = activeId();
     const dirty = active !== null && isDirty();
-    const savable = canSave?.() ?? true;
-    const all = [...items()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 
     this.select.replaceChildren(
       h('option', { value: '' }, '— Unsaved —'),
-      ...all.map((p) => h('option', { value: p.id }, p.id === active && dirty ? `${p.name} (modified)` : p.name)),
+      ...byName(items()).map((p) => h('option', { value: p.id }, p.id === active && dirty ? `${p.name} (modified)` : p.name)),
     );
     this.select.value = active ?? '';
     this.select.classList.toggle('is-modified', dirty);
-
-    this.saveButton.disabled = !dirty || !savable;
-    this.saveButton.title = !active ? 'Load or save a preset first' : !dirty ? 'No changes to save' : !savable ? 'Fix the highlighted fields first' : `Overwrite "${this.activeName()}"`;
-    this.saveAsButton.disabled = !savable;
-    this.saveAsButton.title = savable ? '' : 'Fix the highlighted fields first';
-    this.deleteButton.disabled = active === null;
   }
 
   private activeName(): string {

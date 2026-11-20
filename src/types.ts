@@ -58,7 +58,7 @@ export function noAbilities(): WeaponAbilities {
 
 /**
  * Situational conditions of the attack that switch abilities on. They apply to every weapon
- * in the attack and are part of the live state only (not of presets, units or exports).
+ * in the attack and are part of the page state only (not of attacks or exports).
  */
 export interface AttackConditions {
   /** The target is within half range: Rapid Fire X adds its attacks, Melta X its damage. */
@@ -96,32 +96,31 @@ export interface StoredWeapon extends WeaponStats {
   id: string;
 }
 
-/** A live attack row: `models` models firing the library weapon `weaponId`. */
+/** An attack row: `models` models firing the library weapon `weaponId`. */
 export interface AttackRow {
   id: string;
   models: number;
   weaponId: string | null;
 }
 
-/** A row inside a saved preset: a copy of the weapon, so later library edits don't change it. */
+/**
+ * A row in an export file: a copy of the weapon, so the file is self-contained. Imported
+ * rows are linked to the library again with `materialiseRows`.
+ */
 export interface RowSnapshot {
   models: number;
   weaponId: string;
   weapon: WeaponStats;
 }
 
-/** A saved attack: the whole attack order. */
-export interface AttackPreset {
+/**
+ * An attack: the complete attack of a unit. Its rows link to the library, so editing a weapon
+ * profile changes every attack that uses it. The main page shows the active attack.
+ */
+export interface AttackProfile {
   id: string;
   name: string;
-  rows: RowSnapshot[];
-}
-
-/** A saved attacking unit: a block of rows that can be appended to the attack. */
-export interface UnitPreset {
-  id: string;
-  name: string;
-  rows: RowSnapshot[];
+  rows: AttackRow[];
 }
 
 export interface DefenderPreset {

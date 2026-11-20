@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, noConditions, type AttackPreset, type AttackRow, type DefenderProfile, type StoredWeapon } from '../types';
+import { noAbilities, noConditions, type AttackRow, type DefenderProfile, type StoredWeapon } from '../types';
 import {
+  byName,
   copyDefender,
+  copyRows,
   defenderSummary,
   materialiseRows,
   pickStats,
   resolveRows,
+  rowsSummary,
   sameDefender,
   sameSnapshot,
   snapshotRows,
+  snapshotsSummary,
+  uniqueName,
   weaponUsage,
 } from './presets';
 
@@ -75,14 +80,14 @@ describe('snapshots', () => {
     expect(sameSnapshot(snapshotRows(loaded.rows, loaded.library), snap)).toBe(true);
   });
 
-  it('copies weapons, so editing the library does not change a saved preset but makes it dirty', () => {
+  it('copies weapons, so editing the library does not change a snapshot taken before', () => {
     const { library, rows } = setup();
-    const preset: AttackPreset = { id: 'p', name: 'Intercessors', rows: snapshotRows(rows, library) };
-    expect(sameSnapshot(snapshotRows(rows, library), preset.rows)).toBe(true);
+    const saved = snapshotRows(rows, library);
+    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(true);
 
     library[0].strength = 5;
-    expect(preset.rows[0].weapon.strength).toBe(4);
-    expect(sameSnapshot(snapshotRows(rows, library), preset.rows)).toBe(false);
+    expect(saved[0].weapon.strength).toBe(4);
+    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
   });
 
   it('detects changed models, order and row count', () => {
@@ -222,11 +227,57 @@ describe('materialiseRows', () => {
 });
 
 describe('weaponUsage', () => {
-  it('counts the live rows that use a weapon', () => {
+  it('counts the rows that use a weapon across all attacks', () => {
     const { rows } = setup();
-    expect(weaponUsage('w-bolt', rows)).toBe(2);
-    expect(weaponUsage('w-las', rows)).toBe(1);
-    expect(weaponUsage('w-none', rows)).toBe(0);
+    const devastators = { id: 'c', name: 'Devastators', rows: [{ id: 'c1', models: 4, weaponId: 'w-las' }] };
+    const profiles = [{ id: 'a', name: 'Gunline', rows }, { id: 'b', name: 'Empty', rows: [] }, devastators];
+    expect(weaponUsage('w-bolt', profiles)).toBe(2);
+    expect(weaponUsage('w-las', profiles)).toBe(2);
+    expect(weaponUsage('w-none', profiles)).toBe(0);
+    expect(weaponUsage('w-bolt', [])).toBe(0);
+  });
+});
+
+describe('copyRows', () => {
+  it('copies rows with new ids, linked to the same weapons', () => {
+    const { rows } = setup();
+    const copies = copyRows(rows);
+    expect(copies.map((r) => [r.models, r.weaponId])).toEqual(rows.map((r) => [r.models, r.weaponId]));
+    expect(copies.every((c, i) => c.id !== rows[i].id && c !== rows[i])).toBe(true);
+    expect(new Set(copies.map((c) => c.id)).size).toBe(rows.length);
+  });
+});
+
+describe('summaries', () => {
+  it('rowsSummary names linked rows from the library and marks unlinked ones', () => {
+    const { library, rows } = setup();
+    expect(rowsSummary(rows, library)).toBe('10× Bolt rifle, 1× Lascannon, 5× Bolt rifle');
+    library[0].name = 'Bolt rifle (Mk II)';
+    expect(rowsSummary(rows.slice(0, 1), library)).toBe('10× Bolt rifle (Mk II)');
+    expect(rowsSummary([{ id: 'x', models: 2, weaponId: null }, { id: 'y', models: 1, weaponId: 'gone' }], library)).toBe('2× (no weapon), 1× (no weapon)');
+    expect(rowsSummary([], library)).toBe('');
+  });
+
+  it('snapshotsSummary uses the weapon copies', () => {
+    const { library, rows } = setup();
+    const snap = snapshotRows(rows.slice(0, 2), library);
+    library[0].name = 'Renamed';
+    expect(snapshotsSummary(snap)).toBe('10× Bolt rifle, 1× Lascannon');
+  });
+});
+
+describe('names', () => {
+  it('uniqueName numbers taken names case-insensitively and stays within 40 characters', () => {
+    expect(uniqueName([], 'Gunline')).toBe('Gunline');
+    expect(uniqueName(['gunline'], 'Gunline')).toBe('Gunline (2)');
+    expect(uniqueName(['Gunline', 'Gunline (2)'], 'Gunline')).toBe('Gunline (3)');
+    expect(uniqueName([], 'y'.repeat(50))).toBe('y'.repeat(40));
+  });
+
+  it('byName sorts case-insensitively with numbers in order, without changing the input', () => {
+    const items = [{ name: 'b' }, { name: 'Squad 10' }, { name: 'A' }, { name: 'Squad 2' }];
+    expect(byName(items).map((i) => i.name)).toEqual(['A', 'b', 'Squad 2', 'Squad 10']);
+    expect(items[0].name).toBe('b');
   });
 });
 
