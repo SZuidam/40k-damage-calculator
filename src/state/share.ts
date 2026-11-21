@@ -1,23 +1,34 @@
-import type { AttackProfile, DefenderPreset, DefenderProfile, RowSnapshot, StoredWeapon } from '../types';
+import type { DefenderPreset, DefenderProfile, Profile, StoredWeapon, WeaponStats } from '../types';
 import { MAX_WEAPON_NAME, validateDefender, validateRow, validateWeaponStats } from '../ui/validation';
 import { uid } from './ids';
-import { copyDefender, materialiseRows, pickStats, sameCombatStats, sameDefender, sameSnapshot, snapshotRows, uniqueName } from './presets';
-import { isRecord, list, toDefender, toSnapshot, toWeaponStats } from './storage';
+import { copyDefender, copyRows, pickStats, sameCombatStats, sameDefender, sameRows, uniqueName } from './presets';
+import { isRecord, list, toDefender, toWeaponStats } from './storage';
 
 export { uniqueName };
 
 /** Marks a JSON document as a share file of this app. */
 export const SHARE_FORMAT = 'damage-calculator-share';
-export const SHARE_VERSION = 1;
+/**
+ * 2: profile rows are `{ models, weapon }`. 1 (sessions 4–12): rows also carried the `weaponId`
+ * of the library weapon they were copied from; the parser still reads those and ignores the id.
+ */
+export const SHARE_VERSION = 2;
 /** Refuse pasted text or files above this many characters. */
 export const MAX_SHARE_LENGTH = 1_000_000;
 
+/** `attacks` holds the profiles: the file key from version 1 is kept, so one parser reads both versions. */
 export type ShareKind = 'attacks' | 'defenders' | 'weapons';
 export const SHARE_KINDS: readonly ShareKind[] = ['attacks', 'defenders', 'weapons'];
 
+/** A profile row in a file: models plus a copy of the weapon, without ids. */
+export interface SharedRow {
+  models: number;
+  weapon: WeaponStats;
+}
+
 export interface SharedRowsPreset {
   name: string;
-  rows: RowSnapshot[];
+  rows: SharedRow[];
 }
 
 export interface SharedDefenderPreset {
@@ -26,13 +37,14 @@ export interface SharedDefenderPreset {
 }
 
 /**
- * The shareable content. Attacks and defenders travel without their ids (the importer
- * assigns new ones); attack rows carry a copy of their weapon, so a file is self-contained.
+ * The shareable content. Profiles and defenders travel without their ids (the importer
+ * assigns new ones); profile rows carry their own weapon copy, so a file is self-contained.
  */
 export interface ShareData {
+  /** Profiles. */
   attacks: SharedRowsPreset[];
   defenders: SharedDefenderPreset[];
-  /** Library weapon profiles. Their ids travel along so attack rows link back to them on import. */
+  /** Library weapon profiles, with their ids (kept on import when free). */
   weapons: StoredWeapon[];
 }
 
@@ -45,7 +57,7 @@ export interface ShareFile extends ShareData {
 /** The parts of the app state that can be exported and imported. Arrays are mutated in place on import. */
 export interface ShareState {
   library: StoredWeapon[];
-  attacks: AttackProfile[];
+  profiles: Profile[];
   defenderPresets: DefenderPreset[];
 }
 
@@ -60,7 +72,7 @@ export function buildShareFile(state: ShareState, selection: ShareSelection, now
     format: SHARE_FORMAT,
     version: SHARE_VERSION,
     exportedAt: now.toISOString(),
-    attacks: pick(state.attacks, selection.attacks).map((p) => ({ name: p.name, rows: snapshotRows(p.rows, state.library) })),
+    attacks: pick(state.profiles, selection.attacks).map((p) => ({ name: p.name, rows: p.rows.map((r) => ({ models: r.models, weapon: pickStats(r.weapon) })) })),
     defenders: pick(state.defenderPresets, selection.defenders).map((p) => ({ name: p.name, defender: copyDefender(p.defender) })),
     weapons: pick(state.library, selection.weapons).map((w) => ({ id: w.id, ...pickStats(w) })),
   };
@@ -121,8 +133,16 @@ function toSharedRows(value: unknown): SharedRowsPreset | null {
   if (!isRecord(value)) return null;
   const name = cleanName(value.name);
   if (name === '') return null;
-  const rows = list(value.rows, toSnapshot).map((r) => ({ ...r, weapon: { ...r.weapon, name: cleanName(r.weapon.name) } }));
-  return { name, rows };
+  return { name, rows: list(value.rows, toSharedRow) };
+}
+
+/** A version 2 row, or a version 1 row whose `weaponId` is ignored. */
+function toSharedRow(value: unknown): SharedRow | null {
+  if (!isRecord(value)) return null;
+  const weapon = toWeaponStats(value.weapon);
+  if (!weapon) return null;
+  const models = typeof value.models === 'number' && Number.isFinite(value.models) ? value.models : 1;
+  return { models, weapon: { ...weapon, name: cleanName(weapon.name) } };
 }
 
 function toSharedDefender(value: unknown): SharedDefenderPreset | null {
@@ -155,13 +175,11 @@ const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const byName = <T extends { name: string }>(items: T[], name: string) => items.find((item) => sameName(item.name, name));
 const firstError = (errors: object): string | undefined => Object.values(errors)[0] as string | undefined;
 
-function rowsProblem(rows: RowSnapshot[]): string | undefined {
-  if (rows.length === 0) return 'Has no attack rows';
+function rowsProblem(rows: SharedRow[]): string | undefined {
+  if (rows.length === 0) return 'Has no weapons';
   for (const row of rows) {
-    const weaponError = firstError(validateWeaponStats(row.weapon));
-    if (weaponError) return `${row.weapon.name || 'Weapon'}: ${weaponError}`;
-    const modelsError = validateRow({ id: '', models: row.models, weaponId: row.weaponId }, [{ ...row.weapon, id: row.weaponId }]).models;
-    if (modelsError) return `${row.weapon.name}: ${modelsError}`;
+    const errors = Object.values(validateRow(row));
+    if (errors.length > 0) return `${row.weapon.name || 'Weapon'}: ${errors.join(' · ')}`;
   }
   return undefined;
 }
@@ -175,8 +193,7 @@ export function planImport(data: ShareData, state: ShareState): ImportItem[] {
     items.push(problem ? { kind, index, name, status, problem } : { kind, index, name, status });
   };
 
-  const sameRows = (e: { rows: AttackProfile['rows'] }, rows: RowSnapshot[]) => sameSnapshot(snapshotRows(e.rows, state.library), rows);
-  data.attacks.forEach((p, i) => classify('attacks', i, p.name, rowsProblem(p.rows), state.attacks, (e) => sameRows(e, p.rows)));
+  data.attacks.forEach((p, i) => classify('attacks', i, p.name, rowsProblem(p.rows), state.profiles, (e) => sameRows(e.rows, p.rows)));
   data.defenders.forEach((p, i) => classify('defenders', i, p.name, firstError(validateDefender(p.defender)), state.defenderPresets, (e) => sameDefender(e.defender, p.defender)));
   data.weapons.forEach((w, i) => classify('weapons', i, w.name, firstError(validateWeaponStats(w)), state.library, (e) => sameCombatStats(e, w)));
   return items;
@@ -198,11 +215,8 @@ export interface ImportSummary {
 /**
  * Add the chosen items to the state, mutating its arrays in place. Invalid and duplicate
  * items are skipped. A conflict is replaced or added under a new name per `policy`; a
- * replaced weapon keeps its library id, so rows using it now fire the imported stats.
- * Imported attack rows are linked to the library with `materialiseRows`: to the
- * weapon of the same file wherever it ended up (added, renamed, replaced or already saved)
- * when its stats match, otherwise to a matching saved weapon, otherwise their weapon copy is
- * added to the library.
+ * replaced weapon keeps its library id. Imported profiles keep their own weapon copies:
+ * nothing is linked to or added to the library.
  */
 export function applyImport(data: ShareData, items: ImportItem[], state: ShareState, policy: ConflictPolicy): ImportSummary {
   const summary: ImportSummary = { added: 0, renamed: 0, replaced: 0 };
@@ -225,45 +239,22 @@ export function applyImport(data: ShareData, items: ImportItem[], state: ShareSt
     return name;
   };
 
-  // Weapons first, so attack rows imported in the same go link to them.
-  const ordered = [...items].sort((a, b) => Number(b.kind === 'weapons') - Number(a.kind === 'weapons'));
-  // Where each weapon of the file ended up in the library (its id in the file → library id), so
-  // rows of the same file link to it even when it was renamed, replaced or already saved.
-  const weaponIds = new Map<string, string>();
-  for (const item of ordered) {
-    if (item.status === 'invalid') continue;
+  for (const item of items) {
+    if (item.status === 'invalid' || item.status === 'duplicate') continue;
     if (item.kind === 'weapons') {
       const weapon = data.weapons[item.index];
-      if (item.status === 'duplicate') {
-        const saved = byName(state.library, item.name);
-        if (saved) weaponIds.set(weapon.id, saved.id);
-        continue;
-      }
-      const name = place(item, state.library, (target) => {
-        Object.assign(target, pickStats(weapon));
-        weaponIds.set(weapon.id, target.id);
-      });
+      const name = place(item, state.library, (target) => Object.assign(target, pickStats(weapon)));
       if (name === null) continue;
       const id = state.library.some((w) => w.id === weapon.id) ? uid('weapon') : weapon.id;
       state.library.push({ ...pickStats(weapon), id, name });
-      weaponIds.set(weapon.id, id);
-    } else if (item.status === 'duplicate') {
-      continue;
     } else if (item.kind === 'defenders') {
       const preset = data.defenders[item.index];
       const name = place(item, state.defenderPresets, (target) => (target.defender = copyDefender(preset.defender)));
       if (name !== null) state.defenderPresets.push({ id: uid('defender'), name, defender: copyDefender(preset.defender) });
     } else {
-      const preset = data.attacks[item.index];
-      const target = state.attacks;
-      const link = (name: string) => {
-        const snapshots = preset.rows.map((r) => ({ ...r, weaponId: weaponIds.get(r.weaponId) ?? r.weaponId }));
-        const linked = materialiseRows(snapshots, state.library, name);
-        state.library.splice(0, state.library.length, ...linked.library);
-        return linked.rows;
-      };
-      const name = place(item, target, (t) => (t.rows = link(t.name)));
-      if (name !== null) target.push({ id: uid('attack'), name, rows: link(name) });
+      const profile = data.attacks[item.index];
+      const name = place(item, state.profiles, (target) => (target.rows = copyRows(profile.rows)));
+      if (name !== null) state.profiles.push({ id: uid('profile'), name, rows: copyRows(profile.rows) });
     }
   }
   return summary;

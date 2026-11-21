@@ -1,22 +1,20 @@
 import { uid } from '../state/ids';
-import { sortedLibrary, statsSummary, weaponUsage } from '../state/presets';
-import type { AttackProfile, StoredWeapon } from '../types';
+import { sortedLibrary, statsSummary } from '../state/presets';
+import type { StoredWeapon } from '../types';
 import { h } from './dom';
 import { confirmDialog } from './modal';
 import { openWeaponModal } from './weaponModal';
 
 export interface WeaponsPanelOptions {
   library: StoredWeapon[];
-  /** A weapon an attack uses can't be deleted. */
-  attacks: AttackProfile[];
   /** The library changed (entry added, edited or deleted). */
   onChange: () => void;
 }
 
 /**
  * The Weapons tab of the configuration drawer: list, create, edit and delete library profiles.
- * Editing a profile changes every attack that uses it; deleting is blocked while an attack
- * uses it.
+ * Rows on the main page and saved profiles hold their own weapon copies, so editing or
+ * deleting a library profile never changes them.
  */
 export class WeaponsPanel {
   readonly element: HTMLDivElement;
@@ -38,7 +36,7 @@ export class WeaponsPanel {
     this.element = h(
       'div',
       { class: 'manage-panel' },
-      h('p', { class: 'panel-hint' }, 'Editing a profile changes every attack that uses it.'),
+      h('p', { class: 'panel-hint' }, "Rows and saved profiles keep their own copy, so editing a profile here doesn't change them."),
       this.list,
       this.empty,
       h('div', { class: 'panel-actions-group' }, add),
@@ -54,30 +52,10 @@ export class WeaponsPanel {
     if (focusSelector) this.element.querySelector<HTMLElement>(focusSelector)?.focus();
   }
 
-  /** "Gunline, Intercessors": the attacks that use a weapon, for the tooltip of a blocked delete. */
-  private usedBy(weaponId: string): string {
-    return this.options.attacks
-      .filter((a) => a.rows.some((r) => r.weaponId === weaponId))
-      .map((a) => a.name)
-      .join(', ');
-  }
-
   private item(w: StoredWeapon): HTMLLIElement {
-    const { library, attacks, onChange } = this.options;
-    const uses = weaponUsage(w.id, attacks);
-    const usedBy = uses > 0 ? this.usedBy(w.id) : '';
+    const { library, onChange } = this.options;
     const edit = h('button', { type: 'button', class: 'icon-button', 'data-id': w.id, 'data-action': 'edit', 'aria-label': `Edit ${w.name}`, title: 'Edit' }, '✎');
-    const remove = h(
-      'button',
-      {
-        type: 'button',
-        class: 'icon-button remove',
-        'aria-label': uses > 0 ? `Delete ${w.name} (in use by ${usedBy})` : `Delete ${w.name}`,
-        title: uses > 0 ? `In use by ${usedBy}` : 'Delete',
-        disabled: uses > 0,
-      },
-      '✕',
-    );
+    const remove = h('button', { type: 'button', class: 'icon-button remove', 'aria-label': `Delete ${w.name}`, title: 'Delete' }, '✕');
     edit.addEventListener('click', async () => {
       const stats = await openWeaponModal(w);
       if (stats) {
@@ -102,7 +80,6 @@ export class WeaponsPanel {
         { class: 'manage-text' },
         h('span', { class: 'manage-name' }, w.name),
         h('span', { class: 'manage-detail' }, statsSummary(w)),
-        uses > 0 ? h('span', { class: 'manage-usage' }, `Used by ${usedBy}`) : null,
       ),
       h('div', { class: 'row-actions' }, edit, remove),
     );

@@ -58,7 +58,7 @@ export function noAbilities(): WeaponAbilities {
 
 /**
  * Situational conditions of the attack that switch abilities on. They apply to every weapon
- * in the attack and are part of the page state only (not of attacks or exports).
+ * in the attack and are part of the page state only (not of profiles or exports).
  */
 export interface AttackConditions {
   /** The target is within half range: Rapid Fire X adds its attacks, Melta X its damage. */
@@ -96,16 +96,20 @@ export interface StoredWeapon extends WeaponStats {
   id: string;
 }
 
-/** An attack row: `models` models firing the library weapon `weaponId`. */
-export interface AttackRow {
+/**
+ * A row of a profile (and of the working area on the main page): `models` models firing
+ * `weapon`. The weapon is a copy, taken from the library when the row was added, so editing
+ * or deleting a library profile never changes a row.
+ */
+export interface ProfileRow {
   id: string;
   models: number;
-  weaponId: string | null;
+  weapon: WeaponStats;
 }
 
 /**
- * A row in an export file: a copy of the weapon, so the file is self-contained. Imported
- * rows are linked to the library again with `materialiseRows`.
+ * A row of v2 saved data and v1 export files: a weapon copy plus the id of the library weapon
+ * it was taken from. Only read for migration and import; nothing writes it any more.
  */
 export interface RowSnapshot {
   models: number;
@@ -114,13 +118,13 @@ export interface RowSnapshot {
 }
 
 /**
- * An attack: the complete attack of a unit. Its rows link to the library, so editing a weapon
- * profile changes every attack that uses it. The main page shows the active attack.
+ * A profile: the saved complete attack of a unit, with its own weapon copies. The main page
+ * works on a copy of its rows and saves them back with Save.
  */
-export interface AttackProfile {
+export interface Profile {
   id: string;
   name: string;
-  rows: AttackRow[];
+  rows: ProfileRow[];
 }
 
 export interface DefenderPreset {

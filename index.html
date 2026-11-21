@@ -24,16 +24,19 @@
             <h2 id="attacker-title">Attacker</h2>
             <p class="panel-hint">Weapons resolve top to bottom. A wounded model carries over to the next weapon.</p>
           </div>
-          <div class="preset-bar">
-            <div class="field preset-field">
-              <label for="attack-select">Attack</label>
-              <select id="attack-select" class="preset-select"></select>
-            </div>
-            <button type="button" id="edit-attack" class="button secondary small">✎ Edit attack</button>
-          </div>
+          <div id="profile-bar"></div>
           <div id="attack-conditions"></div>
-          <div id="attack-roster"></div>
-          <p id="optimise-hint" class="optimise-hint" hidden></p>
+          <div id="profile-rows"></div>
+          <div class="attacker-actions">
+            <div class="add-weapon">
+              <select id="add-weapon" class="add-weapon-select" aria-label="Add weapon" aria-describedby="add-weapon-hint"></select>
+              <p id="add-weapon-hint" class="add-weapon-hint" hidden>Create weapon profiles under ☰ → Weapons.</p>
+            </div>
+            <div class="optimise">
+              <button type="button" id="optimise" class="button secondary" aria-describedby="optimise-status">Optimise order <span id="optimise-badge" class="badge" hidden></span></button>
+              <p id="optimise-status" class="optimise-status" aria-live="polite"></p>
+            </div>
+          </div>
         </section>
 
         <section class="panel defender" aria-labelledby="defender-title">
@@ -52,7 +55,7 @@
       </form>
 
       <section id="results" class="results" aria-label="Results">
-        <p class="empty">Pick an attack and a defender, then press Simulate.</p>
+        <p class="empty">Pick a profile or add weapons, then press Simulate.</p>
       </section>
     </main>
 

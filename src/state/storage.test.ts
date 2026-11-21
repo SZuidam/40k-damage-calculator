@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, noConditions, type StoredWeapon } from '../types';
-import { LEGACY_STORAGE_KEY, STORAGE_KEY, V2_STORAGE_KEY, defaultState, loadState, saveState, type KeyValueStorage, type StoredState } from './storage';
+import { noAbilities, noConditions, type ProfileRow, type StoredWeapon } from '../types';
+import { sameRows } from './presets';
+import { LEGACY_STORAGE_KEY, STORAGE_KEY, V2_STORAGE_KEY, V3_STORAGE_KEY, defaultState, loadState, saveState, type KeyValueStorage, type StoredState } from './storage';
 
 function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & { data: Record<string, string> } {
   const data = { ...initial };
@@ -13,7 +14,9 @@ function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & 
   };
 }
 
-const activeRows = (state: StoredState) => state.attacks.find((a) => a.id === state.activeAttackId)!.rows;
+const activeProfile = (state: StoredState) => state.profiles.find((p) => p.id === state.activeProfileId);
+/** [models, weapon name, AP] per row: enough to tell the weapon copies apart. */
+const copies = (rows: ProfileRow[]) => rows.map((r) => [r.models, r.weapon.name, r.weapon.ap]);
 
 const v1 = {
   weapons: [
@@ -26,13 +29,44 @@ const v1 = {
   iterations: 50_000,
 };
 
-// ---------- v2 fixture ----------
-
 const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
 const las = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: noAbilities() });
+const plasma = (): StoredWeapon => ({ id: 'w-plasma', name: 'Plasma gun', attacks: '1', skill: 3, strength: 7, ap: -2, damage: '1', abilities: noAbilities() });
+const stats = ({ id: _, ...weapon }: StoredWeapon) => weapon;
 const snap = (models: number, { id, ...weapon }: StoredWeapon) => ({ models, weaponId: id, weapon });
 const meq = () => ({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] });
-const plasma = (): StoredWeapon => ({ id: 'w-plasma', name: 'Plasma gun', attacks: '1', skill: 3, strength: 7, ap: -2, damage: '1', abilities: noAbilities() });
+
+// ---------- v3 fixture ----------
+
+/** A v3 save: two attacks linked to the library, one row pointing at a deleted weapon. */
+function v3(overrides: Record<string, unknown> = {}) {
+  return {
+    library: [bolt(), las()],
+    attacks: [
+      {
+        id: 'a1',
+        name: 'Gunline',
+        rows: [
+          { id: 'r1', models: 10, weaponId: 'w-bolt' },
+          { id: 'r2', models: 3, weaponId: 'deleted' },
+          { id: 'r3', models: 1, weaponId: 'w-las' },
+        ],
+      },
+      { id: 'a2', name: 'Bolters', rows: [{ id: 'r4', models: 20, weaponId: 'w-bolt' }] },
+    ],
+    activeAttackId: 'a2',
+    defender: { ...meq(), toughness: 5 },
+    defenderPresets: [{ id: 'd1', name: 'MEQ', defender: meq() }],
+    activeDefenderPresetId: 'd1',
+    conditions: { halfRange: true, charged: false },
+    iterations: 5_000,
+    ...overrides,
+  };
+}
+
+const loadV3 = (data: unknown) => loadState(memoryStorage({ [V3_STORAGE_KEY]: JSON.stringify(data) }));
+
+// ---------- v2 fixture ----------
 
 /**
  * A v2 save: live rows matching the active preset "Gunline", a second preset, a defender preset
@@ -61,114 +95,103 @@ function v2(overrides: Record<string, unknown> = {}) {
 }
 
 const loadV2 = (data: unknown) => loadState(memoryStorage({ [V2_STORAGE_KEY]: JSON.stringify(data) }));
-const linked = (rows: { models: number; weaponId: string | null }[]) => rows.map((r) => [r.models, r.weaponId]);
 
 describe('loadState', () => {
   it('returns the default loadout when storage is empty', () => {
     const state = loadState(memoryStorage());
     expect(state.library).toHaveLength(1);
     expect(state.library[0]).toMatchObject({ name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' });
-    expect(state.attacks).toEqual([{ id: state.activeAttackId, name: 'Bolt rifles', rows: [{ id: expect.any(String), models: 10, weaponId: state.library[0].id }] }]);
-    expect(state).not.toHaveProperty('units');
+    expect(state.profiles).toEqual([{ id: state.activeProfileId, name: 'Bolt rifles', rows: [{ id: expect.any(String), models: 10, weapon: stats(state.library[0]) }] }]);
+    // The working area is a copy of the active profile.
+    const profile = activeProfile(state)!;
+    expect(sameRows(state.rows, profile.rows)).toBe(true);
+    expect(state.rows[0].id).not.toBe(profile.rows[0].id);
+    expect(state.rows[0].weapon).not.toBe(profile.rows[0].weapon);
     expect(state.defender).toEqual({ models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] });
     expect(state.iterations).toBe(10_000);
   });
 
-  it('migrates v1 weapons into a deduplicated library plus the rows of a "Current attack"', () => {
-    const state = loadState(memoryStorage({ [LEGACY_STORAGE_KEY]: JSON.stringify(v1) }));
-    expect(state.library.map((w) => [w.name, w.ap])).toEqual([
-      ['Bolt rifles', -1],
-      ['Lascannon', -3],
-      ['Bolt rifles', -2],
-    ]);
-    const [bolt, las, boltAp2] = state.library.map((w) => w.id);
-    expect(state.attacks.map((a) => a.name)).toEqual(['Current attack']);
-    expect(linked(activeRows(state))).toEqual([
-      [10, bolt],
-      [1, las],
-      [5, bolt],
-      [5, boltAp2],
-    ]);
-    expect(state.defender).toEqual({ ...v1.defender, keywords: [] });
-    expect(state.iterations).toBe(50_000);
-  });
-
-  it('prefers v3 over v2 over v1', () => {
+  it('prefers v4 over v3 over v2 over v1', () => {
     const saved = defaultState();
     saved.iterations = 777;
     const v1Text = JSON.stringify(v1);
-    const v2Text = JSON.stringify(v2());
-    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved), [V2_STORAGE_KEY]: v2Text, [LEGACY_STORAGE_KEY]: v1Text })).iterations).toBe(777);
-    expect(loadState(memoryStorage({ [V2_STORAGE_KEY]: v2Text, [LEGACY_STORAGE_KEY]: v1Text })).iterations).toBe(5_000);
+    const v2Text = JSON.stringify(v2({ iterations: 2_000 }));
+    const v3Text = JSON.stringify(v3({ iterations: 3_000 }));
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved), [V3_STORAGE_KEY]: v3Text, [V2_STORAGE_KEY]: v2Text, [LEGACY_STORAGE_KEY]: v1Text })).iterations).toBe(777);
+    expect(loadState(memoryStorage({ [V3_STORAGE_KEY]: v3Text, [V2_STORAGE_KEY]: v2Text, [LEGACY_STORAGE_KEY]: v1Text })).iterations).toBe(3_000);
+    expect(loadState(memoryStorage({ [V2_STORAGE_KEY]: v2Text, [LEGACY_STORAGE_KEY]: v1Text })).iterations).toBe(2_000);
+    expect(loadState(memoryStorage({ [LEGACY_STORAGE_KEY]: v1Text })).iterations).toBe(50_000);
   });
 
   it('falls back to the defaults on corrupt JSON', () => {
     expect(loadState(memoryStorage({ [STORAGE_KEY]: '{not json' })).library[0].name).toBe('Bolt rifle');
+    expect(loadState(memoryStorage({ [V3_STORAGE_KEY]: '{not json' })).library[0].name).toBe('Bolt rifle');
     expect(loadState(memoryStorage({ [V2_STORAGE_KEY]: '{not json' })).library[0].name).toBe('Bolt rifle');
     expect(loadState(memoryStorage({ [LEGACY_STORAGE_KEY]: 'nope' })).library[0].name).toBe('Bolt rifle');
-    expect(activeRows(loadState(memoryStorage({ [STORAGE_KEY]: '42' })))).toHaveLength(1);
+    expect(loadState(memoryStorage({ [STORAGE_KEY]: '42' })).rows).toHaveLength(1);
   });
 
-  it('falls back to the default library and attack when both are empty, keeping the rest', () => {
-    const saved = { ...defaultState(), library: [], attacks: [], iterations: 2_000, defenderPresets: [{ id: 'd1', name: 'MEQ', defender: meq() }] };
-    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
-    expect(state.library.map((w) => w.name)).toEqual(['Bolt rifle']);
-    expect(state.attacks.map((a) => a.name)).toEqual(['Bolt rifles']);
-    expect(activeRows(state)[0].weaponId).toBe(state.library[0].id);
-    expect(state.iterations).toBe(2_000);
-    expect(state.defenderPresets).toHaveLength(1);
-  });
-
-  it('gives a library without attacks one attack using its first weapon', () => {
-    const saved = { ...defaultState(), library: [las()], attacks: [] };
-    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
-    expect(state.attacks).toHaveLength(1);
-    expect(state.activeAttackId).toBe(state.attacks[0].id);
-    expect(linked(activeRows(state))).toEqual([[1, 'w-las']]);
-  });
-
-  it('unlinks rows whose weapon is missing and repairs stale active ids', () => {
-    const saved = defaultState();
-    saved.attacks[0].rows.push({ id: 'r-x', models: 3, weaponId: 'deleted' });
-    saved.attacks.push({ id: 'a2', name: 'Second', rows: [] });
-    saved.activeAttackId = 'missing';
-    saved.activeDefenderPresetId = 'missing';
-    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
-    expect(state.attacks[0].rows[1]).toEqual({ id: 'r-x', models: 3, weaponId: null });
-    expect(state.activeAttackId).toBe(state.attacks[0].id);
-    expect(state.activeDefenderPresetId).toBeNull();
-    // An empty attack is kept: the editor shows it as empty.
-    expect(state.attacks[1]).toEqual({ id: 'a2', name: 'Second', rows: [] });
-  });
-
-  it('drops malformed attacks and rows', () => {
-    const saved = JSON.parse(JSON.stringify(defaultState()));
-    saved.attacks.push({ id: 7, name: 'Bad id', rows: [] }, 'junk', { id: 'a2', name: 'Ok', rows: [{ models: 2, weaponId: saved.library[0].id }, 'x'] });
-    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
-    expect(state.attacks.map((a) => a.name)).toEqual(['Bolt rifles', 'Ok']);
-    expect(state.attacks[1].rows).toEqual([]);
-  });
-
-  it('ignores the units of a v3 save made while units existed, and drops them on the next save', () => {
-    const saved = { ...defaultState(), units: [{ id: 'u1', name: 'Squad', rows: [{ id: 'r8', models: 4, weaponId: 'w-unit' }] }] };
-    const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) });
-    const state = loadState(storage);
-    expect(state).not.toHaveProperty('units');
-    const { units: _, ...rest } = saved;
-    expect(state).toEqual(rest);
-    saveState(state, storage);
-    expect(JSON.parse(storage.data[STORAGE_KEY])).not.toHaveProperty('units');
-  });
-
-  it('round trips through saveState under the v3 key', () => {
+  it('round trips through saveState under the v4 key only', () => {
     const storage = memoryStorage();
     const state = defaultState();
     state.library[0].abilities = { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true, blast: 'D6+2', cleave: '1' };
-    state.attacks.push({ id: 'a2', name: 'Twice', rows: [{ id: 'r9', models: 5, weaponId: state.library[0].id }] });
-    state.activeAttackId = 'a2';
+    state.rows[0].weapon.abilities = { ...noAbilities(), anti: { vehicle: 4 } };
+    state.profiles.push({ id: 'p2', name: 'Twice', rows: [{ id: 'r9', models: 5, weapon: stats(las()) }] });
+    state.activeProfileId = 'p2';
     saveState(state, storage);
     expect(Object.keys(storage.data)).toEqual([STORAGE_KEY]);
     expect(loadState(storage)).toEqual(state);
+  });
+
+  it('keeps an empty library, no profiles and an empty working area', () => {
+    const saved = { ...defaultState(), library: [], profiles: [], rows: [], activeProfileId: null, iterations: 2_000 };
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.library).toEqual([]);
+    expect(state.profiles).toEqual([]);
+    expect(state.rows).toEqual([]);
+    expect(state.activeProfileId).toBeNull();
+    expect(state.iterations).toBe(2_000);
+  });
+
+  it('repairs rows: fills in missing abilities and ids, drops rows without a usable weapon copy', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    const { abilities: _, ...noAbilitiesWeapon } = stats(las());
+    saved.rows = [
+      { id: 'r1', models: 2, weapon: noAbilitiesWeapon },
+      { models: 4, weapon: stats(bolt()) },
+      { id: 'r3', models: 1, weapon: { name: 'No attacks' } },
+      { id: 'r4', models: 1 },
+      'junk',
+    ];
+    saved.profiles[0].rows.push({ id: 'r5', models: 1, weapon: 'gone' });
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.rows).toEqual([
+      { id: 'r1', models: 2, weapon: { ...stats(las()), abilities: noAbilities() } },
+      { id: expect.any(String), models: 4, weapon: stats(bolt()) },
+    ]);
+    expect(state.profiles[0].rows).toHaveLength(1);
+  });
+
+  it('keeps out-of-range values on rows for validation to flag', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    saved.rows[0].models = 99;
+    saved.rows[0].weapon.strength = 40;
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.rows[0].models).toBe(99);
+    expect(state.rows[0].weapon.strength).toBe(40);
+  });
+
+  it('drops malformed profiles and repairs stale active ids', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    saved.profiles.push({ id: 7, name: 'Bad id', rows: [] }, 'junk', { id: 'p2', name: 'Empty', rows: [] });
+    saved.activeProfileId = 'missing';
+    saved.activeDefenderPresetId = 'missing';
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.profiles.map((p) => p.name)).toEqual(['Bolt rifles', 'Empty']);
+    expect(state.activeProfileId).toBeNull();
+    expect(state.activeDefenderPresetId).toBeNull();
+    // Detaching keeps the working area.
+    expect(state.rows).toHaveLength(1);
   });
 
   it('gives weapons saved without abilities (and v1 weapons) no abilities', () => {
@@ -180,6 +203,7 @@ describe('loadState', () => {
     const old = v2({ attackPresets: [{ id: 'a', name: 'A', rows: [{ models: 1, weaponId: 'x', weapon: { name: 'Gun', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1' } }] }] });
     const migrated = loadV2(old);
     expect(migrated.library.find((w) => w.name === 'Gun')?.abilities).toEqual(none);
+    expect(migrated.profiles[0].rows[0].weapon.abilities).toEqual(none);
     expect(loadState(memoryStorage({ [LEGACY_STORAGE_KEY]: JSON.stringify(v1) })).library[0].abilities).toEqual(none);
   });
 
@@ -317,16 +341,86 @@ describe('loadState', () => {
   });
 });
 
-describe('v2 → v3 migration', () => {
-  it('makes the clean active preset the active attack, using the live rows', () => {
-    const state = loadV2(v2());
-    expect(state.attacks.map((a) => [a.id, a.name])).toEqual([
+describe('v3 → v4 migration', () => {
+  it('turns every attack into a profile with the same id and name, copying its weapons', () => {
+    const state = loadV3(v3());
+    expect(state.profiles.map((p) => [p.id, p.name])).toEqual([
       ['a1', 'Gunline'],
       ['a2', 'Bolters'],
     ]);
-    expect(state.activeAttackId).toBe('a1');
-    expect(state.attacks[0].rows).toEqual(v2().rows);
-    expect(linked(state.attacks[1].rows)).toEqual([[20, 'w-bolt']]);
+    expect(state.profiles[1].rows).toEqual([{ id: 'r4', models: 20, weapon: stats(bolt()) }]);
+    expect(state.library).toEqual([bolt(), las()]);
+  });
+
+  it('drops rows whose weapon is missing', () => {
+    const state = loadV3(v3());
+    expect(copies(state.profiles[0].rows)).toEqual([
+      [10, 'Bolt rifle', -1],
+      [1, 'Lascannon', -3],
+    ]);
+  });
+
+  it('keeps the active attack active and loads a copy of it into the working area', () => {
+    const state = loadV3(v3());
+    expect(state.activeProfileId).toBe('a2');
+    expect(copies(state.rows)).toEqual([[20, 'Bolt rifle', -1]]);
+    expect(state.rows[0].id).not.toBe('r4');
+    expect(state.rows[0].weapon).not.toBe(state.profiles[1].rows[0].weapon);
+  });
+
+  it('keeps the defender, its presets, the conditions and the iterations', () => {
+    const state = loadV3(v3());
+    expect(state.defender).toEqual({ ...meq(), toughness: 5 });
+    expect(state.defenderPresets).toEqual(v3().defenderPresets);
+    expect(state.activeDefenderPresetId).toBe('d1');
+    expect(state.conditions).toEqual({ halfRange: true, charged: false });
+    expect(state.iterations).toBe(5_000);
+  });
+
+  it('makes the first attack active when the active id is stale', () => {
+    const state = loadV3(v3({ activeAttackId: 'missing' }));
+    expect(state.activeProfileId).toBe('a1');
+    expect(copies(state.rows)).toEqual(copies(state.profiles[0].rows));
+  });
+
+  it('falls back to the defaults for an empty v3 save', () => {
+    const state = loadV3(v3({ library: [], attacks: [] }));
+    expect(state.library.map((w) => w.name)).toEqual(['Bolt rifle']);
+    expect(state.profiles.map((p) => p.name)).toEqual(['Bolt rifles']);
+    expect(copies(state.rows)).toEqual([[10, 'Bolt rifle', -1]]);
+  });
+
+  it('ignores the units of a v3 save made while units existed', () => {
+    const state = loadV3({ ...v3(), units: [{ id: 'u1', name: 'Squad', rows: [{ id: 'r8', models: 4, weaponId: 'w-bolt' }] }] });
+    expect(state).not.toHaveProperty('units');
+    expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters']);
+  });
+
+  it('leaves the v3 key in place and saves v4 next to it', () => {
+    const old = JSON.stringify(v3());
+    const storage = memoryStorage({ [V3_STORAGE_KEY]: old });
+    const state = loadState(storage);
+    saveState(state, storage);
+    expect(storage.data[V3_STORAGE_KEY]).toBe(old);
+    expect(Object.keys(storage.data).sort()).toEqual([V3_STORAGE_KEY, STORAGE_KEY].sort());
+    expect(loadState(storage)).toEqual(state);
+  });
+});
+
+describe('v2 → v4 migration (through v3)', () => {
+  it('makes the clean active preset the active profile, loaded into the working area', () => {
+    const state = loadV2(v2());
+    expect(state.profiles.map((p) => [p.id, p.name])).toEqual([
+      ['a1', 'Gunline'],
+      ['a2', 'Bolters'],
+    ]);
+    expect(state.activeProfileId).toBe('a1');
+    expect(copies(state.profiles[0].rows)).toEqual([
+      [10, 'Bolt rifle', -1],
+      [1, 'Lascannon', -3],
+    ]);
+    expect(copies(state.rows)).toEqual(copies(state.profiles[0].rows));
+    expect(copies(state.profiles[1].rows)).toEqual([[20, 'Bolt rifle', -1]]);
     // Every preset weapon matched a library entry: nothing was added.
     expect(state.library).toEqual([bolt(), las()]);
   });
@@ -334,8 +428,7 @@ describe('v2 → v3 migration', () => {
   it('drops the unit presets without restoring their weapons', () => {
     const state = loadV2(v2());
     expect(state).not.toHaveProperty('units');
-    expect(state.attacks.map((a) => a.name)).toEqual(['Gunline', 'Bolters']);
-    // The plasma gun only lived in the unit preset: it is not added to the library.
+    expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters']);
     expect(state.library.map((w) => w.id)).toEqual(['w-bolt', 'w-las']);
   });
 
@@ -354,42 +447,46 @@ describe('v2 → v3 migration', () => {
       { id: 'r2', models: 1, weaponId: 'w-las' },
     ];
     const state = loadV2(v2({ rows }));
-    expect(state.attacks.map((a) => a.name)).toEqual(['Gunline', 'Bolters', 'Gunline (modified)']);
-    const [gunline, , modified] = state.attacks;
-    expect(linked(gunline.rows)).toEqual([
-      [10, 'w-bolt'],
-      [1, 'w-las'],
+    expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters', 'Gunline (modified)']);
+    const [gunline, , modified] = state.profiles;
+    expect(copies(gunline.rows)).toEqual([
+      [10, 'Bolt rifle', -1],
+      [1, 'Lascannon', -3],
     ]);
-    expect(modified.rows).toEqual(rows);
-    expect(state.activeAttackId).toBe(modified.id);
-    expect(state.library).toHaveLength(2);
+    expect(copies(modified.rows)).toEqual([
+      [9, 'Bolt rifle', -1],
+      [1, 'Lascannon', -3],
+    ]);
+    expect(state.activeProfileId).toBe(modified.id);
+    expect(copies(state.rows)).toEqual(copies(modified.rows));
   });
 
-  it('treats a live row without a weapon as a modification', () => {
+  it('treats a live row without a weapon as a modification, and drops that row', () => {
     const rows = [...v2().rows, { id: 'r3', models: 2, weaponId: null }];
     const state = loadV2(v2({ rows }));
-    expect(state.attacks.map((a) => a.name)).toEqual(['Gunline', 'Bolters', 'Gunline (modified)']);
-    expect(activeRows(state)).toEqual(rows);
+    expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters', 'Gunline (modified)']);
+    expect(copies(activeProfile(state)!.rows)).toEqual([
+      [10, 'Bolt rifle', -1],
+      [1, 'Lascannon', -3],
+    ]);
   });
 
   it('adds the live rows as "Current attack" when no preset was active, with a unique name', () => {
     const state = loadV2(v2({ activeAttackPresetId: null }));
-    expect(state.attacks.map((a) => a.name)).toEqual(['Gunline', 'Bolters', 'Current attack']);
-    expect(activeRows(state)).toEqual(v2().rows);
+    expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters', 'Current attack']);
+    expect(activeProfile(state)?.name).toBe('Current attack');
 
     const clash = loadV2(v2({ activeAttackPresetId: 'missing', attackPresets: [{ id: 'a9', name: 'current attack', rows: [snap(1, las())] }] }));
-    expect(clash.attacks.map((a) => a.name)).toEqual(['current attack', 'Current attack (2)']);
+    expect(clash.profiles.map((p) => p.name)).toEqual(['current attack', 'Current attack (2)']);
   });
 
   it('keeps a "(modified)" name within 40 characters', () => {
     const name = 'x'.repeat(40);
     const state = loadV2(v2({ rows: [{ id: 'r1', models: 3, weaponId: 'w-bolt' }], attackPresets: [{ id: 'a1', name, rows: [snap(10, bolt())] }] }));
-    const modified = state.attacks.find((a) => a.id === state.activeAttackId)!;
-    expect(modified.name).toBe(`${'x'.repeat(29)} (modified)`);
-    expect(modified.name).toHaveLength(40);
+    expect(activeProfile(state)?.name).toBe(`${'x'.repeat(29)} (modified)`);
   });
 
-  it('links preset weapons to the library without duplicates, adding changed or deleted ones', () => {
+  it('keeps the preset weapon copies, adding changed or deleted ones to the library once', () => {
     const boltAp2 = { ...bolt(), ap: -2 };
     const state = loadV2(
       v2({
@@ -400,37 +497,47 @@ describe('v2 → v3 migration', () => {
         ],
       }),
     );
-    // The bolt rifle changed since "Old bolters" was saved: its copy is added once, named after the preset.
-    // The plasma gun was deleted from the library: it is restored under its own id, once.
     expect(state.library.map((w) => [w.id, w.name])).toEqual([
       ['w-bolt', 'Bolt rifle'],
       ['w-las', 'Lascannon'],
       [expect.any(String), 'Bolt rifle (Old bolters)'],
       ['w-plasma', 'Plasma gun'],
     ]);
-    const copyId = state.library[2].id;
-    expect(state.library[2].ap).toBe(-2);
-    expect(linked(state.attacks[1].rows)).toEqual([
-      [10, copyId],
-      [2, 'w-plasma'],
+    expect(copies(state.profiles[1].rows)).toEqual([
+      [10, 'Bolt rifle (Old bolters)', -2],
+      [2, 'Plasma gun', -2],
     ]);
-    expect(linked(state.attacks[2].rows)).toEqual([[5, 'w-plasma']]);
+    expect(copies(state.profiles[2].rows)).toEqual([[5, 'Plasma gun', -2]]);
   });
 
-  it('migrates v1 → v3 through the same conversion', () => {
+  it('migrates v1 weapons into a deduplicated library plus a "Current attack" profile', () => {
     const state = loadState(memoryStorage({ [LEGACY_STORAGE_KEY]: JSON.stringify(v1) }));
-    expect(state).not.toHaveProperty('units');
+    expect(state.library.map((w) => [w.name, w.ap])).toEqual([
+      ['Bolt rifles', -1],
+      ['Lascannon', -3],
+      ['Bolt rifles', -2],
+    ]);
+    expect(state.profiles.map((p) => p.name)).toEqual(['Current attack']);
+    expect(state.activeProfileId).toBe(state.profiles[0].id);
+    expect(copies(state.rows)).toEqual([
+      [10, 'Bolt rifles', -1],
+      [1, 'Lascannon', -3],
+      [5, 'Bolt rifles', -1],
+      [5, 'Bolt rifles', -2],
+    ]);
     expect(state.defenderPresets).toEqual([]);
-    expect(state.attacks).toHaveLength(1);
-    expect(state.activeAttackId).toBe(state.attacks[0].id);
+    expect(state.defender).toEqual({ ...v1.defender, keywords: [] });
+    expect(state.iterations).toBe(50_000);
   });
 
-  it('leaves the old keys in place and saves v3 next to them', () => {
+  it('leaves the old keys in place and saves v4 next to them', () => {
     const old = JSON.stringify(v2());
-    const storage = memoryStorage({ [V2_STORAGE_KEY]: old });
+    const legacy = JSON.stringify(v1);
+    const storage = memoryStorage({ [V2_STORAGE_KEY]: old, [LEGACY_STORAGE_KEY]: legacy });
     const state = loadState(storage);
     saveState(state, storage);
     expect(storage.data[V2_STORAGE_KEY]).toBe(old);
+    expect(storage.data[LEGACY_STORAGE_KEY]).toBe(legacy);
     expect(loadState(storage)).toEqual(state);
   });
 });
