@@ -262,9 +262,9 @@ select[aria-invalid='true'] {
   display: none;
 }
 
-/* ---------- Weapon rows (attack editor) ---------- */
+/* ---------- Weapon rows (main page) ---------- */
 
-/* The rows adapt to the width of the list (the drawer is narrower than the page), not the viewport. */
+/* The rows adapt to the width of the list, not the viewport. */
 .weapon-list {
   container-type: inline-size;
   list-style: none;
@@ -285,14 +285,32 @@ select[aria-invalid='true'] {
   display: none;
 }
 
+.weapon-list[hidden] {
+  display: none;
+}
+
 .weapon-row {
   display: grid;
-  grid-template-columns: 20px 64px minmax(140px, 2fr) minmax(0, 3fr) auto;
+  grid-template-columns: 20px 64px minmax(120px, 2fr) minmax(0, 3fr) auto;
   gap: 8px;
   align-items: end;
   padding: 10px;
   border-radius: 8px;
   background: var(--surface-2);
+}
+
+/* A weapon copy with invalid stats (only possible from an import or old saved data). */
+.weapon-row.is-invalid {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+/* The weapon name: read-only text, the copy's stats are not edited here. */
+.row-name {
+  align-self: center;
+  margin-top: 16px;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .row-index {
@@ -378,14 +396,7 @@ select[aria-invalid='true'] {
   align-items: center;
 }
 
-.row-actions-sep {
-  width: 1px;
-  height: 20px;
-  margin: 0 2px;
-  background: var(--border);
-}
-
-/* Medium (the drawer): the actions move beside the weapon, the chips to a line of their own. */
+/* Medium: the actions move beside the weapon, the chips to a line of their own. */
 @container (max-width: 680px) {
   .weapon-row {
     grid-template-columns: 20px 64px minmax(0, 1fr) auto;
@@ -401,7 +412,7 @@ select[aria-invalid='true'] {
   }
 }
 
-/* Narrow (phones): models and weapon, then the chips, then the actions. */
+/* Narrow (phones): models and weapon name, then the chips, then the actions. */
 @container (max-width: 440px) {
   .weapon-row {
     grid-template-columns: 64px minmax(0, 1fr);
@@ -419,100 +430,36 @@ select[aria-invalid='true'] {
   }
 }
 
-/* ---------- Attack roster (main page, read-only) ---------- */
-
-.roster {
-  container-type: inline-size;
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* "Add weapon…" on the left, "Optimise order" with its status on the right; they stack when narrow. */
+.attacker-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.add-weapon {
+  display: flex;
+  flex: 1 1 200px;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  max-width: 280px;
 }
 
-.roster[hidden] {
-  display: none;
-}
-
-.roster-row {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 13rem) minmax(0, 1fr);
-  gap: 4px 10px;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-
-.roster-row .row-index,
-.roster-row .stat-chips {
-  margin-top: 0;
-}
-
-.roster-row.is-invalid {
-  box-shadow: inset 3px 0 0 var(--danger);
-}
-
-.roster-row .row-errors {
-  grid-column: 2 / -1;
-}
-
-.roster-name {
-  min-width: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.roster-models {
+.add-weapon-hint {
+  margin: 0;
   color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
 }
 
-.roster-message {
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-}
-
-.roster-message:empty {
+.add-weapon-hint[hidden] {
   display: none;
 }
 
-/* Narrow: the chips wrap below the name. */
-@container (max-width: 520px) {
-  .roster-row {
-    grid-template-columns: 20px minmax(0, 1fr);
-  }
-  .roster-row .stat-chips {
-    grid-column: 2 / -1;
-  }
-}
-
-/* "A better firing order destroys +0.12 models … Edit attack" */
-.optimise-hint {
-  margin: 12px 0 0;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--highlight-bg);
-  color: var(--highlight);
-  font-size: 0.85rem;
-}
-
-.optimise-hint[hidden] {
-  display: none;
-}
-
-.link-button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
+.attacker-actions .optimise {
+  flex: 1 1 240px;
 }
 
 /* ---------- Preset bars ---------- */
@@ -675,11 +622,6 @@ select[aria-invalid='true'] {
   background: var(--accent-hover);
 }
 
-.button.small {
-  height: 34px;
-  padding: 0 10px;
-}
-
 .button.danger {
   background: var(--danger);
   border-color: var(--danger);
@@ -788,9 +730,8 @@ select[aria-invalid='true'] {
   cursor: not-allowed;
 }
 
-/* ---------- Drawer tabs: attack editor, weapons, settings ---------- */
+/* ---------- Drawer tabs: weapons, settings ---------- */
 
-.attack-editor,
 .manage-panel,
 .settings-panel {
   display: flex;
@@ -802,11 +743,6 @@ select[aria-invalid='true'] {
   gap: 24px;
 }
 
-.attack-editor .preset-bar {
-  margin-bottom: 0;
-}
-
-.attack-editor > .panel-hint,
 .manage-panel > .panel-hint,
 .settings-section .panel-hint {
   margin: 0;
@@ -824,27 +760,6 @@ select[aria-invalid='true'] {
 
 .field--iterations {
   max-width: 180px;
-}
-
-/* "+ Add weapon" on one line, "Optimise order" with its status on the next. */
-.editor-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.editor-actions .optimise {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--grid);
-}
-
-.editor-actions .optimise-status {
-  flex: 1 1 200px;
-  text-align: left;
 }
 
 .optimise {
@@ -1494,12 +1409,6 @@ dialog.drawer[open]::backdrop {
   color: var(--text-secondary);
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.manage-usage {
-  color: var(--text-muted);
-  font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 

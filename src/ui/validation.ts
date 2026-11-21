@@ -1,6 +1,6 @@
 import { maxValue, tryParseDice } from '../engine/dice';
 import { parseAntiValue } from '../state/abilities';
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type AttackRow, type DefenderProfile, type StoredWeapon, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile, type ProfileRow, type WeaponAbilities, type WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -84,16 +84,16 @@ export function abilityValueError(expr: string, label: string): string | undefin
   return parsed && maxValue(parsed) > max ? `${label}: X can roll at most ${max}` : undefined;
 }
 
-/** A live attack row: models in range, a weapon chosen, and that weapon valid. */
-export function validateRow(row: AttackRow, library: StoredWeapon[]): FieldErrors<AttackRow> {
-  const weapon = row.weaponId === null ? undefined : library.find((w) => w.id === row.weaponId);
-  let weaponError: string | undefined;
-  if (row.weaponId === null) weaponError = 'Choose a weapon';
-  else if (!weapon) weaponError = 'Weapon profile not found';
-  else if (hasErrors(validateWeaponStats(weapon))) weaponError = `${weapon.name || 'Weapon'} has invalid stats: edit the profile`;
-  const errors: FieldErrors<AttackRow> = {
+/**
+ * A profile row: models in range and a valid weapon copy. Every weapon error is joined into
+ * `weapon`, so the row shows them on one line (a copy can only be wrong when it was imported
+ * or stored invalid; the weapon modal never saves one).
+ */
+export function validateRow(row: Pick<ProfileRow, 'models' | 'weapon'>): FieldErrors<ProfileRow> {
+  const weaponErrors = Object.values(validateWeaponStats(row.weapon));
+  const errors: FieldErrors<ProfileRow> = {
     models: intInRange(row.models, LIMITS.weaponModels, 'Models'),
-    weaponId: weaponError,
+    weapon: weaponErrors.length > 0 ? weaponErrors.join(' · ') : undefined,
   };
   return prune(errors);
 }

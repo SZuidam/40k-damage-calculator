@@ -10,7 +10,7 @@ export interface MenuItem {
 }
 
 export interface MenuOptions {
-  /** Accessible name of the ⋯ button, e.g. "Attack actions". */
+  /** Accessible name of the ⋯ button, e.g. "Profile actions". */
   label: string;
   items: MenuItem[];
 }

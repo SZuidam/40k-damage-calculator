@@ -22,8 +22,8 @@ export const CONDITION_REASONS: Record<keyof AttackConditions, string> = {
 };
 
 /**
- * Read-only stats of a weapon as chips (`A 2`, `BS 3+`, …) plus its abilities as text. Shared by
- * the main page roster and the attack editor. Blast / Cleave / Rapid Fire extra attacks show on
+ * Read-only stats of a weapon as chips (`A 2`, `BS 3+`, …) plus its abilities as text, for the
+ * rows on the main page. Blast / Cleave / Rapid Fire extra attacks show on
  * the A chip and Melta extra damage on the D chip; abilities that apply to the defender's
  * keywords or the current conditions are outlined.
  */
@@ -47,7 +47,7 @@ export function statChips(weapon: WeaponStats | undefined, defender: ChipDefende
   }
   const abilities = activeAbilities(weapon.abilities);
   if (abilities.length === 0) return chips;
-  // Read-only; abilities are edited in the weapon profile modal (✎ in the attack editor or the Weapons tab).
+  // Read-only; abilities are edited in the weapon profile modal (Weapons tab), and rows keep their copy.
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
   abilities.forEach(({ label, description, anti, condition }, i) => {
     if (i > 0) text.append(', ');

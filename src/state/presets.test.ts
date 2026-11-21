@@ -1,21 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, noConditions, type AttackRow, type DefenderProfile, type StoredWeapon } from '../types';
-import {
-  byName,
-  copyDefender,
-  copyRows,
-  defenderSummary,
-  materialiseRows,
-  pickStats,
-  resolveRows,
-  rowsSummary,
-  sameDefender,
-  sameSnapshot,
-  snapshotRows,
-  snapshotsSummary,
-  uniqueName,
-  weaponUsage,
-} from './presets';
+import { noAbilities, noConditions, type DefenderProfile, type Profile, type ProfileRow, type StoredWeapon } from '../types';
+import { byName, copyDefender, copyRows, defenderSummary, pickStats, resolveRows, rowsSummary, sameDefender, sameRows, uniqueName } from './presets';
 
 const none = noAbilities();
 const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
@@ -23,118 +8,130 @@ const lascannon = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks
 
 function setup() {
   const library = [boltRifle(), lascannon()];
-  const rows: AttackRow[] = [
-    { id: 'r1', models: 10, weaponId: 'w-bolt' },
-    { id: 'r2', models: 1, weaponId: 'w-las' },
-    { id: 'r3', models: 5, weaponId: 'w-bolt' },
+  const rows: ProfileRow[] = [
+    { id: 'r1', models: 10, weapon: pickStats(library[0]) },
+    { id: 'r2', models: 1, weapon: pickStats(library[1]) },
+    { id: 'r3', models: 5, weapon: pickStats(library[0]) },
   ];
   return { library, rows };
 }
 
 describe('resolveRows', () => {
-  it('turns rows into engine profiles with the row id and the library name', () => {
-    const { library, rows } = setup();
+  it('turns rows into engine profiles with the row id and the weapon copy', () => {
+    const { rows } = setup();
     const conditions = noConditions();
-    expect(resolveRows(rows, library, conditions)).toEqual([
+    expect(resolveRows(rows, conditions)).toEqual([
       { id: 'r1', name: 'Bolt rifle', models: 10, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none, conditions },
       { id: 'r2', name: 'Lascannon', models: 1, attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: none, conditions },
       { id: 'r3', name: 'Bolt rifle', models: 5, attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none, conditions },
     ]);
   });
 
-  it('gives every weapon its own copy of the attack conditions', () => {
-    const { library, rows } = setup();
+  it('gives every weapon its own copy of the attack conditions and abilities', () => {
+    const { rows } = setup();
     const conditions = { halfRange: true, charged: true };
-    const resolved = resolveRows(rows, library, conditions);
+    const resolved = resolveRows(rows, conditions);
     expect(resolved.every((w) => w.conditions.halfRange && w.conditions.charged)).toBe(true);
     resolved[0].conditions.charged = false;
     expect(conditions.charged).toBe(true);
     expect(resolved[1].conditions.charged).toBe(true);
+    resolved[0].abilities.lethalHits = true;
+    expect(rows[0].weapon.abilities.lethalHits).toBe(false);
   });
 
-  it('skips rows without a weapon or with a missing weapon', () => {
-    const { library } = setup();
-    const rows: AttackRow[] = [
-      { id: 'a', models: 1, weaponId: null },
-      { id: 'b', models: 1, weaponId: 'gone' },
-      { id: 'c', models: 2, weaponId: 'w-las' },
-    ];
-    expect(resolveRows(rows, library, noConditions()).map((w) => w.id)).toEqual(['c']);
+  it('does not look at the library: rows fire their own copy', () => {
+    const { library, rows } = setup();
+    library[0].strength = 9;
+    library.splice(1, 1);
+    expect(resolveRows(rows, noConditions()).map((w) => [w.name, w.strength])).toEqual([
+      ['Bolt rifle', 4],
+      ['Lascannon', 12],
+      ['Bolt rifle', 4],
+    ]);
   });
 });
 
-describe('snapshots', () => {
-  it('round trips: a snapshot materialises back into the same attack and library', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows, library);
-    expect(snap[0]).toEqual({ models: 10, weaponId: 'w-bolt', weapon: { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: none } });
-    expect(snap[0].weapon).not.toHaveProperty('id');
-
-    const loaded = materialiseRows(snap, library, 'Intercessors');
-    expect(loaded.library).toEqual(library);
-    expect(loaded.rows.map((r) => [r.models, r.weaponId])).toEqual([
-      [10, 'w-bolt'],
-      [1, 'w-las'],
-      [5, 'w-bolt'],
-    ]);
-    expect(sameSnapshot(snapshotRows(loaded.rows, loaded.library), snap)).toBe(true);
+describe('copyRows', () => {
+  it('copies rows with new ids and deep copies of their weapons', () => {
+    const { rows } = setup();
+    rows[0].weapon.abilities.anti = { vehicle: 4 };
+    const copies = copyRows(rows);
+    expect(copies.map((r) => [r.models, r.weapon])).toEqual(rows.map((r) => [r.models, r.weapon]));
+    expect(copies.every((c, i) => c.id !== rows[i].id && c !== rows[i] && c.weapon !== rows[i].weapon)).toBe(true);
+    expect(new Set(copies.map((c) => c.id)).size).toBe(rows.length);
+    copies[0].weapon.abilities.anti.monster = 3;
+    copies[0].weapon.strength = 5;
+    expect(rows[0].weapon.abilities.anti).toEqual({ vehicle: 4 });
+    expect(rows[0].weapon.strength).toBe(4);
   });
 
-  it('copies weapons, so editing the library does not change a snapshot taken before', () => {
-    const { library, rows } = setup();
-    const saved = snapshotRows(rows, library);
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(true);
+  it('copies rows without ids (from an export file)', () => {
+    const copies = copyRows([{ models: 3, weapon: pickStats(lascannon()) }]);
+    expect(copies).toEqual([{ id: expect.any(String), models: 3, weapon: pickStats(lascannon()) }]);
+  });
+});
 
-    library[0].strength = 5;
-    expect(saved[0].weapon.strength).toBe(4);
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
+describe('sameRows', () => {
+  it('is true for a copy, and ignores row ids and weapon names', () => {
+    const { rows } = setup();
+    expect(sameRows(rows, copyRows(rows))).toBe(true);
+    const renamed = copyRows(rows);
+    renamed[0].weapon.name = 'Bolt rifle (Mk II)';
+    expect(sameRows(rows, renamed)).toBe(true);
   });
 
   it('detects changed models, order and row count', () => {
-    const { library, rows } = setup();
-    const saved = snapshotRows(rows, library);
-    expect(sameSnapshot(snapshotRows([{ ...rows[0], models: 9 }, rows[1], rows[2]], library), saved)).toBe(false);
-    expect(sameSnapshot(snapshotRows([rows[1], rows[0], rows[2]], library), saved)).toBe(false);
-    expect(sameSnapshot(snapshotRows(rows.slice(0, 2), library), saved)).toBe(false);
+    const { rows } = setup();
+    expect(sameRows([{ ...rows[0], models: 9 }, rows[1], rows[2]], rows)).toBe(false);
+    expect(sameRows([rows[1], rows[0], rows[2]], rows)).toBe(false);
+    expect(sameRows(rows.slice(0, 2), rows)).toBe(false);
+    expect(sameRows([], [])).toBe(true);
   });
 
-  it('treats an ability change as a change, and keeps the preset copy of the abilities', () => {
-    const { library, rows } = setup();
-    const saved = snapshotRows(rows, library);
+  it('treats a stat or ability change as a change, but not dice case or spacing', () => {
+    const { rows } = setup();
+    const changed = copyRows(rows);
+    changed[1].weapon.abilities.lethalHits = true;
+    expect(sameRows(changed, rows)).toBe(false);
+    const sustained = copyRows(rows);
+    sustained[0].weapon.abilities.sustainedHits = '1';
+    const spaced = copyRows(sustained);
+    spaced[0].weapon.abilities.sustainedHits = ' 1 ';
+    spaced[1].weapon.damage = 'd6+1';
+    expect(sameRows(sustained, rows)).toBe(false);
+    expect(sameRows(spaced, sustained)).toBe(true);
+    const anti = copyRows(rows);
+    anti[0].weapon.abilities.anti = { vehicle: 4 };
+    expect(sameRows(anti, rows)).toBe(false);
+  });
+});
+
+describe('profiles keep their own copies', () => {
+  it('editing or deleting a library weapon changes neither a profile nor the working area', () => {
+    const library = [boltRifle()];
+    const profile: Profile = { id: 'p', name: 'Bolters', rows: [{ id: 'r', models: 10, weapon: pickStats(library[0]) }] };
+    const working = copyRows(profile.rows);
+    library[0].ap = -2;
     library[0].abilities.lethalHits = true;
-    expect(saved[0].weapon.abilities.lethalHits).toBe(false);
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
-    library[0].abilities = { ...none, sustainedHits: '1' };
-    const sustained = snapshotRows(rows, library);
-    expect(sameSnapshot(sustained, saved)).toBe(false);
-    library[0].abilities = { ...none, sustainedHits: ' 1 ' };
-    expect(sameSnapshot(snapshotRows(rows, library), sustained)).toBe(true);
+    expect(profile.rows[0].weapon).toEqual(pickStats(boltRifle()));
+    expect(sameRows(working, profile.rows)).toBe(true);
+    library.splice(0, 1);
+    expect(resolveRows(working, noConditions())[0].ap).toBe(-1);
   });
 
-  it('does not depend on the attack conditions', () => {
-    // Conditions are not part of a snapshot, so toggling them never makes a preset dirty.
-    const { library, rows } = setup();
-    const saved = snapshotRows(rows, library);
-    expect(saved.every((row) => !('conditions' in row) && !('conditions' in row.weapon))).toBe(true);
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(true);
+  it('saving copies the working area, so later edits make the profile dirty again', () => {
+    const { rows } = setup();
+    const profile: Profile = { id: 'p', name: 'Gunline', rows: copyRows(rows) };
+    rows[0].models = 8;
+    expect(sameRows(rows, profile.rows)).toBe(false);
+    profile.rows = copyRows(rows);
+    expect(sameRows(rows, profile.rows)).toBe(true);
+    rows[0].models = 7;
+    expect(profile.rows[0].models).toBe(8);
   });
+});
 
-  it('treats Rapid Fire and Lance as weapon changes', () => {
-    const { library, rows } = setup();
-    const saved = snapshotRows(rows, library);
-    library[0].abilities = { ...noAbilities(), rapidFire: '1' };
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
-    library[0].abilities = { ...noAbilities(), lance: true };
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(false);
-  });
-
-  it('ignores a rename of the library profile', () => {
-    const { library, rows } = setup();
-    const saved = snapshotRows(rows, library);
-    library[0].name = 'Bolt rifle (Mk II)';
-    expect(sameSnapshot(snapshotRows(rows, library), saved)).toBe(true);
-  });
-
+describe('defenders', () => {
   it('compares defenders field by field', () => {
     const d = { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] };
     expect(sameDefender(d, { ...d })).toBe(true);
@@ -150,119 +147,16 @@ describe('snapshots', () => {
     expect(sameDefender(d, { ...d, keywords: ['vehicle', 'fly'] })).toBe(false);
     expect(sameDefender({ ...d, keywords: ['vehicle', 'fly'] }, { ...d, keywords: ['fly', 'vehicle'] })).toBe(true);
   });
-
-  it('weapon with a different Anti is a different weapon', () => {
-    const bolt = boltRifle();
-    const anti = { ...bolt, abilities: { ...noAbilities(), anti: { vehicle: 4 } } };
-    const rows: AttackRow[] = [{ id: 'r1', models: 1, weaponId: 'w-bolt' }];
-    expect(sameSnapshot(snapshotRows(rows, [bolt]), snapshotRows(rows, [anti]))).toBe(false);
-    expect(sameSnapshot(snapshotRows(rows, [anti]), snapshotRows(rows, [{ ...anti, abilities: { ...noAbilities(), anti: { vehicle: 4 } } }]))).toBe(true);
-  });
-});
-
-describe('materialiseRows', () => {
-  it('links to the library entry with the same id and stats', () => {
-    const { library, rows } = setup();
-    const result = materialiseRows(snapshotRows(rows, library), library, 'P');
-    expect(result.library).toHaveLength(2);
-    expect(result.rows.every((r, i) => r.weaponId === rows[i].weaponId)).toBe(true);
-    expect(new Set(result.rows.map((r) => r.id)).size).toBe(3);
-  });
-
-  it('links to an entry with the same name and stats when the id differs', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows, library);
-    const other: StoredWeapon[] = [{ ...boltRifle(), id: 'w-bolt-2' }, lascannon()];
-    const result = materialiseRows(snap, other, 'P');
-    expect(result.library).toHaveLength(2);
-    expect(result.rows[0].weaponId).toBe('w-bolt-2');
-  });
-
-  it('restores a deleted weapon under its original id', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows, library);
-    const withoutLas = library.filter((w) => w.id !== 'w-las');
-    const result = materialiseRows(snap, withoutLas, 'P');
-    expect(result.library.find((w) => w.id === 'w-las')).toEqual(lascannon());
-    expect(result.rows[1].weaponId).toBe('w-las');
-    expect(withoutLas).toHaveLength(1);
-  });
-
-  it('adds a changed weapon as a copy suffixed with the preset name', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows, library);
-    library[0].strength = 5;
-    const result = materialiseRows(snap, library, 'Intercessors');
-    expect(result.library).toHaveLength(3);
-    const copy = result.library[2];
-    expect(copy.name).toBe('Bolt rifle (Intercessors)');
-    expect(copy.strength).toBe(4);
-    expect(copy.id).not.toBe('w-bolt');
-    expect(result.rows[0].weaponId).toBe(copy.id);
-    expect(result.rows[2].weaponId).toBe(copy.id);
-    expect(result.library[0].strength).toBe(5);
-    expect(sameSnapshot(snapshotRows(result.rows, result.library), snap)).toBe(true);
-  });
-
-  it('adds no duplicates when the same preset is loaded twice', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows, library);
-    library[0].strength = 5;
-    const once = materialiseRows(snap, library.filter((w) => w.id !== 'w-las'), 'Intercessors');
-    const twice = materialiseRows(snap, once.library, 'Intercessors');
-    expect(once.library).toHaveLength(3);
-    expect(twice.library).toEqual(once.library);
-    expect(twice.rows.map((r) => r.weaponId)).toEqual(once.rows.map((r) => r.weaponId));
-  });
-
-  it('numbers a copy when the suffixed name is taken by a different weapon', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows.slice(0, 1), library);
-    library[0].strength = 5;
-    library.push({ ...boltRifle(), id: 'w-x', name: 'Bolt rifle (P)', strength: 6 });
-    const once = materialiseRows(snap, library, 'P');
-    expect(once.library.at(-1)?.name).toBe('Bolt rifle (P) 2');
-    expect(materialiseRows(snap, once.library, 'P').library).toHaveLength(once.library.length);
-  });
-});
-
-describe('weaponUsage', () => {
-  it('counts the rows that use a weapon across all attacks', () => {
-    const { rows } = setup();
-    const devastators = { id: 'c', name: 'Devastators', rows: [{ id: 'c1', models: 4, weaponId: 'w-las' }] };
-    const profiles = [{ id: 'a', name: 'Gunline', rows }, { id: 'b', name: 'Empty', rows: [] }, devastators];
-    expect(weaponUsage('w-bolt', profiles)).toBe(2);
-    expect(weaponUsage('w-las', profiles)).toBe(2);
-    expect(weaponUsage('w-none', profiles)).toBe(0);
-    expect(weaponUsage('w-bolt', [])).toBe(0);
-  });
-});
-
-describe('copyRows', () => {
-  it('copies rows with new ids, linked to the same weapons', () => {
-    const { rows } = setup();
-    const copies = copyRows(rows);
-    expect(copies.map((r) => [r.models, r.weaponId])).toEqual(rows.map((r) => [r.models, r.weaponId]));
-    expect(copies.every((c, i) => c.id !== rows[i].id && c !== rows[i])).toBe(true);
-    expect(new Set(copies.map((c) => c.id)).size).toBe(rows.length);
-  });
 });
 
 describe('summaries', () => {
-  it('rowsSummary names linked rows from the library and marks unlinked ones', () => {
+  it('rowsSummary names the weapon copies', () => {
     const { library, rows } = setup();
-    expect(rowsSummary(rows, library)).toBe('10× Bolt rifle, 1× Lascannon, 5× Bolt rifle');
-    library[0].name = 'Bolt rifle (Mk II)';
-    expect(rowsSummary(rows.slice(0, 1), library)).toBe('10× Bolt rifle (Mk II)');
-    expect(rowsSummary([{ id: 'x', models: 2, weaponId: null }, { id: 'y', models: 1, weaponId: 'gone' }], library)).toBe('2× (no weapon), 1× (no weapon)');
-    expect(rowsSummary([], library)).toBe('');
-  });
-
-  it('snapshotsSummary uses the weapon copies', () => {
-    const { library, rows } = setup();
-    const snap = snapshotRows(rows.slice(0, 2), library);
+    expect(rowsSummary(rows)).toBe('10× Bolt rifle, 1× Lascannon, 5× Bolt rifle');
     library[0].name = 'Renamed';
-    expect(snapshotsSummary(snap)).toBe('10× Bolt rifle, 1× Lascannon');
+    expect(rowsSummary(rows.slice(0, 1))).toBe('10× Bolt rifle');
+    expect(rowsSummary([{ models: 2, weapon: pickStats(lascannon()) }])).toBe('2× Lascannon');
+    expect(rowsSummary([])).toBe('');
   });
 });
 
@@ -285,6 +179,7 @@ describe('copies', () => {
   it('pickStats and copyDefender share no objects with the original', () => {
     const weapon = { ...boltRifle(), abilities: { ...noAbilities(), anti: { vehicle: 4 } } };
     const copy = pickStats(weapon);
+    expect(copy).not.toHaveProperty('id');
     expect(copy.abilities).toEqual(weapon.abilities);
     expect(copy.abilities).not.toBe(weapon.abilities);
     expect(copy.abilities.anti).not.toBe(weapon.abilities.anti);

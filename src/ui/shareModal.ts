@@ -1,4 +1,4 @@
-import { byName, defenderSummary, rowsSummary, snapshotsSummary, statsSummary } from '../state/presets';
+import { byName, defenderSummary, rowsSummary, statsSummary } from '../state/presets';
 import {
   SHARE_KINDS,
   applyImport,
@@ -18,7 +18,7 @@ import { h } from './dom';
 import { openModal } from './modal';
 
 const KIND_TITLES: Record<ShareKind, string> = {
-  attacks: 'Attacks',
+  attacks: 'Profiles',
   defenders: 'Defenders',
   weapons: 'Weapon profiles',
 };
@@ -115,7 +115,7 @@ export function openExportModal(state: ShareState): Promise<void> {
     className: 'modal--wide',
     content: (close) => {
       const sources: Record<ShareKind, { id: string; name: string; detail: string }[]> = {
-        attacks: byName(state.attacks).map((p) => ({ id: p.id, name: p.name, detail: rowsSummary(p.rows, state.library) || 'No rows' })),
+        attacks: byName(state.profiles).map((p) => ({ id: p.id, name: p.name, detail: rowsSummary(p.rows) || 'No weapons' })),
         defenders: byName(state.defenderPresets).map((p) => ({ id: p.id, name: p.name, detail: defenderSummary(p.defender) })),
         weapons: byName(state.library).map((w) => ({ id: w.id, name: w.name, detail: statsSummary(w) })),
       };
@@ -166,7 +166,7 @@ export function openExportModal(state: ShareState): Promise<void> {
       const total = SHARE_KINDS.reduce((sum, kind) => sum + sources[kind].length, 0);
       if (total === 0) {
         return [
-          h('p', { class: 'modal-text' }, 'Nothing to export yet. Create an attack, defender preset or weapon profile first.'),
+          h('p', { class: 'modal-text' }, 'Nothing to export yet. Save a profile or defender preset, or create a weapon profile first.'),
           h('div', { class: 'modal-actions' }, cancel),
         ];
       }
@@ -175,7 +175,7 @@ export function openExportModal(state: ShareState): Promise<void> {
         h(
           'div',
           { class: 'modal-body' },
-          h('p', { class: 'modal-hint' }, 'Choose what to share. Attacks include a copy of every weapon they use.'),
+          h('p', { class: 'modal-hint' }, 'Choose what to share. Profiles include their own copy of every weapon.'),
           picker.element,
           status,
         ),
@@ -196,7 +196,7 @@ export interface ImportContext {
 function itemDetail(data: ShareData, item: ImportItem): string {
   if (item.kind === 'weapons') return statsSummary(data.weapons[item.index]);
   if (item.kind === 'defenders') return defenderSummary(data.defenders[item.index].defender);
-  return snapshotsSummary(data.attacks[item.index].rows) || 'No rows';
+  return rowsSummary(data.attacks[item.index].rows) || 'No weapons';
 }
 
 function itemTag(item: ImportItem): PickerEntry['tag'] {
@@ -353,7 +353,7 @@ export function openImportModal(ctx: ImportContext): Promise<void> {
         done.addEventListener('click', () => close());
         body.replaceChildren(
           h('p', { class: 'modal-text' }, summaryText(summary)),
-          h('p', { class: 'modal-hint' }, 'Pick imported attacks and defender presets from their lists on the main page.'),
+          h('p', { class: 'modal-hint' }, 'Pick imported profiles and defender presets from their lists on the main page.'),
         );
         actions.className = 'modal-actions';
         actions.replaceChildren(done);

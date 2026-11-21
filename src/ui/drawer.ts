@@ -1,6 +1,6 @@
 import { h } from './dom';
 
-export type DrawerTab = 'attacks' | 'weapons' | 'settings';
+export type DrawerTab = 'weapons' | 'settings';
 
 export interface DrawerPanel {
   tab: DrawerTab;
