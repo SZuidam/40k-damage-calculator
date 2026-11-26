@@ -12,7 +12,6 @@ import {
   type Army,
   type AttackConditions,
   type DefenderKeyword,
-  type SituationRef,
   type Unit,
   type UnitAbility,
   type WeaponAbilities,
@@ -36,50 +35,30 @@ export interface SourcedAbility {
 /** What decides whether an ability is active, besides the weapon: the page's toggles and the target. */
 export interface AbilityContext {
   conditions: AttackConditions;
-  /** The custom situations that are on, as `situationKey`s. */
-  situations: readonly string[];
+  /** The ids of the abilities switched on by hand (abilities with `when.toggle`). */
+  toggles: readonly string[];
   /** The defending unit's keywords; null while no defender is picked (keyword conditions fail). */
   keywords: readonly DefenderKeyword[] | null;
 }
 
-/** The built-in conditions an ability can need, with their short names. */
-export const BUILTIN_SITUATIONS: { key: keyof AttackConditions; name: string; toggle: string }[] = [
+/** The built-in attack conditions an ability can need, with their short names and toggle labels. */
+export const BUILTIN_CONDITIONS: { key: keyof AttackConditions; name: string; toggle: string }[] = [
   { key: 'halfRange', name: 'Half range', toggle: 'Within half range' },
   { key: 'charged', name: 'Charged', toggle: 'Charged this turn' },
 ];
 
-/** A custom situation's identity: its name trimmed and lower-cased ("Oath target" = " oath TARGET "). */
-export function situationKey(name: string): string {
-  return name.trim().toLowerCase();
+/** "Charged" / "Half range": how a built-in condition reads in summaries and on the main page. */
+export function conditionName(key: keyof AttackConditions): string {
+  return BUILTIN_CONDITIONS.find((b) => b.key === key)?.name ?? key;
 }
 
-/**
- * What the user typed as a condition: a built-in one when `text` names it ("Charged", "Charged
- * this turn", ignoring case), else a custom situation with the trimmed text as its name.
- */
-export function situationFromText(text: string): SituationRef {
-  const key = situationKey(text);
-  const builtin = BUILTIN_SITUATIONS.find((b) => situationKey(b.name) === key || situationKey(b.toggle) === key);
-  return builtin ? { builtin: builtin.key } : { name: text.trim() };
-}
-
-/** "Charged" / "Ingress move": how a condition reads in summaries and on the main page. */
-export function situationName(ref: SituationRef): string {
-  return 'builtin' in ref ? (BUILTIN_SITUATIONS.find((b) => b.key === ref.builtin)?.name ?? ref.builtin) : ref.name.trim();
-}
-
-/** Whether `ref` is switched on by the page's toggles. */
-export function situationOn(ref: SituationRef, conditions: AttackConditions, situations: readonly string[]): boolean {
-  return 'builtin' in ref ? conditions[ref.builtin] === true : situations.includes(situationKey(ref.name));
-}
-
-export function sameSituation(a: SituationRef, b: SituationRef): boolean {
-  if ('builtin' in a || 'builtin' in b) return 'builtin' in a && 'builtin' in b && a.builtin === b.builtin;
-  return situationKey(a.name) === situationKey(b.name);
+/** `keys` without duplicates, in BUILTIN_CONDITIONS order. */
+export function sortConditions(keys: readonly (keyof AttackConditions)[]): (keyof AttackConditions)[] {
+  return BUILTIN_CONDITIONS.map((b) => b.key).filter((k) => keys.includes(k));
 }
 
 export function newAbility(): UnitAbility {
-  return { id: uid('ability'), name: '', description: '', appliesTo: 'unit', when: { situations: [], weaponType: 'any', targetKeyword: null }, effects: [] };
+  return { id: uid('ability'), name: '', description: '', appliesTo: 'unit', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [] };
 }
 
 /** A copy that shares no arrays or objects with `a`. */
@@ -93,7 +72,7 @@ export function abilityContent(a: AbilityContent): AbilityContent {
     name: a.name,
     description: a.description,
     appliesTo: a.appliesTo,
-    when: { situations: a.when.situations.map((s) => ({ ...s })), weaponType: a.when.weaponType, targetKeyword: a.when.targetKeyword },
+    when: { toggle: a.when.toggle, conditions: [...a.when.conditions], weaponType: a.when.weaponType, targetKeyword: a.when.targetKeyword },
     effects: a.effects.map(copyEffect),
   };
 }
@@ -119,8 +98,9 @@ export function sameAbilityContent(a: AbilityContent, b: AbilityContent): boolea
     a.appliesTo === b.appliesTo &&
     a.when.weaponType === b.when.weaponType &&
     a.when.targetKeyword === b.when.targetKeyword &&
-    a.when.situations.length === b.when.situations.length &&
-    a.when.situations.every((s, i) => sameSituation(s, b.when.situations[i])) &&
+    a.when.toggle === b.when.toggle &&
+    a.when.conditions.length === b.when.conditions.length &&
+    a.when.conditions.every((c, i) => c === b.when.conditions[i]) &&
     a.effects.length === b.effects.length &&
     a.effects.every((e, i) => sameEffect(e, b.effects[i]))
   );
@@ -150,29 +130,33 @@ export function canLead(unit: Unit): boolean {
   return unit.abilities.some((a) => a.appliesTo === 'ledUnit');
 }
 
-/** What an ability still needs to apply to a weapon (empty when it applies). */
+/** What an ability still needs to apply to a weapon (all empty / false when it applies). */
 export interface AbilityNeeds {
-  /** Situations that are off. */
-  situations: SituationRef[];
+  /** It is switched on by hand and its toggle is off. */
+  toggle: boolean;
+  /** Built-in conditions that are off. */
+  conditions: (keyof AttackConditions)[];
   /** The weapon is of the other type. */
   weaponType: boolean;
   /** The target lacks the keyword (or no target is picked). */
   targetKeyword: boolean;
 }
 
-/** What `condition` still needs for a weapon of `type` (any type when `type` is null). */
-export function conditionNeeds(condition: AbilityCondition, type: WeaponType | null, ctx: AbilityContext): AbilityNeeds {
+/** What `ability` still needs for a weapon of `type` (any type when `type` is null). */
+export function abilityNeeds(ability: UnitAbility, type: WeaponType | null, ctx: AbilityContext): AbilityNeeds {
+  const { when } = ability;
   return {
-    situations: condition.situations.filter((s) => !situationOn(s, ctx.conditions, ctx.situations)),
-    weaponType: type !== null && condition.weaponType !== 'any' && condition.weaponType !== type,
-    targetKeyword: condition.targetKeyword !== null && !(ctx.keywords ?? []).includes(condition.targetKeyword),
+    toggle: when.toggle && !ctx.toggles.includes(ability.id),
+    conditions: when.conditions.filter((key) => ctx.conditions[key] !== true),
+    weaponType: type !== null && when.weaponType !== 'any' && when.weaponType !== type,
+    targetKeyword: when.targetKeyword !== null && !(ctx.keywords ?? []).includes(when.targetKeyword),
   };
 }
 
 /** Whether `ability` applies to the attacks of a weapon of `type`. */
 export function isActive(ability: UnitAbility, type: WeaponType, ctx: AbilityContext): boolean {
-  const needs = conditionNeeds(ability.when, type, ctx);
-  return needs.situations.length === 0 && !needs.weaponType && !needs.targetKeyword;
+  const needs = abilityNeeds(ability, type, ctx);
+  return !needs.toggle && needs.conditions.length === 0 && !needs.weaponType && !needs.targetKeyword;
 }
 
 /** The abilities of `abilities` that apply to a weapon of `type`, in order. */
@@ -180,17 +164,10 @@ export function activeFor<T extends { ability: UnitAbility }>(abilities: readonl
   return abilities.filter((a) => isActive(a.ability, type, ctx));
 }
 
-/** The custom situation names `abilities` need, without duplicates (ignoring case), first spelling kept, in order. */
-export function situationsInUse(abilities: readonly UnitAbility[]): string[] {
-  const names = new Map<string, string>();
-  for (const ability of abilities) {
-    for (const ref of ability.when.situations) {
-      if ('builtin' in ref) continue;
-      const key = situationKey(ref.name);
-      if (key !== '' && !names.has(key)) names.set(key, ref.name.trim());
-    }
-  }
-  return [...names.values()];
+/** `toggles` without the ids of abilities that are gone or no longer switched on by hand (in place). */
+export function pruneToggles(toggles: string[], abilities: readonly UnitAbility[]): void {
+  const ids = new Set(abilities.filter((a) => a.when.toggle).map((a) => a.id));
+  for (let i = toggles.length - 1; i >= 0; i--) if (!ids.has(toggles[i])) toggles.splice(i, 1);
 }
 
 // ---------- applying effects ----------
@@ -307,10 +284,11 @@ export function effectSummary(e: AbilityEffect): string {
   }
 }
 
-/** "Charged · Melee · vs Monster", or '' when the ability always applies. */
+/** "Toggled · Charged · Melee · vs Monster", or '' when the ability always applies. */
 export function conditionSummary(c: AbilityCondition): string {
   return [
-    ...c.situations.map(situationName),
+    c.toggle ? 'Toggled' : '',
+    ...c.conditions.map(conditionName),
     c.weaponType === 'any' ? '' : WEAPON_TYPE_NAMES[c.weaponType],
     c.targetKeyword === null ? '' : `vs ${KEYWORD_NAMES[c.targetKeyword]}`,
   ]
@@ -318,7 +296,7 @@ export function conditionSummary(c: AbilityCondition): string {
     .join(' · ');
 }
 
-/** "Charged · Melee: +1 A", "Re-roll hits of 1" (no condition), with every effect joined by ", ". */
+/** "Charged · Melee: +1 A", "Toggled: Re-roll failed hits", "Re-roll hits of 1" (no condition), with every effect joined by ", ". */
 export function abilitySummary(a: UnitAbility): string {
   const effects = a.effects.length === 0 ? 'No effects' : a.effects.map(effectSummary).join(', ');
   const when = conditionSummary(a.when);

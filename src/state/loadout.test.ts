@@ -159,10 +159,10 @@ describe('abilities in the loadout', () => {
     name: 'Shock Assault',
     description: '',
     appliesTo: 'unit',
-    when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null },
+    when: { toggle: false, conditions: ['charged'], weaponType: 'melee', targetKeyword: null },
     effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }],
   };
-  const oath: UnitAbility = { ...shock, id: 'a-oath', name: 'Oath', when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] };
+  const oath: UnitAbility = { ...shock, id: 'a-oath', name: 'Oath', when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] };
   const squad = () => {
     const u = unit();
     u.weapons[2].type = 'melee';
@@ -173,15 +173,15 @@ describe('abilities in the loadout', () => {
   it('applies an ability only to the weapons it is active for', () => {
     const u = squad();
     const charged = { halfRange: false, charged: true };
-    const profiles = resolveLoadout(u, allCarried(u), charged, { abilities: [shock], situations: [], keywords: ['infantry'] });
+    const profiles = resolveLoadout(u, allCarried(u), charged, { abilities: [shock], toggles: [], keywords: ['infantry'] });
     expect(profiles.map((p) => p.attacks)).toEqual(['2', '1', '4']);
-    expect(resolveLoadout(u, allCarried(u), noConditions(), { abilities: [shock], situations: [], keywords: null }).map((p) => p.attacks)).toEqual(['2', '1', '3']);
+    expect(resolveLoadout(u, allCarried(u), noConditions(), { abilities: [shock], toggles: [], keywords: null }).map((p) => p.attacks)).toEqual(['2', '1', '3']);
   });
 
-  it('switches custom situations on by name', () => {
+  it('applies an ability switched on by hand only while its toggle is on', () => {
     const u = squad();
-    const off = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], situations: [], keywords: null });
-    const on = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], situations: ['oath target'], keywords: null });
+    const off = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], toggles: [], keywords: null });
+    const on = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], toggles: ['a-oath'], keywords: null });
     expect(off.every((p) => p.modifiers.rerollHits === 'none')).toBe(true);
     expect(on.every((p) => p.modifiers.rerollHits === 'failed')).toBe(true);
   });

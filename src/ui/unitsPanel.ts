@@ -1,8 +1,7 @@
 import { uid } from '../state/ids';
 import { byName, statsSummary } from '../state/presets';
-import { situationsInUse } from '../state/unitAbilities';
 import { copyUnit, deleteArmy, groupUnits, isNameTaken, newUnit, sameUnit, unitSummary, unitsInArmy, type ArmyFilter } from '../state/units';
-import type { Army, StoredWeapon, Unit, UnitAbility } from '../types';
+import type { Army, StoredWeapon, Unit } from '../types';
 import { abilityList } from './abilityList';
 import { field, h, numberValue, select, setFieldError } from './dom';
 import { Menu } from './menu';
@@ -131,12 +130,6 @@ export class UnitsPanel {
     );
   }
 
-  /** Custom situation names used by any unit or army (plus `extra`, e.g. a draft's abilities), for the ability modal. */
-  private knownSituations(extra: readonly UnitAbility[] = []): string[] {
-    const { armies, units } = this.options;
-    return situationsInUse([...extra, ...units.flatMap((u) => u.abilities), ...armies.flatMap((a) => a.abilities)]);
-  }
-
   // ---------- armies ----------
 
   /** "Army rules…": the abilities every unit of the selected army has, edited in place. */
@@ -160,7 +153,6 @@ export class UnitsPanel {
               scope: 'army',
               label: `Army rules of ${army.name}`,
               addLabel: '+ New army rule',
-              knownSituations: () => this.knownSituations(),
               onChange: () => {
                 this.options.onChange();
                 this.render();
@@ -361,7 +353,6 @@ export class UnitsPanel {
           scope: 'unit',
           label: 'Abilities of this unit',
           addLabel: '+ New ability',
-          knownSituations: () => this.knownSituations(draft.abilities),
           onChange: () => validate(),
         }),
       ),

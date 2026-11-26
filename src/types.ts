@@ -198,17 +198,16 @@ export interface DefenderProfile {
   keywords: DefenderKeyword[];
 }
 
-/**
- * A condition an ability needs: a built-in attack condition (half range, charged) or a
- * situation the user named ("Ingress move", "Oath target"). Named situations get their own
- * toggle on the main page; they are matched by name, ignoring case and surrounding spaces.
- */
-export type SituationRef = { builtin: keyof AttackConditions } | { name: string };
-
 /** When an ability applies to a weapon's attacks. */
 export interface AbilityCondition {
-  /** Every situation must be on (AND); an empty list means always. */
-  situations: SituationRef[];
+  /**
+   * Switched on by hand: the ability's name is a toggle on the main page and it only applies
+   * while that is on ("Oath of Moment" against the Oath target, "Ingress move"). The other
+   * requirements still have to hold.
+   */
+  toggle: boolean;
+  /** Built-in attack conditions that must all be on (AND), in BUILTIN_CONDITIONS order; [] for none. */
+  conditions: (keyof AttackConditions)[];
   /** Only weapons of this type, or any weapon. */
   weaponType: WeaponType | 'any';
   /** Only against a target with this keyword ("+1 to wound against Monsters"), or any target. */
@@ -246,7 +245,7 @@ export type AbilityTarget = 'unit' | 'ledUnit';
 export interface UnitAbility {
   id: string;
   name: string;
-  /** Free text for the user's own reference; '' for none. */
+  /** The rule text for the user's own reference, in light markup (see ui/markup.ts); '' for none. */
   description: string;
   appliesTo: AbilityTarget;
   when: AbilityCondition;

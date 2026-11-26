@@ -757,11 +757,6 @@ select[aria-invalid='true'] {
   margin: 0;
 }
 
-/* A custom situation (named in the attacker's abilities): dashed until switched on. */
-.toggle-pill--custom span {
-  border-style: dashed;
-}
-
 /* The unit, leader and army abilities of the attack, under the conditions. */
 .attack-conditions:has(+ .attack-abilities:not([hidden])) {
   margin-bottom: 8px;
@@ -825,6 +820,20 @@ select[aria-invalid='true'] {
 .attack-ability-reason {
   font-size: 0.72rem;
   font-weight: 500;
+}
+
+/* An ability switched on by hand: a toggle pill with its name, like the conditions. */
+.attack-ability-toggle .toggle-pill > span {
+  gap: 6px;
+}
+
+/* Switched on, but something else it needs is off: dashed and unfilled, with the reason. */
+.attack-ability-toggle.is-waiting .toggle-input:checked + span,
+.attack-ability-toggle.is-waiting .toggle-pill:hover .toggle-input:checked + span {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: var(--surface-1);
+  color: var(--text-muted);
 }
 
 /* ---------- Buttons ---------- */
@@ -1882,10 +1891,75 @@ input.share-check:disabled {
   margin: 0;
 }
 
-.ability-names {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+.ability-description-input {
+  width: 100%;
+  min-height: 96px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.ability-description-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ability-description-field {
+  gap: 4px;
+}
+
+.field-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   gap: 8px;
+}
+
+.field-count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ability-description-preview {
+  padding: 8px 10px;
+  border-left: 2px solid var(--grid);
+  background: var(--surface-2);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+
+.ability-description-preview[hidden] {
+  display: none;
+}
+
+/* Rendered description markup (ui/markup.ts). */
+.markup {
+  overflow-wrap: anywhere;
+}
+
+.markup > :first-child {
+  margin-top: 0;
+}
+
+.markup > :last-child {
+  margin-bottom: 0;
+}
+
+.markup p,
+.markup ul,
+.markup ol {
+  margin: 0 0 6px;
+}
+
+.markup ul,
+.markup ol {
+  padding-left: 20px;
 }
 
 .ability-section {
@@ -1899,16 +1973,6 @@ input.share-check:disabled {
 .ability-section h3 {
   margin: 0;
   font-size: 0.9rem;
-}
-
-.situation-add {
-  display: flex;
-  gap: 6px;
-}
-
-/* A situation of the user's own: it gets a toggle on the main page. */
-.situation-custom {
-  border-style: dashed;
 }
 
 .ability-when-grid {
@@ -1960,8 +2024,23 @@ input.share-check:disabled {
   border-left: 2px solid var(--grid);
 }
 
+/* The rule text under an ability in the Units tab, folded away. */
 .ability-description {
-  font-style: italic;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.ability-description summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ability-description .markup {
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--grid);
 }
 
 .unit-abilities {
@@ -1969,9 +2048,6 @@ input.share-check:disabled {
 }
 
 @media (max-width: 480px) {
-  .ability-names {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .effect-line .effect-value {
     flex-basis: 96px;
   }

@@ -4,21 +4,23 @@ import { noConditions, type AbilityCondition } from '../types';
 import { abilityStatus } from './abilitiesLine';
 
 const sourced = (when: Partial<AbilityCondition>): SourcedAbility => ({
-  ability: { id: 'a', name: 'A', description: '', appliesTo: 'unit', when: { situations: [], weaponType: 'any', targetKeyword: null, ...when }, effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }] },
+  ability: { id: 'a', name: 'A', description: '', appliesTo: 'unit', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null, ...when }, effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }] },
   origin: 'unit',
   from: 'Intercessors',
 });
 
-const ctx = { conditions: noConditions(), situations: [] as string[], keywords: ['infantry' as const] };
+const ctx = { conditions: noConditions(), toggles: [] as string[], keywords: ['infantry' as const] };
 
 describe('abilityStatus', () => {
-  it('is active when the situations are on, the target fits and a weapon of its type is ticked', () => {
+  it('is active when its toggle and conditions are on, the target fits and a weapon of its type is ticked', () => {
     expect(abilityStatus(sourced({}), ['ranged'], ctx)).toEqual({ active: true, reason: '' });
-    expect(abilityStatus(sourced({ situations: [{ builtin: 'charged' }], weaponType: 'melee' }), ['ranged', 'melee'], { ...ctx, conditions: { halfRange: false, charged: true } }).active).toBe(true);
+    expect(abilityStatus(sourced({ conditions: ['charged'], weaponType: 'melee' }), ['ranged', 'melee'], { ...ctx, conditions: { halfRange: false, charged: true } }).active).toBe(true);
+    expect(abilityStatus(sourced({ toggle: true }), ['ranged'], { ...ctx, toggles: ['a'] }).active).toBe(true);
   });
 
   it('says what it is waiting for', () => {
-    expect(abilityStatus(sourced({ situations: [{ name: 'Ingress move' }, { builtin: 'charged' }] }), ['ranged'], ctx).reason).toBe('Needs: Ingress move, Charged');
+    expect(abilityStatus(sourced({ toggle: true, conditions: ['charged'] }), ['ranged'], ctx).reason).toBe('Switched off');
+    expect(abilityStatus(sourced({ toggle: true, conditions: ['halfRange', 'charged'] }), ['ranged'], { ...ctx, toggles: ['a'] }).reason).toBe('Needs: Half range, Charged');
     expect(abilityStatus(sourced({ targetKeyword: 'monster' }), ['ranged'], ctx).reason).toBe('Needs a Monster target');
     expect(abilityStatus(sourced({ weaponType: 'melee' }), ['ranged'], ctx).reason).toBe('No melee weapon ticked');
     expect(abilityStatus(sourced({}), [], ctx).reason).toBe('No weapon ticked');

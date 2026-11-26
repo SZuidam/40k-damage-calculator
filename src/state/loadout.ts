@@ -112,7 +112,8 @@ export function carriedWeapons(unit: Unit, rows: readonly LoadoutRow[]): { row: 
 export interface LoadoutAbilities {
   /** Every ability that can apply (see abilitiesFor); each is checked per weapon with isActive. */
   abilities: readonly UnitAbility[];
-  situations: readonly string[];
+  /** The ids of the abilities switched on by hand. */
+  toggles: readonly string[];
   /** The defender's keywords, or null without a defender. */
   keywords: readonly DefenderKeyword[] | null;
 }
@@ -124,7 +125,7 @@ export interface LoadoutAbilities {
  * for it (by its type, the toggles and the target) folded in with applyAbilities.
  */
 export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditions: AttackConditions, extra?: LoadoutAbilities): WeaponProfile[] {
-  const ctx: AbilityContext = { conditions, situations: extra?.situations ?? [], keywords: extra?.keywords ?? null };
+  const ctx: AbilityContext = { conditions, toggles: extra?.toggles ?? [], keywords: extra?.keywords ?? null };
   return carriedWeapons(unit, rows).map(({ row, weapon }) => {
     const profile: WeaponProfile = { ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions }, modifiers: noModifiers() };
     const active = (extra?.abilities ?? []).filter((a) => isActive(a, weapon.type, ctx));

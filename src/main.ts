@@ -3,7 +3,7 @@ import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
 import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
 import { loadState, saveState } from './state/storage';
-import { abilitiesFor, activeFor, situationsInUse, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
+import { abilitiesFor, activeFor, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
 import type { StoredWeapon, Unit, WeaponProfile } from './types';
 import { renderAbilitiesLine } from './ui/abilitiesLine';
 import { renderAttackConditions } from './ui/conditionsForm';
@@ -52,7 +52,7 @@ function attackAbilities(): SourcedAbility[] {
 
 /** The toggles and the target, which decide whether an ability is active. */
 function abilityContext(): AbilityContext {
-  return { conditions: state.conditions, situations: state.situations, keywords: defendingUnit()?.keywords ?? null };
+  return { conditions: state.conditions, toggles: state.toggles, keywords: defendingUnit()?.keywords ?? null };
 }
 
 /** The abilities active for `weapon`'s attacks. */
@@ -69,7 +69,7 @@ function attackerWeapons(): WeaponProfile[] {
   const unit = attackingUnit();
   if (!unit) return [];
   const ctx = abilityContext();
-  return resolveLoadout(unit, state.attacker.rows, state.conditions, { abilities: attackAbilities().map((a) => a.ability), situations: ctx.situations, keywords: ctx.keywords });
+  return resolveLoadout(unit, state.attacker.rows, state.conditions, { abilities: attackAbilities().map((a) => a.ability), toggles: ctx.toggles, keywords: ctx.keywords });
 }
 
 /** The first ability of the attack that is invalid (only from a bad save or import), with whose it is. */
@@ -108,7 +108,7 @@ function onInputsChanged(): void {
   saveState(state);
   // The Blast / Cleave extra attacks on the A chips depend on the defender's model count,
   // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions,
-  // unit abilities on the conditions, situations, target and ticked weapons.
+  // unit abilities on the conditions, ability toggles, target and ticked weapons.
   loadoutRows.refreshStats();
   abilitiesLine.update(
     attackAbilities(),
@@ -127,9 +127,10 @@ function onInputsChanged(): void {
 function onUnitsChanged(): void {
   reconcileAttacker(state.attacker, state.armies, state.units);
   reconcileDefender(state.defender, state.armies, state.units);
+  // Forget the toggles of abilities that were deleted or are no longer switched on by hand.
+  pruneToggles(state.toggles, [...state.armies, ...state.units].flatMap((x) => x.abilities));
   attackerPicker.render();
   defenderPicker.render();
-  conditionsForm.render();
   loadoutRows.render();
   defenderPanel.render();
   onInputsChanged();
@@ -254,8 +255,6 @@ const attackerPicker = new UnitPicker({
     selected: () => state.attacker.leaderId,
     onChange: (leaderId) => {
       state.attacker.leaderId = leaderId;
-      // The leader's abilities may need other situations.
-      conditionsForm.render();
       loadoutRows.refreshStats();
       onInputsChanged();
     },
@@ -269,19 +268,13 @@ function pickAttacker(unitId: string | null): void {
   state.attacker.unitId = unit?.id ?? null;
   state.attacker.leaderId = null;
   state.attacker.rows = unit ? newLoadout(unit) : [];
-  conditionsForm.render();
   loadoutRows.render();
 }
 
-// Situational: saved with the page state, but not part of a unit. Besides the built-in toggles,
-// every custom situation the attacker's abilities name gets one.
-const conditionsForm = renderAttackConditions($('attack-conditions'), {
-  conditions: state.conditions,
-  situations: state.situations,
-  customSituations: () => situationsInUse(attackAbilities().map((a) => a.ability)),
-  onChange: onInputsChanged,
-});
-const abilitiesLine = renderAbilitiesLine($('attack-conditions'));
+// Situational: saved with the page state, but not part of a unit. Abilities switched on by hand
+// get their own toggle in the Abilities line under the conditions.
+renderAttackConditions($('attack-conditions'), { conditions: state.conditions, onChange: onInputsChanged });
+const abilitiesLine = renderAbilitiesLine($('attack-conditions'), { toggles: state.toggles, onToggle: onInputsChanged });
 
 const loadoutRows = new LoadoutRows($('loadout'), state.attacker, {
   onChange: onInputsChanged,

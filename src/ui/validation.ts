@@ -149,8 +149,10 @@ export function validateUnit(u: Unit, takenNames: readonly string[] = []): Field
 /** Highest +X of a characteristic, improvement of AP, or number of effects of one ability. */
 export const MAX_EFFECT_AMOUNT = 6;
 export const MAX_EFFECTS = 10;
+/** Longest ability description (the rule text, with markup). */
+export const MAX_DESCRIPTION = 2000;
 
-/** The errors of a unit or army ability: its name, its condition (`when`) and its effects (first problem). */
+/** The errors of a unit or army ability: its name, its description and its effects (first problem). */
 export function validateAbility(a: UnitAbility, takenNames: readonly string[] = []): FieldErrors<UnitAbility> {
   const name = a.name.trim();
   const key = name.toLowerCase();
@@ -163,7 +165,7 @@ export function validateAbility(a: UnitAbility, takenNames: readonly string[] = 
           : takenNames.some((n) => n.trim().toLowerCase() === key)
             ? 'Another ability here already has this name'
             : undefined,
-    when: situationsError(a),
+    description: a.description.length > MAX_DESCRIPTION ? `Description must be at most ${MAX_DESCRIPTION} characters` : undefined,
     effects:
       a.effects.length === 0
         ? 'Add at least one effect'
@@ -172,16 +174,6 @@ export function validateAbility(a: UnitAbility, takenNames: readonly string[] = 
           : a.effects.map(effectError).find((e) => e !== undefined),
   };
   return prune(errors);
-}
-
-function situationsError(a: UnitAbility): string | undefined {
-  for (const s of a.when.situations) {
-    if ('builtin' in s) continue;
-    const name = s.name.trim();
-    if (name === '') return 'A situation needs a name';
-    if (name.length > MAX_WEAPON_NAME) return `Situation names must be at most ${MAX_WEAPON_NAME} characters`;
-  }
-  return undefined;
 }
 
 /** The problem with one effect, or undefined. */

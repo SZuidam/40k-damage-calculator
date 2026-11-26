@@ -10,7 +10,6 @@ import {
   type DefenderKeyword,
   type DefenderSelection,
   type LoadoutRow,
-  type SituationRef,
   type StoredWeapon,
   type Unit,
   type UnitAbility,
@@ -22,6 +21,7 @@ import {
 import { uid } from './ids';
 import { DEFAULT_UNIT_MODELS, DEFAULT_WEAPON_COUNT, defaultArmyId, newLoadout, reconcileAttacker, reconcileDefender } from './loadout';
 import { pickStats } from './presets';
+import { BUILTIN_CONDITIONS, pruneToggles, sortConditions } from './unitAbilities';
 
 export const STORAGE_KEY = 'damage-calculator:v5';
 /** The v4 state (sessions 13–14): weapon library, profiles and defender presets, plus armies and units. */
@@ -40,10 +40,10 @@ export interface StoredState {
   /** Situational attack conditions (half range, charged): page state only. */
   conditions: AttackConditions;
   /**
-   * The custom situations (named in unit and army abilities) that are switched on, as
-   * situationKey()s: trimmed and lower-cased. Page state only, like `conditions`.
+   * The ids of the abilities (with `when.toggle`) switched on on the main page. Page state only,
+   * like `conditions`; ids of abilities that are gone are dropped on load.
    */
-  situations: string[];
+  toggles: string[];
   iterations: number;
 }
 
@@ -69,7 +69,7 @@ const exampleWeapon = (name: string, attacks: string, ap: number, type: WeaponTy
  * bolt pistol, close combat weapon), picked on both sides: 5 bolt rifles into 5 Intercessors.
  */
 export function defaultState(): StoredState {
-  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), situations: [], iterations: DEFAULT_ITERATIONS });
+  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), toggles: [], iterations: DEFAULT_ITERATIONS });
 }
 
 /** `state` plus the example army and unit, picked on both sides with the bolt rifle carried. Only for a state without armies or units. */
@@ -152,7 +152,9 @@ function normalise(raw: unknown): StoredState {
   if (!isRecord(raw.defender)) defender.armyId = defaultArmyId(armies, units);
   reconcileAttacker(attacker, armies, units);
   reconcileDefender(defender, armies, units);
-  return { armies, units, attacker, defender, conditions: toConditions(raw.conditions), situations: toSituations(raw.situations), iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
+  const toggles = toToggles(raw.toggles);
+  pruneToggles(toggles, [...armies, ...units].flatMap((x) => x.abilities));
+  return { armies, units, attacker, defender, conditions: toConditions(raw.conditions), toggles, iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
 }
 
 /**
@@ -191,11 +193,10 @@ function toConditions(value: unknown): AttackConditions {
   return { halfRange: value.halfRange === true, charged: value.charged === true };
 }
 
-/** The switched-on custom situations: non-empty strings, trimmed and lower-cased, without duplicates. */
-function toSituations(value: unknown): string[] {
+/** The switched-on ability ids: non-empty strings without duplicates. (The older `situations` are not carried over.) */
+function toToggles(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  const keys = value.filter((v): v is string => typeof v === 'string').map((v) => v.trim().toLowerCase());
-  return [...new Set(keys.filter((k) => k !== ''))];
+  return [...new Set(value.filter((v): v is string => typeof v === 'string' && v !== ''))];
 }
 
 // ---------- shape checks ----------
@@ -294,18 +295,24 @@ function toArmy(value: unknown): Army | null {
   return { id: value.id, name: value.name, abilities: list(value.abilities, toUnitAbility) };
 }
 
-const BUILTIN_KEYS: readonly (keyof AttackConditions)[] = ['halfRange', 'charged'];
+const BUILTIN_KEYS: readonly (keyof AttackConditions)[] = BUILTIN_CONDITIONS.map((b) => b.key);
+const isBuiltinKey = (v: unknown): v is keyof AttackConditions => BUILTIN_KEYS.includes(v as keyof AttackConditions);
 
-function toSituationRef(value: unknown): SituationRef | null {
-  if (!isRecord(value)) return null;
-  if (typeof value.builtin === 'string') return BUILTIN_KEYS.includes(value.builtin as keyof AttackConditions) ? { builtin: value.builtin as keyof AttackConditions } : null;
-  return typeof value.name === 'string' && value.name.trim() !== '' ? { name: value.name } : null;
-}
-
+/**
+ * When an ability applies. Abilities saved before toggles existed have `situations`: a list of
+ * `{ builtin }` (a built-in condition) and `{ name }` (a situation of the user's own). The
+ * built-ins become `conditions`, and any named situation makes the ability switched on by hand.
+ */
 function toAbilityCondition(value: unknown): AbilityCondition {
   const c = isRecord(value) ? value : {};
+  const legacy = Array.isArray(c.situations) ? c.situations.filter(isRecord) : [];
+  const conditions = [
+    ...(Array.isArray(c.conditions) ? c.conditions.filter(isBuiltinKey) : []),
+    ...legacy.map((s) => s.builtin).filter(isBuiltinKey),
+  ];
   return {
-    situations: list(c.situations, toSituationRef),
+    toggle: c.toggle === true || legacy.some((s) => typeof s.name === 'string' && s.name.trim() !== ''),
+    conditions: sortConditions(conditions),
     weaponType: c.weaponType === 'ranged' || c.weaponType === 'melee' ? c.weaponType : 'any',
     targetKeyword: DEFENDER_KEYWORDS.find((k) => k === c.targetKeyword) ?? null,
   };
