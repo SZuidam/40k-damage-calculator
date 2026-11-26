@@ -1,4 +1,4 @@
-import type { Army, AttackConditions, AttackerSelection, DefenderProfile, DefenderSelection, LoadoutRow, StoredWeapon, Unit, WeaponProfile } from '../types';
+import { noModifiers, type Army, type AttackConditions, type AttackerSelection, type DefenderProfile, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type WeaponProfile } from '../types';
 import { byName, pickStats } from './presets';
 
 /** How many of a weapon a unit carries when it is first picked: units usually start at 5 models. */
@@ -101,7 +101,7 @@ export function carriedWeapons(unit: Unit, rows: readonly LoadoutRow[]): { row: 
  * gets its own copy of the weapon and the attack conditions.
  */
 export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditions: AttackConditions): WeaponProfile[] {
-  return carriedWeapons(unit, rows).map(({ row, weapon }) => ({ ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions } }));
+  return carriedWeapons(unit, rows).map(({ row, weapon }) => ({ ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions }, modifiers: noModifiers() }));
 }
 
 /** The engine's defender: the unit's stat line with `models` models. Shares no arrays with the unit. */

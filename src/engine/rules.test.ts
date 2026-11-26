@@ -9,6 +9,8 @@ import {
   createAttackContext,
   damagePerWound,
   hitChance,
+  hitRollFaces,
+  hitSucceeds,
   isCriticalHit,
   isCriticalWound,
   rollSucceeds,
@@ -332,10 +334,10 @@ describe('Twin-linked', () => {
       [8, 1 / 6],
     ]) {
       const ctx = createAttackContext(twin(4), defender(1, toughness, 3, 2));
-      expect(ctx.rerollFailedWounds).toBe(true);
+      expect(ctx.rerollWounds).toBe('failed');
       expect(woundChance(ctx)).toBeCloseTo(p + (1 - p) * p, 12);
     }
-    expect(createAttackContext(weapon('Single', 1, '1', 3, 4, 0, '1'), defender(1, 4, 3, 2)).rerollFailedWounds).toBe(false);
+    expect(createAttackContext(weapon('Single', 1, '1', 3, 4, 0, '1'), defender(1, 4, 3, 2)).rerollWounds).toBe('none');
   });
 
   it('only failed faces are re-rolled, and the final faces sum to 1', () => {
@@ -372,5 +374,85 @@ describe('Twin-linked', () => {
     // BS 3+, S4 vs T4, no save: normal hits (3/6) wound on 4+ with a re-roll (3/4), critical hits (1/6) always.
     const ctx = createAttackContext(twin(4, { lethalHits: true }), defender(1, 4, 7, 2));
     expect(unsavedPerAttack(ctx)).toBeCloseTo((3 / 6) * (3 / 4) + 1 / 6, 12);
+  });
+});
+
+describe('roll modifiers from abilities', () => {
+  const faces = [1, 2, 3, 4, 5, 6];
+  const target = defender(1, 4, 7, 2);
+  const ctxOf = (skill: number, modifiers: Parameters<typeof weapon>[9], abilities: Partial<WeaponAbilities> = {}, strength = 4, d = target) =>
+    createAttackContext(weapon('W', 1, '1', skill, strength, 0, '1', abilities, {}, modifiers), d);
+
+  it('+1 to hit moves the roll against BS, but critical hits stay on an unmodified 6', () => {
+    const ctx = ctxOf(4, { hit: 1 });
+    expect(faces.filter((r) => hitSucceeds(ctx, r))).toEqual([3, 4, 5, 6]);
+    expect(faces.filter((r) => isCriticalHit(ctx, r))).toEqual([6]);
+    expect(hitChance(ctx)).toBeCloseTo(4 / 6, 12);
+  });
+
+  it('caps the summed hit modifier at -1 / +1, and an unmodified 6 always hits', () => {
+    expect(ctxOf(4, { hit: 3 }).hitModifier).toBe(1);
+    const ctx = ctxOf(6, { hit: -2 });
+    expect(ctx.hitModifier).toBe(-1);
+    expect(faces.filter((r) => hitSucceeds(ctx, r))).toEqual([6]);
+  });
+
+  it('an unmodified 1 always fails, even at +1 to hit on 2+', () => {
+    expect(hitSucceeds(ctxOf(2, { hit: 1 }), 1)).toBe(false);
+  });
+
+  it('adds the wound modifier to Lance and caps the sum', () => {
+    const charged = (modifiers: Parameters<typeof weapon>[9]) => createAttackContext(weapon('W', 1, '1', 3, 4, 0, '1', { lance: true }, { charged: true }, modifiers), target);
+    expect(charged({ wound: 1 }).woundModifier).toBe(1);
+    expect(charged({ wound: -1 }).woundModifier).toBe(0);
+    expect(ctxOf(3, { wound: 1 }).woundModifier).toBe(1);
+  });
+
+  it('critical hits on 5+: always hit and trigger Sustained Hits', () => {
+    const ctx = ctxOf(3, { criticalHit: 5 }, { sustainedHits: '1' });
+    expect(faces.filter((r) => isCriticalHit(ctx, r))).toEqual([5, 6]);
+    // Normal hits 3-4 (2/6) wound on 4+ (1/2); critical hits 5-6 (2/6) score 2 hits each.
+    expect(unsavedPerAttack(ctx)).toBeCloseTo((2 / 6) * (1 / 2) + (2 / 6) * 2 * (1 / 2), 12);
+    // A critical hit on 5+ hits even with BS 6+.
+    expect(faces.filter((r) => hitSucceeds(ctxOf(6, { criticalHit: 5 }), r))).toEqual([5, 6]);
+  });
+
+  it('critical wounds on 5+ wound whatever S vs T says; the lowest of Anti and the ability counts', () => {
+    const ctx = ctxOf(3, { criticalWound: 5 }, {}, 4, defender(1, 8, 7, 2));
+    expect(woundChance(ctx)).toBeCloseTo(2 / 6, 12);
+    expect(ctxOf(3, { criticalWound: 5 }, { anti: { vehicle: 4 } }, 4, defender(1, 8, 7, 2, null, ['vehicle'])).criticalWound).toBe(4);
+    expect(ctxOf(3, { criticalWound: 3 }, { anti: { vehicle: 4 } }, 4, defender(1, 8, 7, 2, null, ['vehicle'])).criticalWound).toBe(3);
+    // Unusable thresholds fall back to 6.
+    expect(ctxOf(3, { criticalWound: 1, criticalHit: 9 })).toMatchObject({ criticalWound: 6, criticalHit: 6 });
+  });
+
+  it('re-rolling hits of 1 re-rolls only face 1: 3+ hits 2/3 + 1/6 · 2/3', () => {
+    const ctx = ctxOf(3, { rerollHits: 'ones' });
+    const final = hitRollFaces(ctx);
+    expect(final[0]).toBeCloseTo(1 / 36, 12);
+    [2, 3, 4, 5, 6].forEach((f) => expect(final[f - 1]).toBeCloseTo(1 / 6 + 1 / 36, 12));
+    expect(final.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(hitChance(ctx)).toBeCloseTo(2 / 3 + (1 / 6) * (2 / 3), 12);
+  });
+
+  it('re-rolling failed hits: 3+ hits 2/3 + 1/3 · 2/3, and the faces sum to 1', () => {
+    const ctx = ctxOf(3, { rerollHits: 'failed' });
+    expect(hitChance(ctx)).toBeCloseTo(2 / 3 + (1 / 3) * (2 / 3), 12);
+    expect(hitRollFaces(ctx).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(hitRollFaces(ctxOf(3, {}))).toEqual(new Array(6).fill(1 / 6));
+  });
+
+  it('re-rolled hits feed Sustained and Lethal Hits through the hit faces', () => {
+    // BS 3+, S4 vs T4, no save, re-roll failed hits; Lethal Hits: a 6 wounds automatically.
+    const ctx = ctxOf(3, { rerollHits: 'failed' }, { lethalHits: true });
+    const final = hitRollFaces(ctx);
+    const normal = final[2] + final[3] + final[4];
+    expect(unsavedPerAttack(ctx)).toBeCloseTo(normal * (1 / 2) + final[5], 12);
+  });
+
+  it('re-rolling wounds of 1, and Twin-linked wins over it', () => {
+    expect(woundChance(ctxOf(3, { rerollWounds: 'ones' }))).toBeCloseTo(3 / 6 + (1 / 6) * (3 / 6), 12);
+    expect(ctxOf(3, { rerollWounds: 'ones' }, { twinLinked: true }).rerollWounds).toBe('failed');
+    expect(ctxOf(3, { rerollWounds: 'failed' }).rerollWounds).toBe('failed');
   });
 });

@@ -1,7 +1,7 @@
 import { emptyStats, type DefenderProfile, type SimulationResult, type StepStats, type WeaponProfile } from '../types';
 import { rollDice, rollDiceSum } from './dice';
 import { d6, defaultRng, type Rng } from './rng';
-import { attacksPerModel, createAttackContext, damagePerWound, hitSucceeds, isCriticalHit, isCriticalWound, saveSucceeds, woundSucceeds } from './rules';
+import { attacksPerModel, createAttackContext, damagePerWound, hitSucceeds, isCriticalHit, isCriticalWound, isRerolled, saveSucceeds, woundSucceeds } from './rules';
 
 /**
  * Monte Carlo simulation of the attack sequence. Weapons resolve in the given
@@ -34,7 +34,9 @@ export function simulate(
         s.attacks += attacks;
 
         for (let a = 0; a < attacks; a++) {
-          const hitRoll = d6(rng);
+          let hitRoll = d6(rng);
+          // Re-roll hits (1s or failed rolls) once; the re-roll stands.
+          if (isRerolled(ctx.rerollHits, hitRoll, hitSucceeds(ctx, hitRoll))) hitRoll = d6(rng);
           if (!hitSucceeds(ctx, hitRoll)) continue;
           const critical = isCriticalHit(ctx, hitRoll);
           // Sustained Hits: a critical hit scores extra hits, which roll to wound normally.
@@ -48,8 +50,8 @@ export function simulate(
             let devastating = false;
             if (h >= autoWounds) {
               let woundRoll = d6(rng);
-              // Twin-linked: a failed wound roll is re-rolled once, and the re-roll stands.
-              if (ctx.rerollFailedWounds && !woundSucceeds(ctx, woundRoll)) woundRoll = d6(rng);
+              // Twin-linked / abilities: a failed wound roll (or a 1) is re-rolled once, and the re-roll stands.
+              if (isRerolled(ctx.rerollWounds, woundRoll, woundSucceeds(ctx, woundRoll))) woundRoll = d6(rng);
               if (!woundSucceeds(ctx, woundRoll)) continue;
               devastating = ctx.devastatingWounds && isCriticalWound(ctx, woundRoll);
             }

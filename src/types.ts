@@ -132,6 +132,31 @@ export interface DefenderSelection {
   models: number;
 }
 
+/** How a roll is re-rolled: not at all, only an unmodified 1, or any failed roll. */
+export type RerollKind = 'none' | 'ones' | 'failed';
+
+/**
+ * The roll levers unit abilities can pull on a weapon, resolved for one attack. The engine
+ * caps the summed modifiers at -1 / +1; critical thresholds count on the unmodified roll.
+ */
+export interface RollModifiers {
+  /** Added to the hit roll (summed; the engine caps it at -1 / +1). */
+  hit: number;
+  /** Added to the wound roll on top of Lance (summed; capped at -1 / +1 with it). */
+  wound: number;
+  /** An unmodified hit roll of this or higher is a critical hit (6 without abilities). */
+  criticalHit: number;
+  /** An unmodified wound roll of this or higher is a critical wound (6; Anti-X Y+ can go lower). */
+  criticalWound: number;
+  rerollHits: RerollKind;
+  /** Twin-linked counts as 'failed' on top of this. */
+  rerollWounds: RerollKind;
+}
+
+export function noModifiers(): RollModifiers {
+  return { hit: 0, wound: 0, criticalHit: 6, criticalWound: 6, rerollHits: 'none', rerollWounds: 'none' };
+}
+
 /** Engine input: one attacking weapon profile, fired by `models` models. */
 export interface WeaponProfile {
   id: string;
@@ -151,6 +176,8 @@ export interface WeaponProfile {
   abilities: WeaponAbilities;
   /** The situational conditions of the attack (half range, charged). */
   conditions: AttackConditions;
+  /** Roll modifiers, critical thresholds and re-rolls from unit, leader and army abilities. */
+  modifiers: RollModifiers;
 }
 
 export interface DefenderProfile {
