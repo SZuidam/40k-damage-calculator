@@ -1,10 +1,10 @@
-import type { Banners } from '../state/banners';
+import { bannerCss, isBannerUrl, type Banners } from '../state/banners';
 import { uid } from '../state/ids';
 import { byName, statsSummary } from '../state/presets';
 import { copyUnit, deleteArmy, groupUnits, isNameTaken, newUnit, sameUnit, unitSummary, unitsInArmy, type ArmyFilter } from '../state/units';
 import type { Army, StoredWeapon, Unit } from '../types';
 import { abilityList } from './abilityList';
-import { prepareBanner } from './bannerImage';
+import { prepareBanner, prepareBannerUrl } from './bannerImage';
 import { field, h, numberValue, select, setFieldError } from './dom';
 import { Menu } from './menu';
 import { MAX_PRESET_NAME, confirmDialog, openModal, promptName } from './modal';
@@ -19,7 +19,7 @@ export interface UnitsPanelOptions {
   units: Unit[];
   /** Armies or units changed (added, edited, deleted). */
   onChange: () => void;
-  /** Banner images by unit id (never exported), mutated in place. */
+  /** Banner images by unit id (only links are exported), mutated in place. */
   banners: Banners;
   /** A unit's banner was set or removed: save them; false when that failed (storage full). */
   onBannersChange: () => boolean;
@@ -246,12 +246,23 @@ export class UnitsPanel {
     const bannerPreview = h('div', { class: 'unit-banner-preview', role: 'img', 'aria-label': 'Banner image' });
     const chooseBanner = h('button', { type: 'button', class: 'button secondary' }, 'Choose image…');
     const removeBanner = h('button', { type: 'button', class: 'button secondary' }, 'Remove');
+    const bannerUrl = h('input', {
+      id: id('banner-url'),
+      type: 'url',
+      inputmode: 'url',
+      autocomplete: 'off',
+      spellcheck: false,
+      placeholder: 'https://…/image.png',
+      'aria-label': 'Link to an online image',
+    });
+    const useBannerUrl = h('button', { type: 'button', class: 'button secondary' }, 'Use link');
     const bannerError = h('p', { class: 'row-errors', 'aria-live': 'polite' });
     const renderBanner = () => {
       bannerPreview.hidden = bannerDraft === null;
-      bannerPreview.style.backgroundImage = bannerDraft === null ? '' : `url("${bannerDraft}")`;
-      chooseBanner.textContent = bannerDraft === null ? 'Choose image…' : 'Replace image…';
+      bannerPreview.style.backgroundImage = bannerCss(bannerDraft);
+      chooseBanner.textContent = bannerDraft === null || isBannerUrl(bannerDraft) ? 'Choose image…' : 'Replace image…';
       removeBanner.hidden = bannerDraft === null;
+      bannerUrl.value = isBannerUrl(bannerDraft) ? bannerDraft : '';
     };
     chooseBanner.addEventListener('click', () => bannerFile.click());
     bannerFile.addEventListener('change', async () => {
@@ -267,6 +278,32 @@ export class UnitsPanel {
       }
       renderBanner();
       chooseBanner.focus();
+    });
+    const applyBannerUrl = async () => {
+      if (bannerUrl.value.trim() === '') {
+        bannerError.textContent = 'Paste a link to an online image first.';
+        bannerUrl.focus();
+        return;
+      }
+      bannerError.textContent = 'Loading the image…';
+      useBannerUrl.disabled = true;
+      try {
+        bannerDraft = await prepareBannerUrl(bannerUrl.value);
+        bannerError.textContent = '';
+        renderBanner();
+      } catch (error) {
+        bannerError.textContent = error instanceof Error ? error.message : 'This link could not be used.';
+      } finally {
+        useBannerUrl.disabled = false;
+      }
+      bannerUrl.focus();
+    };
+    useBannerUrl.addEventListener('click', () => void applyBannerUrl());
+    // Enter in the link field uses the link instead of saving the unit.
+    bannerUrl.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      void applyBannerUrl();
     });
     removeBanner.addEventListener('click', () => {
       bannerDraft = null;
@@ -395,9 +432,14 @@ export class UnitsPanel {
         'section',
         { class: 'settings-section unit-weapons unit-banner-section' },
         h('h3', {}, 'Banner'),
-        h('p', { class: 'panel-hint' }, 'An image from your PC, shown faintly behind the Army and Unit pickers when this unit attacks. It stays on this device and is not part of exports.'),
+        h(
+          'p',
+          { class: 'panel-hint' },
+          'An image from your PC or a link to an online image, shown faintly behind the Army and Unit pickers when this unit attacks. An image from your PC stays on this device; a link is included in exports.',
+        ),
         bannerPreview,
         h('div', { class: 'panel-actions-group' }, chooseBanner, removeBanner),
+        h('div', { class: 'unit-banner-url' }, bannerUrl, useBannerUrl),
         bannerFile,
         bannerError,
       ),

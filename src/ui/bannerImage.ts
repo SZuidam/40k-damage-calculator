@@ -1,4 +1,4 @@
-import { isBannerData } from '../state/banners';
+import { isBannerData, normalizeBannerUrl } from '../state/banners';
 
 /** Largest size a banner is stored at; bigger images are scaled down (it is shown faintly). */
 const MAX_WIDTH = 1200;
@@ -39,4 +39,34 @@ export async function prepareBanner(file: File): Promise<string> {
     if (isBannerData(data) && data.length <= MAX_BANNER_CHARS) return data;
   }
   throw new Error('This image is too large to keep, even scaled down. Try a smaller or simpler one.');
+}
+
+/** How long an online image may take to load before the link is refused. */
+const URL_TIMEOUT_MS = 15_000;
+
+/**
+ * The typed link as a banner: a canonical https link whose image loads in this browser. Rejects
+ * with a message for the user when it isn't an https link or the image can't be loaded.
+ */
+export async function prepareBannerUrl(text: string): Promise<string> {
+  const url = normalizeBannerUrl(text);
+  if (!url) throw new Error('Enter a link to an image that starts with https://.');
+  await new Promise<void>((resolve, reject) => {
+    const img = new Image();
+    const fail = (message: string) => {
+      clearTimeout(timer);
+      img.onload = img.onerror = null;
+      img.src = '';
+      reject(new Error(message));
+    };
+    const timer = setTimeout(() => fail('This image took too long to load. Check the link, or try again later.'), URL_TIMEOUT_MS);
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    img.onerror = () => fail('No image could be loaded from this link. Use a direct link to the image file (right-click the image, Copy image address).');
+    img.referrerPolicy = 'no-referrer';
+    img.src = url;
+  });
+  return url;
 }

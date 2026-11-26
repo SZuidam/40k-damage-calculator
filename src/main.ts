@@ -2,7 +2,7 @@ import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
 import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
-import { loadBanners, pruneBanners, saveBanners } from './state/banners';
+import { bannerCss, loadBanners, pruneBanners, saveBanners } from './state/banners';
 import { loadState, saveState } from './state/storage';
 import { abilitiesFor, activeFor, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
 import type { StoredWeapon, Unit, WeaponProfile } from './types';
@@ -24,7 +24,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 /** All app state. Objects and arrays are mutated in place: the views hold references to them. */
 const state = loadState();
-/** Banner images by unit id: stored apart from `state` and never exported. */
+/** Banner images by unit id: stored apart from `state`; only links are exported. */
 const banners = loadBanners();
 const form = $<HTMLFormElement>('calculator');
 const optimiseButton = $<HTMLButtonElement>('optimise');
@@ -273,10 +273,9 @@ $('attacker-head').prepend(attackerBanner);
 $('attacker-picker').append(attackerPicker.element);
 
 function renderAttackerBanner(): void {
-  const data = state.attacker.unitId ? banners[state.attacker.unitId] : undefined;
-  const image = data ? `url("${data}")` : '';
+  const image = bannerCss(state.attacker.unitId ? banners[state.attacker.unitId] : undefined);
   if (attackerBanner.style.backgroundImage !== image) attackerBanner.style.backgroundImage = image;
-  attackerBanner.hidden = !data;
+  attackerBanner.hidden = image === '';
 }
 
 /** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each, without a leader. */
@@ -356,12 +355,13 @@ function settingsPanel(): HTMLElement {
 
   const importButton = h('button', { type: 'button', class: 'button secondary' }, 'Import…');
   const exportButton = h('button', { type: 'button', class: 'button secondary' }, 'Export…');
-  exportButton.addEventListener('click', () => openExportModal(state));
+  exportButton.addEventListener('click', () => openExportModal({ armies: state.armies, units: state.units, banners }));
   importButton.addEventListener('click', () =>
     openImportModal({
-      state,
+      state: { armies: state.armies, units: state.units, banners },
       // Units and armies may have been added or replaced: the Units tab and the main page follow.
       onImported: () => {
+        saveBanners(banners);
         unitsPanel.render();
         onUnitsChanged();
       },

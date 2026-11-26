@@ -638,6 +638,21 @@ select[aria-invalid='true'] {
   display: none;
 }
 
+/* The link field under the banner buttons: the field takes the room, the button keeps its size. */
+.unit-banner-url {
+  display: flex;
+  gap: 8px;
+}
+
+.unit-banner-url input {
+  flex: 1;
+  min-width: 0;
+}
+
+.unit-banner-url .button {
+  flex: none;
+}
+
 .picker-hint {
   flex-basis: 100%;
   margin: 0;
