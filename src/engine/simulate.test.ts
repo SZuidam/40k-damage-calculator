@@ -187,6 +187,24 @@ describe('simulate', () => {
     expectClose(simulate(lance(false), defender(20, 4, 3, 1), ITERATIONS, mulberry32(34)).total.wounds, 10 * (5 / 6) * (3 / 6));
     expectClose(simulate(lance(true), defender(20, 4, 3, 1), ITERATIONS, mulberry32(34)).total.wounds, 10 * (5 / 6) * (4 / 6));
   });
+  compareWithExact(
+    're-rolled hits with Sustained and Lethal Hits',
+    [weapon('Bolters', 10, '2', 3, 4, -1, '1', { sustainedHits: '1', lethalHits: true }, {}, { rerollHits: 'failed' })],
+    defender(10, 4, 3, 2),
+    21,
+  );
+  compareWithExact(
+    'hit and wound modifiers past the cap, re-roll 1s',
+    [weapon('Choppas', 10, '3', 4, 4, -1, '1', {}, {}, { hit: 2, wound: 2, rerollHits: 'ones', rerollWounds: 'ones' })],
+    defender(10, 5, 4, 1),
+    22,
+  );
+  compareWithExact(
+    'critical hits and wounds on 5+ with Devastating Wounds',
+    [weapon('Blades', 6, '3', 3, 5, -2, '2', { devastatingWounds: true, sustainedHits: '1' }, {}, { criticalHit: 5, criticalWound: 5 })],
+    defender(5, 6, 2, 3, 4),
+    23,
+  );
 });
 
 describe('atLeast', () => {

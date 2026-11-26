@@ -1,9 +1,11 @@
 import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
-import { carriedWeapons, defenderOf, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
+import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
 import { loadState, saveState } from './state/storage';
-import type { Unit, WeaponProfile } from './types';
+import { abilitiesFor, activeFor, situationsInUse, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
+import type { StoredWeapon, Unit, WeaponProfile } from './types';
+import { renderAbilitiesLine } from './ui/abilitiesLine';
 import { renderAttackConditions } from './ui/conditionsForm';
 import { renderDefenderPanel } from './ui/defenderPanel';
 import { field, h, numberValue, setFieldError } from './ui/dom';
@@ -13,7 +15,7 @@ import { createResultsView } from './ui/results';
 import { openExportModal, openImportModal } from './ui/shareModal';
 import { UnitPicker } from './ui/unitPicker';
 import { UnitsPanel } from './ui/unitsPanel';
-import { hasErrors, validateDefender, validateIterations, validateLoadoutRow } from './ui/validation';
+import { hasErrors, validateAbilities, validateDefender, validateIterations, validateLoadoutRow } from './ui/validation';
 
 const OPTIMISE_DEBOUNCE_MS = 200;
 
@@ -38,6 +40,23 @@ let reordering = false;
 const findUnit = (id: string | null): Unit | undefined => state.units.find((u) => u.id === id);
 const attackingUnit = () => findUnit(state.attacker.unitId);
 const defendingUnit = () => findUnit(state.defender.unitId);
+const leadingUnit = () => findUnit(state.attacker.leaderId);
+
+/** Every unit, leader and army ability that can apply to the attack (empty without an attacker). */
+function attackAbilities(): SourcedAbility[] {
+  const unit = attackingUnit();
+  if (!unit) return [];
+  const armyId = armyOf(unit, state.armies);
+  return abilitiesFor(unit, leadingUnit(), state.armies.find((a) => a.id === armyId));
+}
+
+/** The toggles and the target, which decide whether an ability is active. */
+function abilityContext(): AbilityContext {
+  return { conditions: state.conditions, situations: state.situations, keywords: defendingUnit()?.keywords ?? null };
+}
+
+/** The abilities active for `weapon`'s attacks. */
+const activeAbilitiesFor = (weapon: StoredWeapon) => activeFor(attackAbilities(), weapon.type, abilityContext());
 
 /** The carried weapons of the attacking unit, in firing order (empty without a unit). */
 function carried() {
@@ -48,7 +67,17 @@ function carried() {
 /** Engine input for the attacker: its carried weapons (empty without a unit). */
 function attackerWeapons(): WeaponProfile[] {
   const unit = attackingUnit();
-  return unit ? resolveLoadout(unit, state.attacker.rows, state.conditions) : [];
+  if (!unit) return [];
+  const ctx = abilityContext();
+  return resolveLoadout(unit, state.attacker.rows, state.conditions, { abilities: attackAbilities().map((a) => a.ability), situations: ctx.situations, keywords: ctx.keywords });
+}
+
+/** The first ability of the attack that is invalid (only from a bad save or import), with whose it is. */
+function invalidAbility(): string | undefined {
+  const bySource = new Map<string, SourcedAbility[]>();
+  for (const a of attackAbilities()) bySource.set(a.from, [...(bySource.get(a.from) ?? []), a]);
+  for (const [from, list] of bySource) if (validateAbilities(list.map((a) => a.ability)) !== undefined) return from;
+  return undefined;
 }
 
 const carriedValid = () => carried().every(({ row, weapon }) => !hasErrors(validateLoadoutRow(row.count, weapon)));
@@ -66,6 +95,8 @@ function blockedReason(): string {
   if (unit.weapons.length === 0) return 'Give the attacking unit weapons under ☰ → Units to simulate.';
   if (carried().length === 0) return 'Tick the weapons the attacking unit carries to simulate.';
   if (!carriedValid()) return 'Fix the highlighted weapons to simulate.';
+  const badAbilities = invalidAbility();
+  if (badAbilities !== undefined) return `Fix the abilities of ${badAbilities} under ☰ → Units to simulate.`;
   if (!defendingUnit()) return 'Pick a defending unit to simulate.';
   if (!defenderValid()) return 'Fix the defender to simulate.';
   if (validateIterations(state.iterations) !== undefined) return 'Set a valid number of iterations under ☰ → Settings to simulate.';
@@ -76,8 +107,14 @@ function blockedReason(): string {
 function onInputsChanged(): void {
   saveState(state);
   // The Blast / Cleave extra attacks on the A chips depend on the defender's model count,
-  // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions.
+  // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions,
+  // unit abilities on the conditions, situations, target and ticked weapons.
   loadoutRows.refreshStats();
+  abilitiesLine.update(
+    attackAbilities(),
+    carried().map(({ weapon }) => weapon.type),
+    abilityContext(),
+  );
   if (!reordering) reorderNote = '';
   const reason = blockedReason();
   simulateButton.disabled = reason !== '';
@@ -92,6 +129,7 @@ function onUnitsChanged(): void {
   reconcileDefender(state.defender, state.armies, state.units);
   attackerPicker.render();
   defenderPicker.render();
+  conditionsForm.render();
   loadoutRows.render();
   defenderPanel.render();
   onInputsChanged();
@@ -208,19 +246,42 @@ const attackerPicker = new UnitPicker({
     attackerPicker.render();
     onInputsChanged();
   },
+  leader: {
+    choices: () => {
+      const unit = attackingUnit();
+      return unit ? leaderChoices(unit, state.armies, state.units) : [];
+    },
+    selected: () => state.attacker.leaderId,
+    onChange: (leaderId) => {
+      state.attacker.leaderId = leaderId;
+      // The leader's abilities may need other situations.
+      conditionsForm.render();
+      loadoutRows.refreshStats();
+      onInputsChanged();
+    },
+  },
 });
 $('attacker-picker').append(attackerPicker.element);
 
-/** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each. */
+/** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each, without a leader. */
 function pickAttacker(unitId: string | null): void {
   const unit = findUnit(unitId);
   state.attacker.unitId = unit?.id ?? null;
+  state.attacker.leaderId = null;
   state.attacker.rows = unit ? newLoadout(unit) : [];
+  conditionsForm.render();
   loadoutRows.render();
 }
 
-// Situational: saved with the page state, but not part of a unit.
-renderAttackConditions($('attack-conditions'), state.conditions, onInputsChanged);
+// Situational: saved with the page state, but not part of a unit. Besides the built-in toggles,
+// every custom situation the attacker's abilities name gets one.
+const conditionsForm = renderAttackConditions($('attack-conditions'), {
+  conditions: state.conditions,
+  situations: state.situations,
+  customSituations: () => situationsInUse(attackAbilities().map((a) => a.ability)),
+  onChange: onInputsChanged,
+});
+const abilitiesLine = renderAbilitiesLine($('attack-conditions'));
 
 const loadoutRows = new LoadoutRows($('loadout'), state.attacker, {
   onChange: onInputsChanged,
@@ -230,6 +291,7 @@ const loadoutRows = new LoadoutRows($('loadout'), state.attacker, {
     return unit ? { models: state.defender.models, keywords: unit.keywords } : undefined;
   },
   conditions: () => state.conditions,
+  abilities: activeAbilitiesFor,
 });
 
 // ---------- Defender ----------

@@ -1,4 +1,4 @@
-import type { DefenderKeyword, DefenderProfile, WeaponAbilities, WeaponProfile } from '../types';
+import type { DefenderKeyword, DefenderProfile, RerollKind, RollModifiers, WeaponAbilities, WeaponProfile } from '../types';
 import { convolve, diceDistribution, parseDice, repeatDice, type DiceExpr } from './dice';
 
 /** A roll target above 6 can never be met. */
@@ -45,9 +45,12 @@ export interface AttackContext {
   hitTarget: number;
   woundTarget: number;
   saveTarget: number;
-  /** An unmodified hit roll of this or higher is a critical hit (6 for now). */
+  /** An unmodified hit roll of this or higher is a critical hit: 6, or lower from an ability. */
   criticalHit: number;
-  /** An unmodified wound roll of this or higher is a critical wound: 6, or Y with a matching Anti-X Y+. */
+  /**
+   * An unmodified wound roll of this or higher is a critical wound: 6, or the lowest of Y of a
+   * matching Anti-X Y+ and an ability's threshold.
+   */
   criticalWound: number;
   /** Lethal Hits: a critical hit wounds automatically, without a wound roll. */
   lethalHits: boolean;
@@ -58,12 +61,19 @@ export interface AttackContext {
   /** Extra attacks per model from Blast / Cleave / Rapid Fire, rolled on top of `attacks`. */
   bonusAttacks: DiceExpr[];
   /**
-   * Added to the wound roll (Lance while charging), already capped at -1 / +1. It moves the
-   * roll against the S vs T target only: critical wounds use the unmodified roll.
+   * Added to the hit roll (abilities), already capped at -1 / +1. It moves the roll against
+   * BS / WS only: critical hits use the unmodified roll.
+   */
+  hitModifier: number;
+  /**
+   * Added to the wound roll (Lance while charging, abilities), already capped at -1 / +1. It
+   * moves the roll against the S vs T target only: critical wounds use the unmodified roll.
    */
   woundModifier: number;
-  /** Twin-linked: a failed wound roll is re-rolled once; the re-roll stands, pass or fail. */
-  rerollFailedWounds: boolean;
+  /** Which hit rolls are re-rolled once (abilities); the re-roll stands, pass or fail. */
+  rerollHits: RerollKind;
+  /** Which wound rolls are re-rolled once: Twin-linked re-rolls failed ones, abilities 1s or failed ones. */
+  rerollWounds: RerollKind;
 }
 
 /** A hit or wound roll can be modified by at most -1 / +1 in total. */
@@ -97,10 +107,41 @@ export function bonusDamage(weapon: Pick<WeaponProfile, 'abilities' | 'condition
   return melta !== null && weapon.conditions.halfRange ? [parseDice(melta)] : [];
 }
 
-/** The wound roll modifier: +1 for Lance while charging, capped at -1 / +1. */
-export function woundModifier(weapon: Pick<WeaponProfile, 'abilities' | 'conditions'>): number {
-  const total = weapon.abilities.lance && weapon.conditions.charged ? 1 : 0;
-  return Math.max(-MAX_ROLL_MODIFIER, Math.min(MAX_ROLL_MODIFIER, total));
+const capModifier = (total: number) => Math.max(-MAX_ROLL_MODIFIER, Math.min(MAX_ROLL_MODIFIER, total));
+
+/** The hit roll modifier from abilities, capped at -1 / +1. */
+export function hitModifier(weapon: Pick<WeaponProfile, 'modifiers'>): number {
+  return capModifier(weapon.modifiers.hit);
+}
+
+/** The wound roll modifier: +1 for Lance while charging plus abilities, capped at -1 / +1. */
+export function woundModifier(weapon: Pick<WeaponProfile, 'abilities' | 'conditions' | 'modifiers'>): number {
+  const lance = weapon.abilities.lance && weapon.conditions.charged ? 1 : 0;
+  return capModifier(lance + weapon.modifiers.wound);
+}
+
+const REROLL_STRENGTH: Record<RerollKind, number> = { none: 0, ones: 1, failed: 2 };
+
+/** The stronger of two re-rolls: re-rolling failed rolls includes re-rolling 1s. */
+export function strongerReroll(a: RerollKind, b: RerollKind): RerollKind {
+  return REROLL_STRENGTH[a] >= REROLL_STRENGTH[b] ? a : b;
+}
+
+/** Whether a die that rolled `roll` (and passed or not) is re-rolled under `kind`. */
+export function isRerolled(kind: RerollKind, roll: number, succeeded: boolean): boolean {
+  if (kind === 'failed') return !succeeded;
+  if (kind === 'ones') return roll === 1;
+  return false;
+}
+
+/** A critical threshold as a whole number 2–6 (6 when it isn't usable). */
+function threshold(value: number): number {
+  return Number.isInteger(value) && value >= 2 && value <= 6 ? value : 6;
+}
+
+/** The critical hit / wound thresholds of the weapon's roll modifiers, made usable. */
+function criticalThresholds(modifiers: RollModifiers): { hit: number; wound: number } {
+  return { hit: threshold(modifiers.criticalHit), wound: threshold(modifiers.criticalWound) };
 }
 
 /**
@@ -128,6 +169,7 @@ export function damagePerWound(ctx: AttackContext): DiceExpr[] {
 
 export function createAttackContext(weapon: WeaponProfile, defender: DefenderProfile): AttackContext {
   const { abilities } = weapon;
+  const critical = criticalThresholds(weapon.modifiers);
   return {
     weapon,
     defender,
@@ -137,19 +179,25 @@ export function createAttackContext(weapon: WeaponProfile, defender: DefenderPro
     hitTarget: weapon.skill,
     woundTarget: woundTarget(weapon.strength, defender.toughness),
     saveTarget: saveTarget(defender.save, weapon.ap, defender.invuln),
-    criticalHit: 6,
-    criticalWound: antiCriticalWound(abilities, defender.keywords) ?? 6,
+    criticalHit: critical.hit,
+    criticalWound: Math.min(antiCriticalWound(abilities, defender.keywords) ?? 6, critical.wound),
     lethalHits: abilities.lethalHits,
     sustainedHits: abilities.sustainedHits === null ? null : parseDice(abilities.sustainedHits),
     devastatingWounds: abilities.devastatingWounds,
     bonusAttacks: bonusAttacks(weapon, defender),
+    hitModifier: hitModifier(weapon),
     woundModifier: woundModifier(weapon),
-    rerollFailedWounds: abilities.twinLinked,
+    rerollHits: weapon.modifiers.rerollHits,
+    rerollWounds: strongerReroll(abilities.twinLinked ? 'failed' : 'none', weapon.modifiers.rerollWounds),
   };
 }
 
+/**
+ * A hit roll succeeds when the modified roll meets BS / WS, and a critical hit (an unmodified
+ * roll of `criticalHit`+) always hits. An unmodified 1 always fails.
+ */
 export function hitSucceeds(ctx: AttackContext, roll: number): boolean {
-  return rollSucceeds(roll, ctx.hitTarget);
+  return roll !== 1 && (roll + ctx.hitModifier >= ctx.hitTarget || roll >= ctx.criticalHit);
 }
 
 /**
@@ -181,21 +229,36 @@ function chance(ctx: AttackContext, step: (ctx: AttackContext, roll: number) => 
   return successes / 6;
 }
 
-export const hitChance = (ctx: AttackContext) => chance(ctx, hitSucceeds);
 export const saveChance = (ctx: AttackContext) => chance(ctx, saveSucceeds);
 
 /**
- * Probability that a hit's wound roll ends on each face after re-rolls: faces[roll - 1].
- * Without a re-roll every face is 1/6. Twin-linked re-rolls a failed roll once, and the
- * re-rolled die is the one that counts (as an unmodified roll, so it can be a critical wound):
- *   P(face f) = [f wounds] · 1/6 + P(first roll fails) · 1/6.
+ * Probability that a roll ends on each face after a re-roll: faces[roll - 1]. Without a re-roll
+ * every face is 1/6. A re-rolled die (a 1, or any failed roll) is rolled once more and the new
+ * roll is the one that counts, as an unmodified roll (so it can be critical):
+ *   P(face f) = [f is kept] · 1/6 + P(first roll is re-rolled) · 1/6.
  * The faces sum to 1 either way.
  */
-export function woundRollFaces(ctx: AttackContext): number[] {
+function rollFaces(ctx: AttackContext, kind: RerollKind, step: (ctx: AttackContext, roll: number) => boolean): number[] {
   const first = new Array<number>(6).fill(1 / 6);
-  if (!ctx.rerollFailedWounds) return first;
-  const failed = 1 - chance(ctx, woundSucceeds);
-  return first.map((p, i) => (woundSucceeds(ctx, i + 1) ? p : 0) + failed / 6);
+  if (kind === 'none') return first;
+  const rerolled = first.map((_, i) => isRerolled(kind, i + 1, step(ctx, i + 1)));
+  const again = rerolled.filter(Boolean).length / 6;
+  return first.map((p, i) => (rerolled[i] ? 0 : p) + again / 6);
+}
+
+/** Probability that a hit roll ends on each face after re-rolls (see rollFaces). */
+export function hitRollFaces(ctx: AttackContext): number[] {
+  return rollFaces(ctx, ctx.rerollHits, hitSucceeds);
+}
+
+/** Probability that a hit's wound roll ends on each face after re-rolls (Twin-linked, abilities). */
+export function woundRollFaces(ctx: AttackContext): number[] {
+  return rollFaces(ctx, ctx.rerollWounds, woundSucceeds);
+}
+
+/** P(an attack hits), re-rolls included. */
+export function hitChance(ctx: AttackContext): number {
+  return hitRollFaces(ctx).reduce((sum, p, i) => sum + (hitSucceeds(ctx, i + 1) ? p : 0), 0);
 }
 
 /** P(a hit that rolls to wound wounds), re-rolls included. */
@@ -237,6 +300,7 @@ export function unsavedDistribution(ctx: AttackContext): number[] {
     fromExtra = addInto(fromExtra, binomial(x, q), extraHits[x]);
   }
 
+  const hitFaces = hitRollFaces(ctx);
   let pmf = [0];
   for (let roll = 1; roll <= 6; roll++) {
     let outcome: number[];
@@ -246,7 +310,7 @@ export function unsavedDistribution(ctx: AttackContext): number[] {
       const main = ctx.lethalHits ? failSave : q;
       outcome = convolve([1 - main, main], fromExtra);
     }
-    pmf = addInto(pmf, outcome, 1 / 6);
+    pmf = addInto(pmf, outcome, hitFaces[roll - 1]);
   }
   return pmf;
 }

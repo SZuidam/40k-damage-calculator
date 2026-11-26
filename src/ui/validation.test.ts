@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type Unit, type WeaponStats } from '../types';
-import { abilityValueError, antiValueError, validateLoadoutRow, validateUnit, validateWeaponStats } from './validation';
+import { noAbilities, type AbilityEffect, type Unit, type UnitAbility, type WeaponStats } from '../types';
+import { abilityValueError, antiValueError, validateAbilities, validateAbility, validateLoadoutRow, validateUnit, validateWeaponStats } from './validation';
 
-const stats: WeaponStats = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
+const stats: WeaponStats = { name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
 
 describe('validateWeaponStats', () => {
   it('accepts a valid profile', () => {
@@ -16,7 +16,7 @@ describe('validateWeaponStats', () => {
 
   it('flags each invalid stat', () => {
     const abilities = { ...noAbilities(), sustainedHits: 'D7' };
-    const errors = validateWeaponStats({ name: 'X', attacks: '', skill: 7, strength: 31, ap: 1, damage: '2D', abilities });
+    const errors = validateWeaponStats({ name: 'X', type: 'ranged', attacks: '', skill: 7, strength: 31, ap: 1, damage: '2D', abilities });
     expect(Object.keys(errors).sort()).toEqual(['abilities', 'ap', 'attacks', 'damage', 'skill', 'strength']);
   });
 
@@ -82,7 +82,7 @@ describe('validateWeaponStats', () => {
 });
 
 describe('validateUnit', () => {
-  const unit: Unit = { id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'], weapons: [{ ...stats, id: 'w1' }] };
+  const unit: Unit = { id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'], weapons: [{ ...stats, id: 'w1' }], abilities: [] };
 
   it('accepts a valid unit, also one without weapons', () => {
     expect(validateUnit(unit)).toEqual({});
@@ -133,5 +133,50 @@ describe('validateLoadoutRow', () => {
     expect(validateLoadoutRow(1, { ...stats, attacks: 'D7' })).toEqual({ weapon: 'Attacks: use 3, D3, D6, 2D6, D6+1, …' });
     expect(validateLoadoutRow(1, { ...stats, strength: 40, ap: 2 })).toEqual({ weapon: 'Strength must be between 1 and 30 · AP must be between -6 and 0' });
     expect(validateLoadoutRow(0, { ...stats, name: '' })).toEqual({ count: 'Count must be between 1 and 50', weapon: 'Name is required' });
+  });
+});
+
+describe('validateAbility', () => {
+  const unit: Unit = { id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [], weapons: [], abilities: [] };
+  const ability = (overrides: Partial<UnitAbility> = {}): UnitAbility => ({
+    id: 'a1',
+    name: 'Shock Assault',
+    description: '',
+    appliesTo: 'unit',
+    when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null },
+    effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }],
+    ...overrides,
+  });
+
+  it('accepts a valid ability', () => {
+    expect(validateAbility(ability())).toEqual({});
+  });
+
+  it('requires a unique name of at most 40 characters and at least one effect', () => {
+    expect(validateAbility(ability({ name: ' ' })).name).toBe('Name is required');
+    expect(validateAbility(ability({ name: 'x'.repeat(41) })).name).toMatch(/at most 40/);
+    expect(validateAbility(ability(), ['shock assault ']).name).toMatch(/already has this name/);
+    expect(validateAbility(ability({ effects: [] })).effects).toBe('Add at least one effect');
+  });
+
+  it('checks amounts, thresholds and granted abilities', () => {
+    const effectError = (effect: AbilityEffect) => validateAbility(ability({ effects: [effect] })).effects;
+    expect(effectError({ kind: 'stat', stat: 'attacks', amount: 7 })).toMatch(/between 1 and 6/);
+    expect(effectError({ kind: 'ap', amount: 0 })).toMatch(/between 1 and 6/);
+    expect(effectError({ kind: 'roll', roll: 'hit', amount: 2 })).toMatch(/\+1 or -1/);
+    expect(effectError({ kind: 'roll', roll: 'hit', amount: -1 })).toBeUndefined();
+    expect(effectError({ kind: 'critical', roll: 'wound', on: 1 })).toMatch(/2\+ to 6\+/);
+    expect(effectError({ kind: 'grant', abilities: noAbilities() })).toMatch(/at least one/);
+    expect(effectError({ kind: 'grant', abilities: { ...noAbilities(), sustainedHits: '2D6+1' } })).toMatch(/Sustained Hits/);
+    expect(effectError({ kind: 'grant', abilities: { ...noAbilities(), anti: { vehicle: 9 } } })).toMatch(/Anti-Vehicle/);
+  });
+
+  it('requires situation names', () => {
+    expect(validateAbility(ability({ when: { situations: [{ name: ' ' }], weaponType: 'any', targetKeyword: null } })).when).toMatch(/needs a name/);
+  });
+
+  it('flags invalid and duplicate abilities of a unit', () => {
+    expect(validateAbilities([ability(), ability({ id: 'a2', name: 'SHOCK assault' })])).toMatch(/Two abilities/);
+    expect(validateUnit({ ...unit, abilities: [ability({ effects: [] })] }).abilities).toMatch(/^Shock Assault: Add at least one effect/);
   });
 });

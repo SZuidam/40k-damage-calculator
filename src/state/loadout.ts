@@ -1,5 +1,6 @@
-import type { Army, AttackConditions, AttackerSelection, DefenderProfile, DefenderSelection, LoadoutRow, StoredWeapon, Unit, WeaponProfile } from '../types';
+import { noModifiers, type Army, type AttackConditions, type AttackerSelection, type DefenderKeyword, type DefenderProfile, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitAbility, type WeaponProfile } from '../types';
 import { byName, pickStats } from './presets';
+import { applyAbilities, canLead, isActive, type AbilityContext } from './unitAbilities';
 
 /** How many of a weapon a unit carries when it is first picked: units usually start at 5 models. */
 export const DEFAULT_WEAPON_COUNT = 5;
@@ -60,17 +61,29 @@ function validArmy(armyId: string | null, armies: readonly Army[], units: readon
 }
 
 /**
+ * The units that can lead `unit` on the main page: the other units of its army (or of "No army")
+ * with at least one ability for the unit they lead, by name.
+ */
+export function leaderChoices(unit: Unit, armies: readonly Army[], units: readonly Unit[]): Unit[] {
+  const army = armyOf(unit, armies);
+  return byName(units.filter((u) => u.id !== unit.id && armyOf(u, armies) === army && canLead(u)));
+}
+
+/**
  * Bring the attacker in line with the armies and units, in place (after loading, or after the
  * Units tab changed something): a deleted unit is unpicked, the army follows the picked unit,
- * and the loadout follows the unit's weapons (syncLoadout).
+ * the loadout follows the unit's weapons (syncLoadout), and a leader that is gone, in another
+ * army or can no longer lead is dropped.
  */
 export function reconcileAttacker(sel: AttackerSelection, armies: readonly Army[], units: readonly Unit[]): void {
   const unit = units.find((u) => u.id === sel.unitId);
   if (unit) {
     sel.armyId = armyOf(unit, armies);
     sel.rows = syncLoadout(sel.rows, unit);
+    if (!leaderChoices(unit, armies, units).some((u) => u.id === sel.leaderId)) sel.leaderId = null;
   } else {
     sel.unitId = null;
+    sel.leaderId = null;
     sel.rows = [];
     sel.armyId = validArmy(sel.armyId, armies, units);
   }
@@ -95,13 +108,28 @@ export function carriedWeapons(unit: Unit, rows: readonly LoadoutRow[]): { row: 
   });
 }
 
+/** What resolveLoadout needs besides the conditions to apply unit, leader and army abilities. */
+export interface LoadoutAbilities {
+  /** Every ability that can apply (see abilitiesFor); each is checked per weapon with isActive. */
+  abilities: readonly UnitAbility[];
+  situations: readonly string[];
+  /** The defender's keywords, or null without a defender. */
+  keywords: readonly DefenderKeyword[] | null;
+}
+
 /**
  * Engine input for the attacker: one profile per carried weapon, in firing order, fired by
  * `count` models. The weapon id becomes the profile id (unique within the unit). Every profile
- * gets its own copy of the weapon and the attack conditions.
+ * gets its own copy of the weapon and the attack conditions, and the abilities that are active
+ * for it (by its type, the toggles and the target) folded in with applyAbilities.
  */
-export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditions: AttackConditions): WeaponProfile[] {
-  return carriedWeapons(unit, rows).map(({ row, weapon }) => ({ ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions } }));
+export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditions: AttackConditions, extra?: LoadoutAbilities): WeaponProfile[] {
+  const ctx: AbilityContext = { conditions, situations: extra?.situations ?? [], keywords: extra?.keywords ?? null };
+  return carriedWeapons(unit, rows).map(({ row, weapon }) => {
+    const profile: WeaponProfile = { ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions }, modifiers: noModifiers() };
+    const active = (extra?.abilities ?? []).filter((a) => isActive(a, weapon.type, ctx));
+    return active.length === 0 ? profile : applyAbilities(profile, active);
+  });
 }
 
 /** The engine's defender: the unit's stat line with `models` models. Shares no arrays with the unit. */

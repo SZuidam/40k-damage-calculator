@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (268 tests, about 4 s)
+- `npm test`: Vitest, run once (318 tests, about 5 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -26,7 +26,7 @@ src/
   engine/
     rng.ts              Rng type, mulberry32(seed), rollDie, d6 (default rng = Math.random)
     dice.ts             tryParseDice/parseDice, rollDice, diceDistribution (exact PMF), convolve, repeatDice, sums of expressions (rollDiceSum, diceSumDistribution, formatDiceSum)
-    rules.ts            woundTarget, saveTarget, rollSucceeds, bonusAttacks, woundModifier, antiCriticalWound, AttackContext + step functions
+    rules.ts            woundTarget, saveTarget, rollSucceeds, bonusAttacks, hitModifier / woundModifier, strongerReroll / isRerolled, antiCriticalWound, AttackContext + step functions, hitRollFaces / woundRollFaces
     simulate.ts         Monte Carlo simulate(weapons, defender, iterations, rng), atLeast()
     exact.ts            exact Markov-chain expectation (weaponKernel, applyWeapon, exactResult)
     optimise.ts         optimiseOrder(): exhaustive for 7 or fewer weapons, greedy above that
@@ -39,14 +39,19 @@ src/
     abilities.ts        ability labels, "Add ability…" choices, withAbilityValue, withAntiValue / withoutAnti, parseAntiValue, sameAbilities
     presets.ts          pickStats, sameCombatStats, sameDefender, byName, statsSummary, statLine
     units.ts            armies and units: newUnit, copyUnit, sameUnit, isNameTaken, unitSummary, groupUnits, unitsInArmy, deleteArmy
-    share.ts            unit export file (buildShareFile / serializeShareFile, version 3), parseShareText, planImport, applyImport, sameUnitContent, uniqueName
+    share.ts            unit export file (buildShareFile / serializeShareFile, version 3, with unit abilities and army rules), parseShareText, planImport, applyImport, mergeArmyRules, sameUnitContent, uniqueName
+    unitAbilities.ts    user-defined unit / leader / army abilities: abilitiesFor, isActive / activeFor / conditionNeeds, situationsInUse, situationFromText, applyAbilities (+ addToDice, grantAbilities), copies, comparison and summaries
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateLoadoutRow / validateDefender / validateUnit / validateIterations, abilityValueError, antiValueError, LIMITS
     modal.ts            openModal() around a native <dialog>, confirmDialog(), promptName() (optional validate)
     drawer.ts           Drawer class: the configuration <dialog> sliding in from the right, ARIA tabs (Units · Settings), open(tab?)
     menu.ts             Menu class: ⋯ button + menu (arrow keys, Esc, click outside, disabled items with a reason)
-    weaponModal.ts      openWeaponModal(initial?, { takenNames? }): create or edit a weapon profile of a unit
+    weaponModal.ts      openWeaponModal(initial?, { takenNames? }): create or edit a weapon profile of a unit (Ranged / Melee, stats, abilities)
+    weaponAbilityEditor.ts  weaponAbilityEditor(): the "Add ability…" dropdown + chips, shared by the weapon modal and "Gain weapon abilities" effects
+    abilityModal.ts     openAbilityModal(initial?, { scope, takenNames, knownSituations }): create or edit a unit ability or army rule
+    abilityList.ts      abilityList(): a list of abilities with ✎ / ✕ / + New, for the unit editor and the army rules dialog
+    abilitiesLine.ts    renderAbilitiesLine() and abilityStatus(): the main page's "Abilities" line (active / "Needs: …")
     abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta or the Y of Anti-X Y+
     statChips.ts        statChips(): read-only stat chips + ability text (Blast / Rapid Fire / Melta bonuses, active Anti / condition outlines) for the rows
     unitPicker.ts       UnitPicker class: the Army and Unit dropdowns of the attacker and the defender
@@ -55,7 +60,7 @@ src/
     unitsPanel.ts       UnitsPanel class (Units tab): army filter + ⋯ (New army… / Rename… / Delete), units grouped by army, unit editor on a draft with its own weapons
     statFields.ts       SAVE_OPTIONS / INVULN_OPTIONS and keywordToggles(), for the unit editor
     shareModal.ts       "Export…" (pick units grouped by army, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
-    conditionsForm.ts   renderAttackConditions() → { setValues() }: the "Within half range" / "Charged this turn" toggles
+    conditionsForm.ts   renderAttackConditions() → { render() }: the "Within half range" / "Charged this turn" toggles plus one per custom situation in use
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
 ```
 
@@ -91,7 +96,7 @@ src/
 
 ## Engine design
 
-- **Extension point (`rules.ts`):** each step is a small function `(ctx: AttackContext, roll) => boolean`: `hitSucceeds`, `woundSucceeds` and `saveSucceeds`. `hitChance`/`woundChance`/`saveChance` work out their probabilities by running those same functions over all six die faces, so the simulation and the exact engine stay consistent. Put modifiers, rerolls, lethal hits and similar abilities here. Wound re-rolls go through `woundRollFaces(ctx)` (the final-face distribution after re-rolls); a hit re-roll would get a matching `hitRollFaces` that `unsavedDistribution` weighs its per-face outcomes with instead of 1/6.
+- **Extension point (`rules.ts`):** each step is a small function `(ctx: AttackContext, roll) => boolean`: `hitSucceeds`, `woundSucceeds` and `saveSucceeds`. `hitChance`/`woundChance`/`saveChance` work out their probabilities by running those same functions over all six die faces, so the simulation and the exact engine stay consistent. Put modifiers, rerolls, lethal hits and similar abilities here. Re-rolls go through `hitRollFaces(ctx)` / `woundRollFaces(ctx)` (the final-face distributions after re-rolls); `unsavedDistribution` weighs each hit face with `hitRollFaces`. Unit abilities reach the engine as `WeaponProfile.modifiers` (see session 17).
 - **simulate.ts:** each iteration rolls attacks per model, then hit, wound, save and damage per attack, and tracks `modelsLeft` and `woundsLeft`. It returns per-weapon and total averages, `killDistribution` (P(exactly k)) and `killAtLeast` (P(≥k)). It runs synchronously on the main thread (about 20 ms for 10k iterations). Move it to a Web Worker only if it gets slow.
 - **exact.ts:**
   - The defender is a Markov chain over (modelsLeft, woundsLeftOnCurrent), plus an absorbing "all destroyed" state. The state vector's index 0 is "all destroyed", and index `1 + (m-1)·W + (w-1)` is the state (m, w).
@@ -208,7 +213,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 ## Twin-linked (session 9, 2026-11-19)
 
 - **Data:** `WeaponAbilities.twinLinked: boolean`; storage reads it with `=== true`, so older saves and exports load without it. No condition, no X.
-- **Engine:** `AttackContext.rerollFailedWounds` (from `twinLinked`). `woundRollFaces(ctx)` returns the six final-face probabilities; `woundChance` and `unsavedPerWoundRoll` use it, so `unsavedDistribution` and the exact engine pick it up through `q` (Lethal Hits auto-wounds still use `failSave` directly, Sustained Hits extra hits roll with the re-roll). `simulate` rolls a second d6 when the first wound roll fails and keeps it.
+- **Engine:** `AttackContext.rerollFailedWounds` (from `twinLinked`; since session 17 `rerollWounds: 'failed'`). `woundRollFaces(ctx)` returns the six final-face probabilities; `woundChance` and `unsavedPerWoundRoll` use it, so `unsavedDistribution` and the exact engine pick it up through `q` (Lethal Hits auto-wounds still use `failSave` directly, Sustained Hits extra hits roll with the re-roll). `simulate` rolls a second d6 when the first wound roll fails and keeps it.
 - **Weapon modal:** `Twin-linked` (added straight away) comes after Lance in the dropdown and the chip list.
 - `npm test` 247/247 (new: wound chance p + (1 − p)·p for 2+ to 6+, final faces only boost failed faces and sum to 1, re-rolled 6 with Devastating Wounds, Anti and Lance combined, Lethal Hits auto-wounds not re-rolled; sim 3/4 wound rate for S4 vs T4; sim vs exact for Twin-linked + Devastating Wounds + Sustained Hits and Twin-linked + Lethal Hits + Anti; choices, labels, `withoutAbility`, `sameAbilities`; storage round trip and missing field; share round trip). `npm run build` is clean. Not checked in the browser.
 
@@ -360,6 +365,29 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 **Verification:** `npm test` 268/268 (new `state/share.test.ts`: export picks units and army names without ids, a stale army exports as "No army", round trip incl. abilities, error texts incl. old versions, repair and trimming, review statuses per army and case-insensitive army match, `sameUnitContent`, adding with army creation, keep both, replace keeping unit and weapon ids, chosen items only, `uniqueName`). `npm run build` is clean. Checked in Chrome: Export lists Chaos Daemons / Space Marines / No army with unit summaries; importing a file with a changed Hellblasters, a Custodian Guard in a new army and an invalid unit shows "Name in use in this army", "(new army)" and the Toughness error; Replace gives "Imported 2 units: 1 added, 1 replaced. Created 1 new army."; the attacker's Hellblasters loadout kept its ticked plasma incinerator and gained the new heavy bolt pistol unticked; no console errors.
 
+## Unit, leader and army abilities (session 17, 2026-11-26, branch `unit-abilities`)
+
+**Why:** most damage swings come from unit abilities, leaders and army / detachment rules ("+1 A on melee weapons if this unit charged", "re-roll hits of 1 while leading", "re-roll hits against the Oath target"). Hard-coding every 40k ability doesn't scale, so the user defines them as **condition → effect** rules; the engine only knows a small fixed set of levers. Decisions with the user: leaders give **abilities only** (their weapons don't fire); effects are stat modifiers, roll modifiers and critical thresholds, re-rolls and granted weapon abilities (defensive abilities such as Feel No Pain, -1 damage and cover are out of scope); conditions are **user-named toggles**; unit **and** army abilities.
+
+**Weapon type:** `WeaponStats.type` is `'ranged' | 'melee'` (`WEAPON_TYPES`, `WEAPON_TYPE_NAMES`). Weapons saved or shared without one load as ranged; the example close combat weapon is melee. The weapon modal has a Ranged / Melee segmented toggle (the BS label becomes WS), rows show a small `MELEE` tag and `WS 3+`, `statsSummary` reads `Melee · A 3 · WS 3+ · …`. `sameCombatStats` compares the type. Cleave still works like Blast for any weapon.
+
+**Model (`types.ts`):** `UnitAbility { id, name, description, appliesTo: 'unit' | 'ledUnit', when: AbilityCondition, effects: AbilityEffect[] }`; `AbilityCondition { situations: SituationRef[] (all must be on; [] = always), weaponType: 'ranged' | 'melee' | 'any', targetKeyword: DefenderKeyword | null }`; `SituationRef = { builtin: 'halfRange' | 'charged' } | { name }` (custom names match ignoring case and surrounding spaces, `situationKey`). Effects: `stat` (+X to A / S / D, X 1–6), `ap` (improve AP by X), `roll` (±1 to hit / wound), `critical` (critical hits / wounds on Y+), `reroll` (hits / wounds, `ones` or `failed`), `grant` (`WeaponAbilities`, only what is set counts). `Unit.abilities`, `Army.abilities` (army rules, apply to every unit of the army; `appliesTo` is ignored), `AttackerSelection.leaderId`, `StoredState.situations` (the switched-on custom situations as keys).
+
+**Engine levers (`RollModifiers` on `WeaponProfile.modifiers`, `noModifiers()`):** `hit` / `wound` (summed; capped at ±1 in `rules.ts`, the wound one together with Lance), `criticalHit` / `criticalWound` (default 6; the critical wound is the lowest of Anti and the modifier; unusable values fall back to 6), `rerollHits` / `rerollWounds` (`'none' | 'ones' | 'failed'`, `strongerReroll`; Twin-linked maps to `failed`). `AttackContext` has `hitModifier`, `rerollHits`, `rerollWounds` (replacing `rerollFailedWounds`). `hitSucceeds` = `roll !== 1 && (roll + hitModifier >= hitTarget || roll >= criticalHit)`: a critical hit always hits, and +1 to hit never makes a critical (an unmodified 6 still is the only critical by default). `rollFaces` generalises the Twin-linked maths: a re-rolled face (a 1 for `ones`, any failed face for `failed`) gives its 1/6 to every face, so `hitRollFaces` / `woundRollFaces` sum to 1 and `unsavedDistribution` weighs every hit face with `hitRollFaces` instead of 1/6. Only failed rolls are re-rolled (no fishing for criticals), and the re-roll stands. `simulate.ts` re-rolls the dice with `isRerolled`.
+
+**Resolution (`state/unitAbilities.ts`, pure):** `abilitiesFor(attacker, leader, army)` = the unit's `appliesTo: 'unit'` abilities + the leader's `ledUnit` abilities + the army's rules, each as a `SourcedAbility { ability, origin, from }`. `isActive(ability, weaponType, ctx)`: every situation on, the weapon type matches, the target has the keyword (none picked → not active). `applyAbilities(profile, abilities)` folds active effects into a new profile: A / D get +X added to their dice (`addToDice`: `2`+1 → `3`, `D6`+1 → `D6+1`), S +X, AP improved down to -6; modifiers summed, lowest critical threshold, strongest re-roll; `grantAbilities` ORs the on / off abilities, takes a granted X only when the weapon has none, and keeps the lower Anti Y. Out-of-range values are ignored (validation flags them). `resolveLoadout(unit, rows, conditions, { abilities, situations, keywords })` applies the abilities active for each carried weapon. `situationsInUse(abilities)` lists the custom names (first spelling kept) for the main page's toggles. `abilitySummary` gives `Charged · Melee: +1 A`.
+
+**Leader:** `leaderChoices(unit, armies, units)` = the other units of the same army (or of "No army") with at least one `ledUnit` ability. `reconcileAttacker` drops a leader that is gone, in another army, the attacker itself or can no longer lead; picking another attacker clears it.
+
+**UI:**
+- Units tab: the unit editor has an **Abilities** section (`abilityList`: name, summary, description; ✎ / ✕ / + New ability), part of the draft, so `copyUnit` / `sameUnit` include abilities. The army ⋯ menu has **Army rules…**, a dialog with the same list; changes there are saved straight away. `unitSummary` adds "· 1 ability".
+- Ability modal (`openAbilityModal`): Name, Description; *Applies to* This unit / The unit it leads (units only); **When**: situation chips with a text input + `<datalist>` of the built-ins and every custom name in use (Enter or Add; typing "Charged" or "Within half range" picks the built-in, anything else becomes a custom situation, shown dashed), Weapons Any / Ranged / Melee, Target; a live "Applies when: …" line; **Effects**: one row per effect, `[effect ▾] [value ▾] ✕` (Attacks / Strength / Damage +X, Improve AP by X, Hit / Wound roll modifier ±1, Critical hits / wounds on 5+…2+, Re-roll hits / wounds of 1 or that failed, Gain weapon abilities with the weapon modal's ability chips), at most 10; a new ability starts with one effect.
+- Main page: the attacker picker gets **Led by** (hidden when nothing can lead). The conditions row shows a (dashed) toggle per custom situation the attack's abilities need, re-rendered when the attacker or leader changes. An **Abilities** line under it lists every ability of the attack: outlined when active, dashed and muted with "Needs: Ingress move", "Needs a Monster target" or "No melee weapon ticked" otherwise; its tooltip names the source. The chips of each row show what applies to that weapon: `A 3+1` / `S 4+1` / `D 1+1` (merged with Blast / Rapid Fire / Melta), the improved AP in blue, `BS 3+ (+1)`, and granted weapon abilities and roll levers ("Re-roll failed hits", "Critical hits on 5+", "+1 to wound") as dashed entries in the ability text. An invalid ability (only from a bad save or import) blocks Simulate: "Fix the abilities of X under ☰ → Units to simulate."
+
+**Storage / share / validation:** the key stays `damage-calculator:v5` (additive): units and armies without abilities get none, malformed abilities (no name) and effects (unknown kind or fields) are dropped, out-of-range numbers kept for validation, `leaderId` reconciled, `situations` trimmed, lower-cased and de-duplicated. Share files stay version 3: units carry `abilities` (no ids) and the file has `armies: { name, abilities }[]` for the exported units' armies that have rules. `sameUnitContent` compares abilities, so a changed ability is "Name in use in this army". Importing merges the rules into the armies of the imported units by ability name (`mergeArmyRules`: new names added, a changed rule replaced in place keeping its id, invalid rule sets skipped); the summary says "Added or updated N army rules." `validateAbility` (name 1–40 and unique within the unit / army, situation names, 1–10 effects, amounts 1–6, modifiers ±1, thresholds 2–6, a grant with at least one valid weapon ability) and `validateAbilities` (used by `validateUnit` and imports).
+
+**Verification:** `npm test` 318/318 (new `state/unitAbilities.test.ts`; engine tests for hit modifiers and caps, critical hits / wounds on 5+, re-roll 1s and failed hits incl. hand values (3+ with re-roll 1s: 2/3 + 1/6 · 2/3), re-rolled hits feeding Sustained / Lethal, wound re-rolls with Twin-linked, and sim-vs-exact for re-rolled hits + Sustained + Lethal, modifiers past the cap, criticals on 5+ with Devastating Wounds; storage round trip and repair of abilities, leader and situations; share round trip incl. army rules, conflicts and merging; loadout resolution and leader choices; validation; `abilityStatus`). `npm run build` is clean. Checked in Chrome: Shock Assault (Charged · Melee: +1 A) created through the modal on the Intercessor Squad, a Captain with Rites of Battle (re-roll hits of 1, for the unit it leads) and an army rule Oath of Moment (Oath target: re-roll failed hits). The Led by dropdown and the Oath target toggle appeared; 5 Intercessors with close combat weapons into 5 Intercessors gave 1.66 damage (hand: 1.667), 2.20 after charging (2.222), 2.62 led by the Captain (2.593) and 2.96 with the Oath target on (2.963); chips showed `A 3+1` and "Re-roll failed hits"; adding "Gain Lethal Hits" to the army rule showed a dashed Lethal Hits on every row; an export of both units re-imported as "Already saved" and into an empty state with the army rule and the leader ability intact; the leader and toggles survived a reload; no console errors. A real phone-width viewport was not checked.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -368,7 +396,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## Ideas for next steps
 
-- More abilities through the `AttackContext` step functions: hit modifiers (and more wound modifiers, which already go through `woundModifier`), rerolls (1s or all, hit or wound), Torrent, Feel No Pain, damage reduction, cover.
+- More abilities through the `AttackContext` step functions: Torrent, Feel No Pain, damage reduction, cover (defensive abilities would hang off the defending unit's abilities). Unit abilities could also gain more levers (re-roll damage, +1 to the save roll of the target, Ignores Cover).
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - A share link (export encoded in the URL hash) next to Copy / Download.
