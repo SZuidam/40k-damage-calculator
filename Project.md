@@ -29,6 +29,7 @@ src/
     rules.ts            woundTarget, saveTarget, rollSucceeds, bonusAttacks, hitModifier / woundModifier, strongerReroll / isRerolled, antiCriticalWound, AttackContext + step functions, hitRollFaces / woundRollFaces
     simulate.ts         Monte Carlo simulate(weapons, defender, iterations, rng), atLeast()
     exact.ts            exact Markov-chain expectation (weaponKernel, applyWeapon, exactResult)
+    breakdown.ts        breakdown(): every step's exact expectation per weapon as you'd work it out by hand (re-rolls as first + rerolled × first, Sustained / Lethal / Devastating split out), plus the exact damage applied and models destroyed per weapon
     optimise.ts         optimiseOrder(): exhaustive for 7 or fewer weapons, greedy above that
     testFixtures.ts     shared weapon and defender fixtures for tests
     *.test.ts           tests next to each module
@@ -39,9 +40,9 @@ src/
     abilities.ts        ability labels, "Add ability…" choices, withAbilityValue, withAntiValue / withoutAnti, parseAntiValue, sameAbilities
     presets.ts          pickStats, sameCombatStats, sameDefender, byName, statsSummary, statLine
     units.ts            armies and units: newUnit, copyUnit, sameUnit, isNameTaken, unitSummary, groupUnits, unitsInArmy, deleteArmy
-    share.ts            unit export file (buildShareFile / serializeShareFile, version 3, with unit abilities and army rules), parseShareText, planImport, applyImport, mergeArmyRules, sameUnitContent, uniqueName
+    share.ts            unit export file (buildShareFile / serializeShareFile, version 3, with unit abilities, army rules and banner links), parseShareText, planImport, applyImport, mergeArmyRules, sameUnitContent, uniqueName
     unitAbilities.ts    user-defined unit / leader / army abilities: abilitiesFor, isActive / activeFor / abilityNeeds, pruneToggles, BUILTIN_CONDITIONS, applyAbilities (+ addToDice, grantAbilities), copies, comparison and summaries
-    banners.ts          unit banner images (unit id → data URL) under their own localStorage key: loadBanners / saveBanners / pruneBanners, isBannerData; never exported
+    banners.ts          unit banner images (unit id → data URL or https link) under their own localStorage key: loadBanners / saveBanners / pruneBanners, isBannerData / isBannerUrl / normalizeBannerUrl / bannerCss; links are exported, data URLs never
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateLoadoutRow / validateDefender / validateUnit / validateIterations, abilityValueError, antiValueError, LIMITS
@@ -52,7 +53,7 @@ src/
     weaponAbilityEditor.ts  weaponAbilityEditor(): the "Add ability…" dropdown + chips, shared by the weapon modal and "Gain weapon abilities" effects
     abilityModal.ts     openAbilityModal(initial?, { scope, takenNames }): create or edit a unit ability or army rule
     markup.ts           parseMarkup / renderMarkup / markupToText: light markup (bold, italic, lists, paragraphs) for ability descriptions, built as DOM nodes
-    bannerImage.ts      prepareBanner(file): scale a picked image to fit 1200 × 800 and encode it as a WebP data URL of at most 600k characters
+    bannerImage.ts      prepareBanner(file): scale a picked image to fit 1200 × 800 and encode it as a WebP data URL of at most 600k characters; prepareBannerUrl(text): check an https link and that its image loads
     abilityList.ts      abilityList(): a list of abilities with ✎ / ✕ / + New, for the unit editor and the army rules dialog
     abilitiesLine.ts    renderAbilitiesLine() and abilityStatus(): the main page's "Abilities" line (active / "Needs: …")
     abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta or the Y of Anti-X Y+
@@ -64,7 +65,8 @@ src/
     statFields.ts       SAVE_OPTIONS / INVULN_OPTIONS and keywordToggles(), for the unit editor
     shareModal.ts       "Export…" (pick units grouped by army, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
     conditionsForm.ts   renderAttackConditions(): the "Within half range" / "Charged this turn" toggles
-    results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
+    results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`) + "Show the calculation", kill chart (SVG) + table view
+    calculation.ts      weaponCalc() / calculationText() / renderCalculation(): the breakdown as plain-text formulas with notes, and "Copy as text"
 ```
 
 ## Rules implemented (confirmed with the user)
@@ -410,6 +412,24 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 **How:** the unit editor has a **Banner** section (preview, *Choose image… / Replace image…*, *Remove*), part of the draft: written on Save, dropped on Back (and it counts as an unsaved change). `prepareBanner` scales the image down and encodes WebP, lowering the quality until it fits; the result goes into `banners` (unit id → data URL), stored under `damage-calculator:banners`, separate from `StoredState` so the big strings aren't rewritten on every input change and can't leak into exports. If storage is full, Save keeps the editor open with "There is no room left to store this image…" and the old banner stays. Banners of deleted units are pruned in `onUnitsChanged`. Only `data:image/(png|jpeg|webp|gif);base64,…` values are ever put in a style (`isBannerData`).
 
 **Verification:** `npm test` 328/328 (new `state/banners.test.ts`). `npm run build` is clean. Checked in Chrome: a 3000 × 1500 PNG (4.3 MB) became a 20 kB WebP, the editor preview showed it, Save stored it under its own key (the main state holds no image data), the banner appeared behind the heading and pickers only, hid when Captain was picked as attacker and came back for the Intercessor Squad; no console errors. The storage-full path and light mode were not checked in the browser.
+
+## Banner links (session 19, 2026-11-26, branch `banner-urls`)
+
+**What:** besides a picture from the PC, a unit's banner can be a link to an online image. Links travel with export / import; pictures from the PC still never do.
+
+**How:** the Banner section of the unit editor has a link field and *Use link* (Enter in the field does the same instead of saving the unit). `prepareBannerUrl` accepts only `https://` links without credentials, up to 2048 characters, stores them in canonical form (`new URL(…).href`, which percent-encodes quotes and spaces) and only once the image actually loads (15 s timeout, `no-referrer`). The link goes into the same `banners` map as data URLs, so a unit has one banner of either kind; picking a file replaces a link and vice versa. Anything put in a style goes through `bannerCss`, which only accepts a valid data URL or a canonical https link (`isBanner`).
+
+**Share:** `SharedUnit.banner` (optional; `SHARE_VERSION` stays 3, older files load without a banner and older apps ignore the field). `ShareState.banners` is passed by `main.ts`. Export adds the link when the unit's banner is one. On import a new unit gets the file's link; a same-named unit with the same content but a different banner (the file has a link) is a conflict, and Replace takes over the link; a replaced unit keeps its own banner when the file has none. `main.ts` saves the banners after an import.
+
+**Verification:** `npm test` 336/336 (new cases in `state/banners.test.ts` and `state/share.test.ts`). `npm run build` is clean. Not checked in the browser (the Chrome extension wasn't connected).
+
+## Defender banner (session 19, 2026-11-26, branch `banner-urls`)
+
+**What:** the defending unit's banner is shown too, the same way as the attacker's: faintly behind the Defender heading, hint and Army / Unit pickers, edge to edge from the panel's top, ending at the line under its own pickers. The two banners don't line up with each other: a first version padded the shorter head so they ended level, but that left a big gap between the Attacker's hint and its pickers, so it was dropped at the user's request.
+
+**How:** `index.html` wraps the defender's panel head and `#defender-picker` in `#defender-head`; both heads use the class `unit-head` (was `attacker-head`). `main.ts` renders both banners in `renderBanners`.
+
+**Verification:** `npm test` 336/336, `npm run build` clean. Checked in Chrome at 1536px wide with a test banner on the Intercessor Squad on both sides: each banner ends at the line under its own pickers, the Attacker head has no extra space, no console errors.
 
 ## Housekeeping
 

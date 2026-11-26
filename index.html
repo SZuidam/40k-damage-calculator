@@ -20,7 +20,7 @@
     <main>
       <form id="calculator" class="calculator" novalidate>
         <section class="panel attacker" aria-labelledby="attacker-title">
-          <div id="attacker-head" class="attacker-head">
+          <div id="attacker-head" class="unit-head">
             <div class="panel-head">
               <h2 id="attacker-title">Attacker</h2>
               <p class="panel-hint">Tick the weapons the unit carries and how many. Weapons resolve top to bottom; a wounded model carries over to the next weapon.</p>
@@ -38,11 +38,13 @@
         </section>
 
         <section class="panel defender" aria-labelledby="defender-title">
-          <div class="panel-head">
-            <h2 id="defender-title">Defender</h2>
-            <p class="panel-hint">Damage beyond a model's remaining wounds is lost.</p>
+          <div id="defender-head" class="unit-head">
+            <div class="panel-head">
+              <h2 id="defender-title">Defender</h2>
+              <p class="panel-hint">Damage beyond a model's remaining wounds is lost.</p>
+            </div>
+            <div id="defender-picker"></div>
           </div>
-          <div id="defender-picker"></div>
           <div id="defender"></div>
         </section>
 

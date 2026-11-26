@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BANNER_STORAGE_KEY, isBannerData, loadBanners, pruneBanners, saveBanners } from './banners';
+import { BANNER_STORAGE_KEY, bannerCss, isBanner, isBannerData, isBannerUrl, loadBanners, normalizeBannerUrl, pruneBanners, saveBanners } from './banners';
 import type { KeyValueStorage } from './storage';
 
 const png = 'data:image/png;base64,iVBORw0KGgo=';
 const webp = 'data:image/webp;base64,UklGRg==';
+const link = 'https://example.com/banners/intercessors.png';
 
 function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & { data: Record<string, string> } {
   const data = { ...initial };
@@ -21,12 +22,40 @@ describe('isBannerData', () => {
   });
 });
 
+describe('normalizeBannerUrl / isBannerUrl', () => {
+  it('accepts https links and returns them in canonical form', () => {
+    expect(normalizeBannerUrl(`  ${link}  `)).toBe(link);
+    expect(normalizeBannerUrl('HTTPS://Example.com/a b.png')).toBe('https://example.com/a%20b.png');
+    expect(normalizeBannerUrl('https://example.com/a.png?x="y"')).toBe('https://example.com/a.png?x=%22y%22');
+    expect(normalizeBannerUrl('https://en.wikipedia.org/wiki/File:A_(b).jpg')).toBe('https://en.wikipedia.org/wiki/File:A_(b).jpg');
+    expect(isBannerUrl(link)).toBe(true);
+  });
+
+  it('refuses anything else', () => {
+    for (const text of ['', 'example.com/a.png', 'http://example.com/a.png', 'javascript:alert(1)', 'data:image/png;base64,iVBORw0KGgo=', 'https://user:pw@example.com/a.png', `https://example.com/${'a'.repeat(2048)}`]) {
+      expect(normalizeBannerUrl(text)).toBeNull();
+    }
+    // Only the canonical form counts as a stored link.
+    expect(isBannerUrl('HTTPS://example.com/a.png')).toBe(false);
+    expect(isBannerUrl('https://example.com/a b.png')).toBe(false);
+    expect(isBannerUrl(42)).toBe(false);
+  });
+
+  it('turns banners into a CSS value', () => {
+    expect(isBanner(png) && isBanner(link)).toBe(true);
+    expect(bannerCss(link)).toBe(`url("${link}")`);
+    expect(bannerCss(png)).toBe(`url("${png}")`);
+    expect(bannerCss('https://example.com/a")')).toBe('');
+    expect(bannerCss(undefined)).toBe('');
+  });
+});
+
 describe('loadBanners / saveBanners', () => {
   it('round trips the banners under their own key', () => {
     const storage = memoryStorage();
-    expect(saveBanners({ u1: png, u2: webp }, storage)).toBe(true);
+    expect(saveBanners({ u1: png, u2: webp, u3: link }, storage)).toBe(true);
     expect(Object.keys(storage.data)).toEqual([BANNER_STORAGE_KEY]);
-    expect(loadBanners(storage)).toEqual({ u1: png, u2: webp });
+    expect(loadBanners(storage)).toEqual({ u1: png, u2: webp, u3: link });
   });
 
   it('drops entries that aren’t images and survives junk', () => {

@@ -1,5 +1,6 @@
 import type { Army, StoredWeapon, Unit, UnitAbility, UnitStats, WeaponStats } from '../types';
 import { MAX_WEAPON_NAME, validateAbilities, validateUnit } from '../ui/validation';
+import { isBannerUrl, type Banners } from './banners';
 import { uid } from './ids';
 import { armyOf } from './loadout';
 import { pickStats, sameCombatStats, sameDefender } from './presets';
@@ -12,8 +13,8 @@ export const SHARE_FORMAT = 'damage-calculator-share';
 /**
  * 3 (session 16): armies and units. 1–2 held profiles, defender presets and weapon profiles,
  * which units replaced; those files are refused with an explanation. Weapon types, unit
- * abilities and army rules (`armies`) were added to version 3 later; files without them load
- * with ranged weapons and no abilities.
+ * abilities and army rules (`armies`) and banner links (`banner`) were added to version 3 later;
+ * files without them load with ranged weapons, no abilities and no banner.
  */
 export const SHARE_VERSION = 3;
 /** Refuse pasted text or files above this many characters. */
@@ -29,6 +30,8 @@ export interface SharedUnit extends UnitStats {
   weapons: WeaponStats[];
   /** The unit's abilities, without ids. */
   abilities: AbilityContent[];
+  /** The unit's banner when it is an online image (an https link); pictures from the PC stay home. */
+  banner?: string;
 }
 
 /** The rules of an army whose units are in the file, matched by name on import. */
@@ -53,6 +56,8 @@ export interface ShareFile extends ShareData {
 export interface ShareState {
   armies: Army[];
   units: Unit[];
+  /** Banner images by unit id; links are exported and imported, pictures from the PC are not. */
+  banners?: Banners;
 }
 
 // ---------- export ----------
@@ -74,13 +79,15 @@ export function buildShareFile(state: ShareState, unitIds: readonly string[], no
     format: SHARE_FORMAT,
     version: SHARE_VERSION,
     exportedAt: now.toISOString(),
-    units: units.map((u) => toShared(u, armyName(u, state.armies))),
+    units: units.map((u) => toShared(u, armyName(u, state.armies), state.banners?.[u.id])),
     armies: state.armies.filter((a) => armyIds.has(a.id) && a.abilities.length > 0).map((a) => ({ name: a.name, abilities: a.abilities.map(abilityContent) })),
   };
 }
 
-function toShared(u: Unit, army: string | null): SharedUnit {
-  return { name: u.name, army, ...stats(u), keywords: [...u.keywords], weapons: u.weapons.map(pickStats), abilities: u.abilities.map(abilityContent) };
+function toShared(u: Unit, army: string | null, banner: string | undefined): SharedUnit {
+  const shared: SharedUnit = { name: u.name, army, ...stats(u), keywords: [...u.keywords], weapons: u.weapons.map(pickStats), abilities: u.abilities.map(abilityContent) };
+  if (isBannerUrl(banner)) shared.banner = banner;
+  return shared;
 }
 
 export function serializeShareFile(file: ShareFile): string {
@@ -130,6 +137,7 @@ function toSharedUnit(value: unknown): SharedUnit | null {
     ...stats(unit),
     weapons: unit.weapons.map((w) => ({ ...pickStats(w), name: cleanName(w.name) })),
     abilities: unit.abilities.map(toSharedAbility),
+    ...(isBannerUrl(value.banner) ? { banner: value.banner } : {}),
   };
 }
 
@@ -151,7 +159,8 @@ function toSharedArmy(value: unknown): SharedArmy | null {
 /**
  * - new: the army has no unit with this name.
  * - duplicate: a unit with this name and the same content is already in that army.
- * - conflict: a unit with this name but different content is in that army.
+ * - conflict: a unit with this name but different content (or, when the file has a banner link,
+ *   a different banner) is in that army.
  * - invalid: values out of range; `problem` says which.
  */
 export type ImportStatus = 'new' | 'duplicate' | 'conflict' | 'invalid';
@@ -211,7 +220,8 @@ export function planImport(data: ShareData, state: ShareState): ImportItem[] {
   return data.units.map((unit, index) => {
     const problem = Object.values(validateUnit(asUnit(unit)))[0];
     const match = unitsUnder(state, unit.army).find((u) => sameName(u.name, unit.name));
-    const status: ImportStatus = problem ? 'invalid' : !match ? 'new' : sameUnitContent(match, unit) ? 'duplicate' : 'conflict';
+    const sameBanner = unit.banner === undefined || (match !== undefined && state.banners?.[match.id] === unit.banner);
+    const status: ImportStatus = problem ? 'invalid' : !match ? 'new' : sameUnitContent(match, unit) && sameBanner ? 'duplicate' : 'conflict';
     const newArmy = unit.army !== null && !findArmy(state.armies, unit.army);
     return { index, name: unit.name, army: unit.army, newArmy, status, ...(problem ? { problem } : {}) };
   });
@@ -252,7 +262,8 @@ export function uniqueName(taken: readonly string[], name: string): string {
  * Add the chosen units to the state, mutating its arrays in place. Invalid and duplicate items
  * are skipped. A missing army is created. A conflict is replaced or added under a new name per
  * `policy`. A replaced unit keeps its id, and its weapons keep their ids where the name stays,
- * so a loadout on the main page that uses them stays linked. Everything else gets new ids.
+ * so a loadout on the main page that uses them stays linked. Everything else gets new ids. A
+ * banner link in the file is put in `state.banners`; a replaced unit without one keeps its banner.
  */
 export function applyImport(data: ShareData, items: readonly ImportItem[], state: ShareState, policy: ConflictPolicy): ImportSummary {
   const summary: ImportSummary = { added: 0, renamed: 0, replaced: 0, armies: 0, armyRules: 0 };
@@ -280,6 +291,7 @@ export function applyImport(data: ShareData, items: readonly ImportItem[], state
     if (match && item.status === 'conflict' && policy === 'replace') {
       const weapons: StoredWeapon[] = unit.weapons.map((w) => ({ ...pickStats(w), id: match.weapons.find((m) => sameName(m.name, w.name))?.id ?? uid('weapon') }));
       Object.assign(match, { ...stats(unit), keywords: [...unit.keywords], weapons, abilities: withIds(unit.abilities) });
+      if (unit.banner !== undefined && state.banners) state.banners[match.id] = unit.banner;
       summary.replaced += 1;
       continue;
     }
@@ -289,8 +301,10 @@ export function applyImport(data: ShareData, items: readonly ImportItem[], state
     );
     if (name === unit.name) summary.added += 1;
     else summary.renamed += 1;
+    const id = uid('unit');
+    if (unit.banner !== undefined && state.banners) state.banners[id] = unit.banner;
     state.units.push({
-      id: uid('unit'),
+      id,
       name,
       armyId,
       ...stats(unit),

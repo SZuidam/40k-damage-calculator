@@ -200,6 +200,57 @@ describe('applyImport', () => {
   });
 });
 
+describe('banner links', () => {
+  const link = 'https://example.com/intercessors.png';
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  const withBanners = (banners: Record<string, string>): ShareState => ({ ...sourceState(), banners });
+
+  it('exports links but not pictures from the PC', () => {
+    const exported = buildShareFile(withBanners({ u1: link, u2: png }), ['u1', 'u2', 'u3']);
+    expect(exported.units.map((u) => u.banner)).toEqual([link, undefined, undefined]);
+    expect(serializeShareFile(exported)).not.toContain('data:image');
+  });
+
+  it('reads valid links only', () => {
+    const units = [
+      { ...buildShareFile(sourceState(), ['u1']).units[0], banner: link },
+      { ...buildShareFile(sourceState(), ['u2']).units[0], banner: 'javascript:alert(1)' },
+    ];
+    const parsed = parseShareText(file(units));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.data.units.map((u) => u.banner)).toEqual([link, undefined]);
+  });
+
+  it('adds the link of a new unit to the banners', () => {
+    const data = roundTrip(withBanners({ u1: link }), ['u1']);
+    const target: ShareState = { ...emptyState(), banners: {} };
+    applyImport(data, planImport(data, target), target, 'rename');
+    expect(target.banners).toEqual({ [target.units[0].id]: link });
+  });
+
+  it('treats a different banner link as a conflict, and replacing takes it over', () => {
+    const data = roundTrip(withBanners({ u1: link }), ['u1']);
+    const same = withBanners({ u1: link });
+    expect(planImport(data, same)[0].status).toBe('duplicate');
+
+    const target = withBanners({ u1: png });
+    const items = planImport(data, target);
+    expect(items[0].status).toBe('conflict');
+    applyImport(data, items, target, 'replace');
+    expect(target.banners).toEqual({ u1: link });
+  });
+
+  it('keeps the banner of a replaced unit when the file has no link', () => {
+    const data = roundTrip(sourceState(), ['u1']);
+    data.units[0].wounds = 3;
+    const target = withBanners({ u1: png });
+    const items = planImport(data, target);
+    expect(items[0].status).toBe('conflict');
+    applyImport(data, items, target, 'replace');
+    expect(target.banners).toEqual({ u1: png });
+  });
+});
+
 describe('uniqueName', () => {
   it('numbers taken names case-insensitively and stays within 40 characters', () => {
     expect(uniqueName([], 'Squad')).toBe('Squad');

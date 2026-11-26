@@ -2,7 +2,7 @@ import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
 import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
-import { loadBanners, pruneBanners, saveBanners } from './state/banners';
+import { bannerCss, loadBanners, pruneBanners, saveBanners } from './state/banners';
 import { loadState, saveState } from './state/storage';
 import { abilitiesFor, activeFor, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
 import type { StoredWeapon, Unit, WeaponProfile } from './types';
@@ -24,7 +24,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 /** All app state. Objects and arrays are mutated in place: the views hold references to them. */
 const state = loadState();
-/** Banner images by unit id: stored apart from `state` and never exported. */
+/** Banner images by unit id: stored apart from `state`; only links are exported. */
 const banners = loadBanners();
 const form = $<HTMLFormElement>('calculator');
 const optimiseButton = $<HTMLButtonElement>('optimise');
@@ -113,7 +113,7 @@ function onInputsChanged(): void {
   // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions,
   // unit abilities on the conditions, ability toggles, target and ticked weapons.
   loadoutRows.refreshStats();
-  renderAttackerBanner();
+  renderBanners();
   abilitiesLine.update(
     attackAbilities(),
     carried().map(({ weapon }) => weapon.type),
@@ -227,7 +227,7 @@ function runSimulation(): void {
     const started = performance.now();
     const result = simulate(weapons, defender, state.iterations);
     const ms = Math.round(performance.now() - started);
-    results.show(result, weapons, defender.models, defender.wounds);
+    results.show(result, weapons, defender);
     hasResults = true;
     simulateButton.disabled = false;
     runStatus.textContent = `${state.iterations.toLocaleString()} runs in ${ms.toLocaleString()} ms.`;
@@ -266,17 +266,23 @@ const attackerPicker = new UnitPicker({
     },
   },
 });
-// The attacking unit's banner image, faintly behind the Attacker heading and the Army / Unit
-// pickers (not the conditions or weapons).
+// The picked units' banner images, faintly behind each panel's heading and Army / Unit pickers
+// (not the conditions, weapons or defender stats).
 const attackerBanner = h('div', { class: 'unit-banner', 'aria-hidden': 'true', hidden: true });
+const defenderBanner = h('div', { class: 'unit-banner', 'aria-hidden': 'true', hidden: true });
 $('attacker-head').prepend(attackerBanner);
+$('defender-head').prepend(defenderBanner);
 $('attacker-picker').append(attackerPicker.element);
 
-function renderAttackerBanner(): void {
-  const data = state.attacker.unitId ? banners[state.attacker.unitId] : undefined;
-  const image = data ? `url("${data}")` : '';
-  if (attackerBanner.style.backgroundImage !== image) attackerBanner.style.backgroundImage = image;
-  attackerBanner.hidden = !data;
+function renderBanner(element: HTMLElement, unitId: string | null): void {
+  const image = bannerCss(unitId ? banners[unitId] : undefined);
+  if (element.style.backgroundImage !== image) element.style.backgroundImage = image;
+  element.hidden = image === '';
+}
+
+function renderBanners(): void {
+  renderBanner(attackerBanner, state.attacker.unitId);
+  renderBanner(defenderBanner, state.defender.unitId);
 }
 
 /** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each, without a leader. */
@@ -339,7 +345,7 @@ const unitsPanel = new UnitsPanel({
   banners,
   onBannersChange: () => {
     const saved = saveBanners(banners);
-    renderAttackerBanner();
+    renderBanners();
     return saved;
   },
 });
@@ -356,12 +362,13 @@ function settingsPanel(): HTMLElement {
 
   const importButton = h('button', { type: 'button', class: 'button secondary' }, 'Import…');
   const exportButton = h('button', { type: 'button', class: 'button secondary' }, 'Export…');
-  exportButton.addEventListener('click', () => openExportModal(state));
+  exportButton.addEventListener('click', () => openExportModal({ armies: state.armies, units: state.units, banners }));
   importButton.addEventListener('click', () =>
     openImportModal({
-      state,
+      state: { armies: state.armies, units: state.units, banners },
       // Units and armies may have been added or replaced: the Units tab and the main page follow.
       onImported: () => {
+        saveBanners(banners);
         unitsPanel.render();
         onUnitsChanged();
       },
