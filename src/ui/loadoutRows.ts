@@ -1,5 +1,5 @@
 import type { AttackConditions, AttackerSelection, LoadoutRow, StoredWeapon, Unit } from '../types';
-import { field, h, numberValue, setFieldError } from './dom';
+import { h, numberValue, setFieldError } from './dom';
 import { statChips, type ChipDefender } from './statChips';
 import { validateLoadoutRow } from './validation';
 
@@ -93,6 +93,7 @@ export class LoadoutRows {
     const count = h('input', { id: id('count'), class: 'row-count', type: 'number', inputmode: 'numeric', min: 1, max: 50, value: row.count, 'aria-label': `Number of ${name} carried` });
     const number = h('span', { class: 'row-index', 'aria-hidden': 'true' });
     const chips = h('div', { class: 'stat-chips' });
+    const abilities = h('span', { class: 'row-ability-slot' });
     const errors = h('p', { class: 'row-errors', id: id('errors'), 'aria-live': 'polite' });
     const li = h('li', { class: 'weapon-row loadout-row' });
 
@@ -106,7 +107,12 @@ export class LoadoutRows {
       li.classList.toggle('is-invalid', result.weapon !== undefined);
       li.classList.toggle('is-off', !row.carried);
       number.textContent = String(this.firingNumber(row) ?? '');
-      chips.replaceChildren(...statChips(weapon, this.options.defender(), this.options.conditions()));
+      // The stat chips go on the second line, the abilities beside the name, so every row has
+      // the same two lines and the chips line up from row to row.
+      const parts = statChips(weapon, this.options.defender(), this.options.conditions());
+      const isAbilities = (el: HTMLElement) => el.classList.contains('row-abilities');
+      chips.replaceChildren(...parts.filter((el) => !isAbilities(el)));
+      abilities.replaceChildren(...parts.filter(isAbilities));
     };
 
     carried.addEventListener('change', () => {
@@ -126,13 +132,24 @@ export class LoadoutRows {
     up.addEventListener('click', () => this.move(index, -1, 'move-up'));
     down.addEventListener('click', () => this.move(index, 1, 'move-down'));
 
+    // A two-toned pill: the equip cell (checkbox and firing number) on the left, then the weapon on
+    // two lines: count × name with its abilities and the order buttons, and below it the stat chips.
     li.append(
-      number,
-      field('Count', count, 'field--count'),
-      h('label', { class: 'row-name row-carry', for: carried.id }, carried, h('span', {}, name)),
-      chips,
-      h('div', { class: 'row-actions' }, up, down),
-      errors,
+      h('label', { class: 'row-equip', title: 'Equip' }, carried, h('span', { class: 'visually-hidden' }, 'Equip '), number),
+      h(
+        'div',
+        { class: 'row-body' },
+        h(
+          'div',
+          { class: 'row-head' },
+          count,
+          h('span', { class: 'row-times', 'aria-hidden': 'true' }, '×'),
+          h('div', { class: 'row-title' }, h('label', { class: 'row-name', for: carried.id }, name), abilities),
+          h('div', { class: 'row-actions' }, up, down),
+        ),
+        chips,
+        errors,
+      ),
     );
     this.updaters.push(update);
     return li;
