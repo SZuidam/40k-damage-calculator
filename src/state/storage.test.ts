@@ -26,13 +26,14 @@ const intercessors = (overrides: Partial<Unit> = {}): Unit => ({
   wounds: 2,
   keywords: ['infantry'],
   weapons: [bolt(), las()],
+  abilities: [],
   ...overrides,
 });
 
 /** A v5 save with one army, one unit, picked on both sides; `overrides` replace top-level keys. */
 function v5(overrides: Record<string, unknown> = {}) {
   return {
-    armies: [{ id: 'sm', name: 'Space Marines' }],
+    armies: [{ id: 'sm', name: 'Space Marines', abilities: [] }],
     units: [intercessors()],
     attacker: {
       armyId: 'sm',
@@ -67,8 +68,8 @@ function v4(overrides: Record<string, unknown> = {}) {
     conditions: { halfRange: false, charged: true },
     iterations: 20_000,
     armies: [
-      { id: 'sm', name: 'Space Marines' },
-      { id: 'ad', name: 'Adeptus Custodes' },
+      { id: 'sm', name: 'Space Marines', abilities: [] },
+      { id: 'ad', name: 'Adeptus Custodes', abilities: [] },
     ],
     units: [intercessors()],
     ...overrides,
@@ -78,7 +79,7 @@ function v4(overrides: Record<string, unknown> = {}) {
 describe('loadState', () => {
   it('starts with the example army and unit, picked on both sides, when storage is empty', () => {
     const state = loadState(memoryStorage());
-    expect(state.armies).toEqual([{ id: expect.any(String), name: 'Space Marines' }]);
+    expect(state.armies).toEqual([{ id: expect.any(String), name: 'Space Marines', abilities: [] }]);
     expect(state.units).toHaveLength(1);
     const [unit] = state.units;
     expect(unit).toMatchObject({ name: 'Intercessor Squad', armyId: state.armies[0].id, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'] });
@@ -89,6 +90,7 @@ describe('loadState', () => {
     expect(state.attacker).toEqual({
       armyId: unit.armyId,
       unitId: unit.id,
+      leaderId: null,
       rows: [
         { weaponId: unit.weapons[0].id, carried: true, count: 5 },
         { weaponId: unit.weapons[1].id, carried: false, count: 5 },
@@ -120,14 +122,14 @@ describe('loadState', () => {
     const state = load(v5({ armies: [], units: [] }));
     expect(state.armies).toEqual([]);
     expect(state.units).toEqual([]);
-    expect(state.attacker).toEqual({ armyId: null, unitId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: null, unitId: null, leaderId: null, rows: [] });
     expect(state.defender).toEqual({ armyId: null, unitId: null, models: 10 });
   });
 
   it('round trips armies and units with their own weapons', () => {
     const storage = memoryStorage();
     const state = load(v5());
-    state.armies.push({ id: 'cd', name: 'Chaos Daemons' });
+    state.armies.push({ id: 'cd', name: 'Chaos Daemons', abilities: [] });
     state.units.push({ ...intercessors(), id: 'u2', name: 'Test dummy', armyId: null, toughness: 10, save: 2, invuln: 4, wounds: 12, keywords: ['vehicle', 'fly'], weapons: [{ ...bolt(), strength: 5 }] });
     saveState(state, storage);
     expect(loadState(storage)).toEqual(state);
@@ -135,7 +137,7 @@ describe('loadState', () => {
 
   it('repairs units: stale army, missing ids, unknown keywords, broken weapons', () => {
     const saved = v5({
-      armies: [{ id: 'sm', name: 'Space Marines' }, { id: 'broken' }, 'nope', { id: '', name: 'No id' }],
+      armies: [{ id: 'sm', name: 'Space Marines', abilities: [] }, { id: 'broken' }, 'nope', { id: '', name: 'No id', abilities: [] }],
       units: [
         {
           name: 'Intercessors',
@@ -152,7 +154,7 @@ describe('loadState', () => {
       ],
     });
     const state = load(saved);
-    expect(state.armies).toEqual([{ id: 'sm', name: 'Space Marines' }]);
+    expect(state.armies).toEqual([{ id: 'sm', name: 'Space Marines', abilities: [] }]);
     expect(state.units).toHaveLength(2);
     const [first, second] = state.units;
     expect(first.id).toMatch(/^unit-/);
@@ -163,7 +165,7 @@ describe('loadState', () => {
     expect(first.weapons[0].id).toMatch(/^weapon-/);
     expect(first.weapons[0].abilities).toEqual(noAbilities());
     // Out-of-range numbers are kept for validation to flag; non-numbers get the defaults.
-    expect(second).toEqual({ id: 'u2', name: 'Tough', armyId: 'sm', toughness: 4, save: 99, invuln: null, wounds: 3, keywords: [], weapons: [] });
+    expect(second).toEqual({ id: 'u2', name: 'Tough', armyId: 'sm', toughness: 4, save: 99, invuln: null, wounds: 3, keywords: [], weapons: [], abilities: [] });
   });
 
   it('does not throw when storage throws', () => {
@@ -213,8 +215,8 @@ describe('attacker and defender on load', () => {
   });
 
   it('unpicks a unit that is gone and keeps the army dropdown on an existing choice', () => {
-    const state = load(v5({ attacker: { armyId: 'sm', unitId: 'gone', rows: [{ weaponId: 'w-bolt', carried: true, count: 5 }] }, defender: { armyId: 'gone', unitId: 'gone', models: 'x' } }));
-    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, rows: [] });
+    const state = load(v5({ attacker: { armyId: 'sm', unitId: 'gone', leaderId: null, rows: [{ weaponId: 'w-bolt', carried: true, count: 5 }] }, defender: { armyId: 'gone', unitId: 'gone', models: 'x' } }));
+    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
     expect(state.defender).toEqual({ armyId: 'sm', unitId: null, models: 5 });
   });
 
@@ -222,8 +224,8 @@ describe('attacker and defender on load', () => {
     const state = load(
       v5({
         armies: [
-          { id: 'sm', name: 'Space Marines' },
-          { id: 'cd', name: 'Chaos Daemons' },
+          { id: 'sm', name: 'Space Marines', abilities: [] },
+          { id: 'cd', name: 'Chaos Daemons', abilities: [] },
         ],
         units: [intercessors({ armyId: 'cd' })],
         defender: { armyId: 'sm', unitId: 'u1', models: 5 },
@@ -236,7 +238,7 @@ describe('attacker and defender on load', () => {
   it('starts without a selection when nothing was saved for it', () => {
     const { attacker: _a, defender: _d, ...rest } = v5();
     const state = load(rest);
-    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
     expect(state.defender).toEqual({ armyId: 'sm', unitId: null, models: 5 });
   });
 });
@@ -245,13 +247,13 @@ describe('v4 → v5', () => {
   it('keeps the armies, units, conditions and iterations, and drops the rest', () => {
     const storage = memoryStorage({ [V4_STORAGE_KEY]: JSON.stringify(v4()) });
     const state = loadState(storage);
-    expect(Object.keys(state).sort()).toEqual(['armies', 'attacker', 'conditions', 'defender', 'iterations', 'units']);
+    expect(Object.keys(state).sort()).toEqual(['armies', 'attacker', 'conditions', 'defender', 'iterations', 'situations', 'units']);
     expect(state.armies).toEqual(v4().armies);
     expect(state.units).toEqual([intercessors()]);
     expect(state.conditions).toEqual({ halfRange: false, charged: true });
     expect(state.iterations).toBe(20_000);
     // No unit is picked yet; the army dropdowns start on the first army (by name) that has units.
-    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
     expect(state.defender).toEqual({ armyId: 'sm', unitId: null, models: 5 });
   });
 
@@ -342,5 +344,79 @@ describe('weapon type on load', () => {
     const { type: _, ...untyped } = bolt();
     const state = load(v5({ units: [{ ...intercessors(), weapons: [untyped, { ...las(), type: 'psychic' }, { ...bolt(), id: 'w-ccw', name: 'Chainsword', type: 'melee' }] }] }));
     expect(state.units[0].weapons.map((w) => w.type)).toEqual(['ranged', 'ranged', 'melee']);
+  });
+});
+
+describe('abilities, leader and situations on load', () => {
+  const oath = { id: 'a-oath', name: 'Oath', description: 'Oath of Moment', appliesTo: 'unit', when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] };
+
+  it('gives units and armies saved without abilities none', () => {
+    const { abilities: _, ...withoutAbilities } = intercessors();
+    const state = load(v5({ armies: [{ id: 'sm', name: 'Space Marines' }], units: [withoutAbilities] }));
+    expect(state.units[0].abilities).toEqual([]);
+    expect(state.armies[0].abilities).toEqual([]);
+    expect(state.attacker.leaderId).toBeNull();
+    expect(state.situations).toEqual([]);
+  });
+
+  it('round trips unit and army abilities, the leader and the situations', () => {
+    const storage = memoryStorage();
+    const rites = { ...oath, id: 'a-rites', name: 'Rites', appliesTo: 'ledUnit', when: { situations: [], weaponType: 'melee', targetKeyword: 'monster' }, effects: [{ kind: 'critical', roll: 'hit', on: 5 }, { kind: 'grant', abilities: { ...noAbilities(), lethalHits: true } }] };
+    const state = load(
+      v5({
+        armies: [{ id: 'sm', name: 'Space Marines', abilities: [oath] }],
+        units: [intercessors(), { ...intercessors(), id: 'cap', name: 'Captain', weapons: [], abilities: [rites] }],
+        attacker: { ...v5().attacker, leaderId: 'cap' },
+        situations: ['oath target'],
+      }),
+    );
+    expect(state.attacker.leaderId).toBe('cap');
+    expect(state.armies[0].abilities).toEqual([oath]);
+    expect(state.situations).toEqual(['oath target']);
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
+  });
+
+  it('repairs abilities: drops malformed ones and effects, defaults the rest', () => {
+    const broken = {
+      name: 'Kept',
+      appliesTo: 'aura',
+      when: { situations: [{ builtin: 'charged' }, { builtin: 'flying' }, { name: '  ' }, 'x'], weaponType: 'psychic', targetKeyword: 'titan' },
+      effects: [
+        { kind: 'stat', stat: 'attacks', amount: 9 },
+        { kind: 'stat', stat: 'toughness', amount: 1 },
+        { kind: 'roll', roll: 'save', amount: 1 },
+        { kind: 'reroll', roll: 'hit', which: 'all' },
+        { kind: 'grant' },
+        { kind: 'teleport' },
+      ],
+    };
+    const abilities = load(v5({ units: [{ ...intercessors(), abilities: [broken, { id: 'nameless', effects: [] }, 'junk'] }] })).units[0].abilities;
+    expect(abilities).toHaveLength(1);
+    const [kept] = abilities;
+    expect(kept.id).toMatch(/^ability-/);
+    expect(kept).toMatchObject({ name: 'Kept', description: '', appliesTo: 'unit', when: { situations: [{ builtin: 'charged' }], weaponType: 'any', targetKeyword: null } });
+    // Out of range stays for validation to flag; unknown stats, rolls, re-rolls and kinds are dropped.
+    expect(kept.effects).toEqual([{ kind: 'stat', stat: 'attacks', amount: 9 }]);
+  });
+
+  it('drops a leader that is gone, in another army, the attacker itself or without abilities for its unit', () => {
+    const lead = { ...oath, id: 'a-lead', appliesTo: 'ledUnit' };
+    const captain = { ...intercessors(), id: 'cap', name: 'Captain', abilities: [lead] };
+    const armies = [
+      { id: 'sm', name: 'Space Marines' },
+      { id: 'cd', name: 'Chaos Daemons' },
+    ];
+    const leaderOf = (leaderId: string, units: unknown[]) => load(v5({ armies, units, attacker: { ...v5().attacker, leaderId } })).attacker.leaderId;
+    expect(leaderOf('cap', [intercessors(), captain])).toBe('cap');
+    expect(leaderOf('gone', [intercessors(), captain])).toBeNull();
+    expect(leaderOf('cap', [intercessors(), { ...captain, armyId: 'cd' }])).toBeNull();
+    expect(leaderOf('cap', [intercessors(), { ...captain, abilities: [] }])).toBeNull();
+    expect(leaderOf('u1', [{ ...intercessors(), abilities: [lead] }])).toBeNull();
+  });
+
+  it('keeps the switched-on situations as trimmed, lower-cased strings without duplicates', () => {
+    expect(load(v5({ situations: [' Oath Target ', 'oath target', '', 3, null, 'Ingress move'] })).situations).toEqual(['oath target', 'ingress move']);
+    expect(load(v5({ situations: 'oath' })).situations).toEqual([]);
   });
 });

@@ -1,4 +1,24 @@
-import { DEFENDER_KEYWORDS, noAbilities, noConditions, type Army, type AttackConditions, type AttackerSelection, type DefenderKeyword, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitStats, type WeaponAbilities, type WeaponStats, type WeaponType } from '../types';
+import {
+  DEFENDER_KEYWORDS,
+  noAbilities,
+  noConditions,
+  type AbilityCondition,
+  type AbilityEffect,
+  type Army,
+  type AttackConditions,
+  type AttackerSelection,
+  type DefenderKeyword,
+  type DefenderSelection,
+  type LoadoutRow,
+  type SituationRef,
+  type StoredWeapon,
+  type Unit,
+  type UnitAbility,
+  type UnitStats,
+  type WeaponAbilities,
+  type WeaponStats,
+  type WeaponType,
+} from '../types';
 import { uid } from './ids';
 import { DEFAULT_UNIT_MODELS, DEFAULT_WEAPON_COUNT, defaultArmyId, newLoadout, reconcileAttacker, reconcileDefender } from './loadout';
 import { pickStats } from './presets';
@@ -19,6 +39,11 @@ export interface StoredState {
   defender: DefenderSelection;
   /** Situational attack conditions (half range, charged): page state only. */
   conditions: AttackConditions;
+  /**
+   * The custom situations (named in unit and army abilities) that are switched on, as
+   * situationKey()s: trimmed and lower-cased. Page state only, like `conditions`.
+   */
+  situations: string[];
   iterations: number;
 }
 
@@ -44,12 +69,12 @@ const exampleWeapon = (name: string, attacks: string, ap: number, type: WeaponTy
  * bolt pistol, close combat weapon), picked on both sides: 5 bolt rifles into 5 Intercessors.
  */
 export function defaultState(): StoredState {
-  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), iterations: DEFAULT_ITERATIONS });
+  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), situations: [], iterations: DEFAULT_ITERATIONS });
 }
 
 /** `state` plus the example army and unit, picked on both sides with the bolt rifle carried. Only for a state without armies or units. */
 function withExample(state: StoredState): StoredState {
-  const army: Army = { id: uid('army'), name: 'Space Marines' };
+  const army: Army = { id: uid('army'), name: 'Space Marines', abilities: [] };
   const unit: Unit = {
     id: uid('unit'),
     name: 'Intercessor Squad',
@@ -60,6 +85,7 @@ function withExample(state: StoredState): StoredState {
     wounds: 2,
     keywords: ['infantry'],
     weapons: [exampleWeapon('Bolt rifle', '2', -1), exampleWeapon('Bolt pistol', '1', 0), exampleWeapon('Close combat weapon', '3', 0, 'melee')],
+    abilities: [],
   };
   const rows = newLoadout(unit);
   rows[0].carried = true;
@@ -67,12 +93,12 @@ function withExample(state: StoredState): StoredState {
     ...state,
     armies: [army],
     units: [unit],
-    attacker: { armyId: army.id, unitId: unit.id, rows },
+    attacker: { armyId: army.id, unitId: unit.id, leaderId: null, rows },
     defender: { armyId: army.id, unitId: unit.id, models: DEFAULT_UNIT_MODELS },
   };
 }
 
-const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, rows: [] });
+const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, leaderId: null, rows: [] });
 const noDefender = (): DefenderSelection => ({ armyId: null, unitId: null, models: DEFAULT_UNIT_MODELS });
 
 function browserStorage(): KeyValueStorage | undefined {
@@ -126,7 +152,7 @@ function normalise(raw: unknown): StoredState {
   if (!isRecord(raw.defender)) defender.armyId = defaultArmyId(armies, units);
   reconcileAttacker(attacker, armies, units);
   reconcileDefender(defender, armies, units);
-  return { armies, units, attacker, defender, conditions: toConditions(raw.conditions), iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
+  return { armies, units, attacker, defender, conditions: toConditions(raw.conditions), situations: toSituations(raw.situations), iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
 }
 
 /**
@@ -144,7 +170,7 @@ function fromV4(raw: unknown): StoredState {
 /** The attacker: ids as saved (reconciled afterwards) and its loadout rows. */
 function toAttacker(value: unknown): AttackerSelection {
   if (!isRecord(value)) return noAttacker();
-  return { armyId: optionalId(value.armyId), unitId: optionalId(value.unitId), rows: list(value.rows, toLoadoutRow) };
+  return { armyId: optionalId(value.armyId), unitId: optionalId(value.unitId), leaderId: optionalId(value.leaderId), rows: list(value.rows, toLoadoutRow) };
 }
 
 function toLoadoutRow(value: unknown): LoadoutRow | null {
@@ -163,6 +189,13 @@ const optionalId = (value: unknown): string | null => (typeof value === 'string'
 function toConditions(value: unknown): AttackConditions {
   if (!isRecord(value)) return noConditions();
   return { halfRange: value.halfRange === true, charged: value.charged === true };
+}
+
+/** The switched-on custom situations: non-empty strings, trimmed and lower-cased, without duplicates. */
+function toSituations(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const keys = value.filter((v): v is string => typeof v === 'string').map((v) => v.trim().toLowerCase());
+  return [...new Set(keys.filter((k) => k !== ''))];
 }
 
 // ---------- shape checks ----------
@@ -258,7 +291,64 @@ function toUnitStats(value: Record<string, unknown>): UnitStats {
 
 function toArmy(value: unknown): Army | null {
   if (!isRecord(value) || typeof value.id !== 'string' || value.id === '' || typeof value.name !== 'string') return null;
-  return { id: value.id, name: value.name };
+  return { id: value.id, name: value.name, abilities: list(value.abilities, toUnitAbility) };
+}
+
+const BUILTIN_KEYS: readonly (keyof AttackConditions)[] = ['halfRange', 'charged'];
+
+function toSituationRef(value: unknown): SituationRef | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.builtin === 'string') return BUILTIN_KEYS.includes(value.builtin as keyof AttackConditions) ? { builtin: value.builtin as keyof AttackConditions } : null;
+  return typeof value.name === 'string' && value.name.trim() !== '' ? { name: value.name } : null;
+}
+
+function toAbilityCondition(value: unknown): AbilityCondition {
+  const c = isRecord(value) ? value : {};
+  return {
+    situations: list(c.situations, toSituationRef),
+    weaponType: c.weaponType === 'ranged' || c.weaponType === 'melee' ? c.weaponType : 'any',
+    targetKeyword: DEFENDER_KEYWORDS.find((k) => k === c.targetKeyword) ?? null,
+  };
+}
+
+const isRoll = (v: unknown): v is 'hit' | 'wound' => v === 'hit' || v === 'wound';
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * One effect of an ability. An unknown kind or a missing / mistyped field drops it; numbers out
+ * of range are kept for validation to flag (the engine ignores them).
+ */
+export function toAbilityEffect(value: unknown): AbilityEffect | null {
+  if (!isRecord(value)) return null;
+  switch (value.kind) {
+    case 'stat':
+      return (value.stat === 'attacks' || value.stat === 'strength' || value.stat === 'damage') && finite(value.amount) ? { kind: 'stat', stat: value.stat, amount: value.amount } : null;
+    case 'ap':
+      return finite(value.amount) ? { kind: 'ap', amount: value.amount } : null;
+    case 'roll':
+      return isRoll(value.roll) && finite(value.amount) ? { kind: 'roll', roll: value.roll, amount: value.amount } : null;
+    case 'critical':
+      return isRoll(value.roll) && finite(value.on) ? { kind: 'critical', roll: value.roll, on: value.on } : null;
+    case 'reroll':
+      return isRoll(value.roll) && (value.which === 'ones' || value.which === 'failed') ? { kind: 'reroll', roll: value.roll, which: value.which } : null;
+    case 'grant':
+      return isRecord(value.abilities) ? { kind: 'grant', abilities: toAbilities(value.abilities) } : null;
+    default:
+      return null;
+  }
+}
+
+/** A unit or army ability: a name and the effects that could be read, with a new id when it has none. */
+export function toUnitAbility(value: unknown): UnitAbility | null {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  return {
+    id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('ability'),
+    name: value.name,
+    description: typeof value.description === 'string' ? value.description : '',
+    appliesTo: value.appliesTo === 'ledUnit' ? 'ledUnit' : 'unit',
+    when: toAbilityCondition(value.when),
+    effects: list(value.effects, toAbilityEffect),
+  };
 }
 
 /** A weapon of a unit: a usable weapon profile, with a new id when it has none. */
@@ -280,5 +370,6 @@ export function toUnit(value: unknown): Unit | null {
     armyId: typeof value.armyId === 'string' ? value.armyId : null,
     ...toUnitStats(value),
     weapons: list(value.weapons, toUnitWeapon),
+    abilities: list(value.abilities, toUnitAbility),
   };
 }

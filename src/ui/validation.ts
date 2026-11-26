@@ -1,6 +1,6 @@
 import { maxValue, tryParseDice } from '../engine/dice';
-import { parseAntiValue } from '../state/abilities';
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile, type Unit, type WeaponAbilities, type WeaponStats } from '../types';
+import { activeAbilities, parseAntiValue } from '../state/abilities';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type AbilityEffect, type DefenderProfile, type Unit, type UnitAbility, type WeaponAbilities, type WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -141,8 +141,78 @@ export function validateUnit(u: Unit, takenNames: readonly string[] = []): Field
     invuln: u.invuln === null ? undefined : intInRange(u.invuln, { min: 2, max: 6 }, 'Invulnerable save'),
     wounds: intInRange(u.wounds, LIMITS.wounds, 'Wounds'),
     weapons: unitWeaponsError(u.weapons),
+    abilities: validateAbilities(u.abilities),
   };
   return prune(errors);
+}
+
+/** Highest +X of a characteristic, improvement of AP, or number of effects of one ability. */
+export const MAX_EFFECT_AMOUNT = 6;
+export const MAX_EFFECTS = 10;
+
+/** The errors of a unit or army ability: its name, its condition (`when`) and its effects (first problem). */
+export function validateAbility(a: UnitAbility, takenNames: readonly string[] = []): FieldErrors<UnitAbility> {
+  const name = a.name.trim();
+  const key = name.toLowerCase();
+  const errors: FieldErrors<UnitAbility> = {
+    name:
+      name === ''
+        ? 'Name is required'
+        : name.length > MAX_WEAPON_NAME
+          ? `Name must be at most ${MAX_WEAPON_NAME} characters`
+          : takenNames.some((n) => n.trim().toLowerCase() === key)
+            ? 'Another ability here already has this name'
+            : undefined,
+    when: situationsError(a),
+    effects:
+      a.effects.length === 0
+        ? 'Add at least one effect'
+        : a.effects.length > MAX_EFFECTS
+          ? `At most ${MAX_EFFECTS} effects`
+          : a.effects.map(effectError).find((e) => e !== undefined),
+  };
+  return prune(errors);
+}
+
+function situationsError(a: UnitAbility): string | undefined {
+  for (const s of a.when.situations) {
+    if ('builtin' in s) continue;
+    const name = s.name.trim();
+    if (name === '') return 'A situation needs a name';
+    if (name.length > MAX_WEAPON_NAME) return `Situation names must be at most ${MAX_WEAPON_NAME} characters`;
+  }
+  return undefined;
+}
+
+/** The problem with one effect, or undefined. */
+export function effectError(e: AbilityEffect): string | undefined {
+  switch (e.kind) {
+    case 'stat':
+      return intInRange(e.amount, { min: 1, max: MAX_EFFECT_AMOUNT }, `+X to ${e.stat === 'attacks' ? 'A' : e.stat === 'strength' ? 'S' : 'D'}`);
+    case 'ap':
+      return intInRange(e.amount, { min: 1, max: MAX_EFFECT_AMOUNT }, 'AP improvement');
+    case 'roll':
+      return e.amount === 1 || e.amount === -1 ? undefined : `The ${e.roll} roll modifier must be +1 or -1`;
+    case 'critical':
+      return Number.isInteger(e.on) && e.on >= 2 && e.on <= 6 ? undefined : `Critical ${e.roll}s must be on 2+ to 6+`;
+    case 'reroll':
+      return undefined;
+    case 'grant':
+      return activeAbilities(e.abilities).length === 0 ? 'Pick at least one weapon ability to gain' : abilityError(e.abilities);
+  }
+}
+
+/** The first problem with a list of abilities (a unit's or an army's): an invalid ability, or two with the same name. */
+export function validateAbilities(abilities: readonly UnitAbility[]): string | undefined {
+  const seen = new Set<string>();
+  for (const a of abilities) {
+    const problems = Object.values(validateAbility(a));
+    if (problems.length > 0) return `${a.name.trim() || 'Unnamed ability'}: ${problems.join(' · ')}`;
+    const key = a.name.trim().toLowerCase();
+    if (seen.has(key)) return `Two abilities are named "${a.name.trim()}"`;
+    seen.add(key);
+  }
+  return undefined;
 }
 
 /** The first problem with a unit's weapons: an invalid profile, or two weapons with the same name. */

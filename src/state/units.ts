@@ -1,4 +1,5 @@
 import type { Army, StoredWeapon, Unit } from '../types';
+import { copyAbility, sameAbilityList } from './unitAbilities';
 import { uid } from './ids';
 import { byName, pickStats, sameCombatStats, sameDefender, statLine } from './presets';
 
@@ -13,7 +14,7 @@ export interface UnitGroup {
 
 /** A new, empty unit (the editor's starting draft). */
 export function newUnit(armyId: string | null = null): Unit {
-  return { id: uid('unit'), name: '', armyId, toughness: 4, save: 3, invuln: null, wounds: 1, keywords: [], weapons: [] };
+  return { id: uid('unit'), name: '', armyId, toughness: 4, save: 3, invuln: null, wounds: 1, keywords: [], weapons: [], abilities: [] };
 }
 
 /** A weapon of a unit copied with its id; shares no objects with `w`. */
@@ -33,17 +34,19 @@ export function copyUnit(u: Unit): Unit {
     wounds: u.wounds,
     keywords: [...u.keywords],
     weapons: u.weapons.map(copyWeapon),
+    abilities: u.abilities.map(copyAbility),
   };
 }
 
-/** Whether two units are identical: name, army, stats, keywords and every weapon (in order). */
+/** Whether two units are identical: name, army, stats, keywords, every weapon and every ability (in order). */
 export function sameUnit(a: Unit, b: Unit): boolean {
   return (
     a.name === b.name &&
     a.armyId === b.armyId &&
     sameDefender({ ...a, models: 0 }, { ...b, models: 0 }) &&
     a.weapons.length === b.weapons.length &&
-    a.weapons.every((w, i) => w.id === b.weapons[i].id && w.name === b.weapons[i].name && sameCombatStats(w, b.weapons[i]))
+    a.weapons.every((w, i) => w.id === b.weapons[i].id && w.name === b.weapons[i].name && sameCombatStats(w, b.weapons[i])) &&
+    sameAbilityList(a.abilities, b.abilities)
   );
 }
 
@@ -53,10 +56,11 @@ export function isNameTaken(names: readonly string[], name: string): boolean {
   return names.some((n) => n.trim().toLowerCase() === key);
 }
 
-/** "T4 · Sv 3+ · W2 · Infantry · 2 weapons". */
+/** "T4 · Sv 3+ · W2 · Infantry · 2 weapons", plus " · 1 ability" when it has abilities. */
 export function unitSummary(u: Unit): string {
   const count = u.weapons.length;
-  return `${statLine(u)} · ${count === 0 ? 'no weapons' : `${count} weapon${count === 1 ? '' : 's'}`}`;
+  const abilities = u.abilities.length === 0 ? '' : ` · ${u.abilities.length} abilit${u.abilities.length === 1 ? 'y' : 'ies'}`;
+  return `${statLine(u)} · ${count === 0 ? 'no weapons' : `${count} weapon${count === 1 ? '' : 's'}`}${abilities}`;
 }
 
 /**

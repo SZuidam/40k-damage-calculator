@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type StoredWeapon, type Unit } from '../types';
+import { noAbilities, type StoredWeapon, type Unit, type UnitAbility } from '../types';
 import { SHARE_FORMAT, SHARE_VERSION, applyImport, buildShareFile, parseShareText, planImport, sameUnitContent, serializeShareFile, uniqueName, type ShareData, type ShareState } from './share';
 
 const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
@@ -16,14 +16,15 @@ const unit = (overrides: Partial<Unit> = {}): Unit => ({
   wounds: 2,
   keywords: ['infantry'],
   weapons: [bolt(), pistol()],
+  abilities: [],
   ...overrides,
 });
 
 function sourceState(): ShareState {
   return {
     armies: [
-      { id: 'sm', name: 'Space Marines' },
-      { id: 'cd', name: 'Chaos Daemons' },
+      { id: 'sm', name: 'Space Marines', abilities: [] },
+      { id: 'cd', name: 'Chaos Daemons', abilities: [] },
     ],
     units: [
       unit(),
@@ -148,10 +149,10 @@ describe('planImport', () => {
 describe('applyImport', () => {
   it('adds units with new ids, creating missing armies by name', () => {
     const target = emptyState();
-    target.armies.push({ id: 'mine', name: 'space marines' });
+    target.armies.push({ id: 'mine', name: 'space marines', abilities: [] });
     const data = roundTrip();
     const summary = applyImport(data, planImport(data, target), target, 'rename');
-    expect(summary).toEqual({ added: 3, renamed: 0, replaced: 0, armies: 1 });
+    expect(summary).toEqual({ added: 3, renamed: 0, replaced: 0, armies: 1, armyRules: 0 });
     expect(target.armies.map((a) => a.name)).toEqual(['space marines', 'Chaos Daemons']);
     const [sm, cd, dummy] = target.units;
     expect(sm.armyId).toBe('mine');
@@ -167,7 +168,7 @@ describe('applyImport', () => {
     const data = roundTrip();
     data.units.push({ ...data.units[0], toughness: 5 }, { ...data.units[0], name: 'Broken', wounds: 0 });
     const summary = applyImport(data, planImport(data, target), target, 'rename');
-    expect(summary).toEqual({ added: 0, renamed: 1, replaced: 0, armies: 0 });
+    expect(summary).toEqual({ added: 0, renamed: 1, replaced: 0, armies: 0, armyRules: 0 });
     expect(target.units.map((u) => u.name)).toEqual(['Intercessors', 'Bloodletters', 'Test dummy', 'Intercessors (2)']);
     expect(target.units[3]).toMatchObject({ armyId: 'sm', toughness: 5 });
   });
@@ -177,7 +178,7 @@ describe('applyImport', () => {
     const data = roundTrip(sourceState(), ['u1']);
     data.units[0] = { ...data.units[0], name: 'INTERCESSORS', toughness: 5, weapons: [data.units[0].weapons[0], { ...data.units[0].weapons[1], name: 'Plasma pistol' }] };
     const summary = applyImport(data, planImport(data, target), target, 'replace');
-    expect(summary).toEqual({ added: 0, renamed: 0, replaced: 1, armies: 0 });
+    expect(summary).toEqual({ added: 0, renamed: 0, replaced: 1, armies: 0, armyRules: 0 });
     const replaced = target.units[0];
     // The saved name and army stay; the stats and weapons come from the file.
     expect(replaced).toMatchObject({ id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 5 });
@@ -193,7 +194,7 @@ describe('applyImport', () => {
     const target = emptyState();
     const data = roundTrip();
     const items = planImport(data, target).filter((i) => i.name === 'Test dummy');
-    expect(applyImport(data, items, target, 'rename')).toEqual({ added: 1, renamed: 0, replaced: 0, armies: 0 });
+    expect(applyImport(data, items, target, 'rename')).toEqual({ added: 1, renamed: 0, replaced: 0, armies: 0, armyRules: 0 });
     expect(target.units.map((u) => u.name)).toEqual(['Test dummy']);
     expect(target.armies).toEqual([]);
   });
@@ -205,5 +206,69 @@ describe('uniqueName', () => {
     expect(uniqueName(['squad'], 'Squad')).toBe('Squad (2)');
     expect(uniqueName(['Squad', 'Squad (2)'], 'Squad')).toBe('Squad (3)');
     expect(uniqueName(['y'.repeat(40)], 'y'.repeat(50))).toBe(`${'y'.repeat(36)} (2)`);
+  });
+});
+
+describe('abilities and army rules', () => {
+  const oath = (): UnitAbility => ({ id: 'a-oath', name: 'Oath', description: '', appliesTo: 'unit', when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] });
+  const shock = (): UnitAbility => ({ id: 'a-shock', name: 'Shock Assault', description: 'Charge!', appliesTo: 'unit', when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null }, effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }] });
+  const content = ({ id: _, ...rest }: UnitAbility) => rest;
+
+  const withAbilities = (): ShareState => {
+    const state = sourceState();
+    state.armies[0].abilities = [oath()];
+    state.units[0].abilities = [shock()];
+    return state;
+  };
+
+  it('exports unit abilities and the rules of the exported units’ armies, without ids', () => {
+    const exported = buildShareFile(withAbilities(), ['u1', 'u2']);
+    expect(exported.armies).toEqual([{ name: 'Space Marines', abilities: [content(oath())] }]);
+    expect(exported.units[0].abilities).toEqual([content(shock())]);
+    expect(JSON.stringify(exported)).not.toContain('"id"');
+    // Bloodletters' army has no rules, and Space Marines are left out when none of its units is exported.
+    expect(buildShareFile(withAbilities(), ['u2']).armies).toEqual([]);
+  });
+
+  it('round trips abilities and army rules', () => {
+    const data = roundTrip(withAbilities());
+    expect(data.units[0].abilities).toEqual([content(shock())]);
+    expect(data.armies).toEqual([{ name: 'Space Marines', abilities: [content(oath())] }]);
+  });
+
+  it('reads files without abilities or armies (older exports of version 3)', () => {
+    const parsed = parseShareText(file([{ name: 'Old', army: null, toughness: 4, save: 3, invuln: null, wounds: 1, keywords: [], weapons: [] }]));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.data.units[0].abilities).toEqual([]);
+    expect(parsed.data.armies).toEqual([]);
+  });
+
+  it('treats a changed ability as different content', () => {
+    const target = withAbilities();
+    target.units[0].abilities[0].effects = [{ kind: 'stat', stat: 'attacks', amount: 2 }];
+    expect(planImport(roundTrip(withAbilities(), ['u1']), target)[0].status).toBe('conflict');
+    expect(planImport(roundTrip(withAbilities(), ['u1']), withAbilities())[0].status).toBe('duplicate');
+  });
+
+  it('imports unit abilities with new ids and merges army rules by name', () => {
+    const data = roundTrip(withAbilities(), ['u1']);
+    data.armies[0].abilities.push({ ...content(oath()), name: 'Bolter Drill', effects: [{ kind: 'critical', roll: 'hit', on: 5 }] });
+    const target = emptyState();
+    target.armies.push({ id: 'mine', name: 'space marines', abilities: [{ ...oath(), id: 'keep-me', effects: [{ kind: 'reroll', roll: 'hit', which: 'ones' }] }] });
+    const summary = applyImport(data, planImport(data, target), target, 'rename');
+    expect(summary).toMatchObject({ added: 1, armies: 0, armyRules: 2 });
+    expect(target.units[0].abilities[0].id).toMatch(/^ability-/);
+    expect(target.armies[0].abilities.map((a) => [a.id, a.name, a.effects[0]])).toEqual([
+      ['keep-me', 'Oath', { kind: 'reroll', roll: 'hit', which: 'failed' }],
+      [expect.stringMatching(/^ability-/), 'Bolter Drill', { kind: 'critical', roll: 'hit', on: 5 }],
+    ]);
+    // Importing again adds the unit under a new name but changes no rules.
+    expect(applyImport(data, planImport(data, target), target, 'rename').armyRules).toBe(0);
+  });
+
+  it('flags a unit with an invalid ability as invalid', () => {
+    const data = roundTrip(withAbilities(), ['u1']);
+    data.units[0].abilities[0].effects = [];
+    expect(planImport(data, emptyState())[0]).toMatchObject({ status: 'invalid', problem: expect.stringContaining('Shock Assault') });
   });
 });

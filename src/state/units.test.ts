@@ -15,12 +15,13 @@ const unit = (overrides: Partial<Unit> = {}): Unit => ({
   wounds: 2,
   keywords: ['infantry'],
   weapons: [bolt(), pistol()],
+  abilities: [],
   ...overrides,
 });
 
 const armies = (): Army[] => [
-  { id: 'sm', name: 'Space Marines' },
-  { id: 'cd', name: 'Chaos Daemons' },
+  { id: 'sm', name: 'Space Marines', abilities: [] },
+  { id: 'cd', name: 'Chaos Daemons', abilities: [] },
 ];
 
 describe('newUnit', () => {

@@ -138,7 +138,7 @@ export class UnitsPanel {
     const taken = this.armyNames();
     const name = await promptName('New army', '', { confirmLabel: 'Create', validate: (n) => (isNameTaken(taken, n) ? ARMY_TAKEN : undefined) });
     if (!name) return;
-    const army: Army = { id: uid('army'), name };
+    const army: Army = { id: uid('army'), name, abilities: [] };
     this.options.armies.push(army);
     this.filter = army.id;
     this.options.onChange();

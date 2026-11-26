@@ -150,7 +150,7 @@ export function openExportModal(state: ShareState): Promise<void> {
         h(
           'div',
           { class: 'modal-body' },
-          h('p', { class: 'modal-hint' }, 'Choose the units to share. Each unit takes its stats, keywords, weapons and the name of its army along.'),
+          h('p', { class: 'modal-hint' }, 'Choose the units to share. Each unit takes its stats, keywords, weapons, abilities and the name of its army along, plus the rules of that army.'),
           picker.element,
           status,
         ),
@@ -181,7 +181,7 @@ function itemTag(item: ImportItem): PickerEntry['tag'] {
   }
 }
 
-function summaryText({ added, renamed, replaced, armies }: ImportSummary): string {
+function summaryText({ added, renamed, replaced, armies, armyRules }: ImportSummary): string {
   const parts = [
     added > 0 ? `${added} added` : '',
     renamed > 0 ? `${renamed} added under a new name` : '',
@@ -190,7 +190,8 @@ function summaryText({ added, renamed, replaced, armies }: ImportSummary): strin
   const total = added + renamed + replaced;
   if (total === 0) return 'Nothing was imported.';
   const created = armies > 0 ? ` Created ${armies} new arm${armies === 1 ? 'y' : 'ies'}.` : '';
-  return `Imported ${total} unit${total === 1 ? '' : 's'}: ${parts.join(', ')}.${created}`;
+  const rules = armyRules > 0 ? ` Added or updated ${armyRules} army rule${armyRules === 1 ? '' : 's'}.` : '';
+  return `Imported ${total} unit${total === 1 ? '' : 's'}: ${parts.join(', ')}.${created}${rules}`;
 }
 
 /** "Import…": paste or open an export, review what it contains, and add the chosen items. */

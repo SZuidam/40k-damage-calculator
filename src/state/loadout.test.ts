@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type Army, type AttackerSelection, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit } from '../types';
+import { noAbilities, noConditions, type Army, type AttackerSelection, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitAbility } from '../types';
 import {
   armyChoices,
   armyOf,
   carriedWeapons,
   defaultArmyId,
   defenderOf,
+  leaderChoices,
   newLoadout,
   reconcileAttacker,
   reconcileDefender,
@@ -27,12 +28,13 @@ const unit = (overrides: Partial<Unit> = {}): Unit => ({
   wounds: 2,
   keywords: ['infantry'],
   weapons: [weapon('w-bolt', 'Bolt rifle', '2'), weapon('w-pistol', 'Bolt pistol'), weapon('w-ccw', 'Close combat weapon', '3')],
+  abilities: [],
   ...overrides,
 });
 
 const armies = (): Army[] => [
-  { id: 'sm', name: 'Space Marines' },
-  { id: 'cd', name: 'Chaos Daemons' },
+  { id: 'sm', name: 'Space Marines', abilities: [] },
+  { id: 'cd', name: 'Chaos Daemons', abilities: [] },
 ];
 
 const row = (weaponId: string, carried: boolean, count: number): LoadoutRow => ({ weaponId, carried, count });
@@ -72,7 +74,7 @@ describe('armies in the dropdown', () => {
   });
 
   it('unitsOfArmy lists one army’s units (or those without an army) by name', () => {
-    const units = [unit({ id: 'b', name: 'Hellblasters' }), unit({ id: 'a', name: 'Aggressors' }), unit({ id: 'c', name: 'Bloodletters', armyId: 'cd' }), unit({ id: 'd', name: 'Dummy', armyId: null })];
+    const units = [unit({ id: 'b', name: 'Hellblasters', abilities: [] }), unit({ id: 'a', name: 'Aggressors', abilities: [] }), unit({ id: 'c', name: 'Bloodletters', armyId: 'cd' }), unit({ id: 'd', name: 'Dummy', armyId: null })];
     expect(unitsOfArmy(units, armies(), 'sm').map((u) => u.id)).toEqual(['a', 'b']);
     expect(unitsOfArmy(units, armies(), 'cd').map((u) => u.id)).toEqual(['c']);
     expect(unitsOfArmy(units, armies(), null).map((u) => u.id)).toEqual(['d']);
@@ -88,17 +90,17 @@ describe('armies in the dropdown', () => {
 
 describe('reconcile', () => {
   it('syncs the attacker’s loadout and moves its army to the unit’s army', () => {
-    const sel: AttackerSelection = { armyId: 'cd', unitId: 'u1', rows: [row('w-pistol', true, 2), row('w-gone', true, 1)] };
+    const sel: AttackerSelection = { armyId: 'cd', unitId: 'u1', leaderId: null, rows: [row('w-pistol', true, 2), row('w-gone', true, 1)] };
     reconcileAttacker(sel, armies(), [unit()]);
-    expect(sel).toEqual({ armyId: 'sm', unitId: 'u1', rows: [row('w-pistol', true, 2), row('w-bolt', false, 5), row('w-ccw', false, 5)] });
+    expect(sel).toEqual({ armyId: 'sm', unitId: 'u1', leaderId: null, rows: [row('w-pistol', true, 2), row('w-bolt', false, 5), row('w-ccw', false, 5)] });
   });
 
   it('unpicks a deleted unit and keeps the army dropdown on an existing choice', () => {
-    const sel: AttackerSelection = { armyId: 'gone', unitId: 'gone', rows: [row('w-bolt', true, 5)] };
+    const sel: AttackerSelection = { armyId: 'gone', unitId: 'gone', leaderId: null, rows: [row('w-bolt', true, 5)] };
     reconcileAttacker(sel, armies(), [unit()]);
-    expect(sel).toEqual({ armyId: 'sm', unitId: null, rows: [] });
+    expect(sel).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
 
-    const kept: AttackerSelection = { armyId: 'cd', unitId: null, rows: [] };
+    const kept: AttackerSelection = { armyId: 'cd', unitId: null, leaderId: null, rows: [] };
     reconcileAttacker(kept, armies(), [unit()]);
     expect(kept.armyId).toBe('cd');
   });
@@ -148,5 +150,49 @@ describe('the attack', () => {
     const all = [row('a', true, 1), row('b', false, 1), row('c', true, 1), row('d', true, 1), row('e', false, 1)];
     expect(reorderCarried(all, [2, 0, 1]).map((r) => r.weaponId)).toEqual(['d', 'b', 'a', 'c', 'e']);
     expect(reorderCarried(all, [0, 1, 2]).map((r) => r.weaponId)).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+});
+
+describe('abilities in the loadout', () => {
+  const shock: UnitAbility = {
+    id: 'a-shock',
+    name: 'Shock Assault',
+    description: '',
+    appliesTo: 'unit',
+    when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null },
+    effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }],
+  };
+  const oath: UnitAbility = { ...shock, id: 'a-oath', name: 'Oath', when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] };
+  const squad = () => {
+    const u = unit();
+    u.weapons[2].type = 'melee';
+    return u;
+  };
+  const allCarried = (u: Unit) => newLoadout(u).map((r) => ({ ...r, carried: true }));
+
+  it('applies an ability only to the weapons it is active for', () => {
+    const u = squad();
+    const charged = { halfRange: false, charged: true };
+    const profiles = resolveLoadout(u, allCarried(u), charged, { abilities: [shock], situations: [], keywords: ['infantry'] });
+    expect(profiles.map((p) => p.attacks)).toEqual(['2', '1', '4']);
+    expect(resolveLoadout(u, allCarried(u), noConditions(), { abilities: [shock], situations: [], keywords: null }).map((p) => p.attacks)).toEqual(['2', '1', '3']);
+  });
+
+  it('switches custom situations on by name', () => {
+    const u = squad();
+    const off = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], situations: [], keywords: null });
+    const on = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], situations: ['oath target'], keywords: null });
+    expect(off.every((p) => p.modifiers.rerollHits === 'none')).toBe(true);
+    expect(on.every((p) => p.modifiers.rerollHits === 'failed')).toBe(true);
+  });
+
+  it('offers the units of the same army that can lead', () => {
+    const lead: UnitAbility = { ...shock, id: 'a-lead', appliesTo: 'ledUnit' };
+    const captain = unit({ id: 'cap', name: 'Captain', abilities: [lead] });
+    const chaplain = unit({ id: 'chap', name: 'Chaplain', abilities: [lead] });
+    const outsider = unit({ id: 'lord', name: 'Daemon Prince', armyId: 'cd', abilities: [lead] });
+    const plain = unit({ id: 'tac', name: 'Tacticals' });
+    const units = [unit(), chaplain, captain, outsider, plain];
+    expect(leaderChoices(units[0], armies(), units).map((u) => u.id)).toEqual(['cap', 'chap']);
   });
 });
