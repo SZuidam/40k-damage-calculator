@@ -143,7 +143,7 @@ describe('validateAbility', () => {
     name: 'Shock Assault',
     description: '',
     appliesTo: 'unit',
-    when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null },
+    when: { toggle: false, conditions: ['charged'], weaponType: 'melee', targetKeyword: null },
     effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }],
     ...overrides,
   });
@@ -171,8 +171,9 @@ describe('validateAbility', () => {
     expect(effectError({ kind: 'grant', abilities: { ...noAbilities(), anti: { vehicle: 9 } } })).toMatch(/Anti-Vehicle/);
   });
 
-  it('requires situation names', () => {
-    expect(validateAbility(ability({ when: { situations: [{ name: ' ' }], weaponType: 'any', targetKeyword: null } })).when).toMatch(/needs a name/);
+  it('allows descriptions of up to 2000 characters', () => {
+    expect(validateAbility(ability({ description: 'x'.repeat(2000) }))).toEqual({});
+    expect(validateAbility(ability({ description: 'x'.repeat(2001) })).description).toMatch(/at most 2000/);
   });
 
   it('flags invalid and duplicate abilities of a unit', () => {

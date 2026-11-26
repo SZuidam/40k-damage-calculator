@@ -2,6 +2,7 @@ import { abilitySummary } from '../state/unitAbilities';
 import type { UnitAbility } from '../types';
 import { openAbilityModal } from './abilityModal';
 import { h } from './dom';
+import { renderMarkup } from './markup';
 import { confirmDialog } from './modal';
 
 export interface AbilityListOptions {
@@ -13,8 +14,6 @@ export interface AbilityListOptions {
   label: string;
   /** Text of the add button. */
   addLabel: string;
-  /** Custom situation names in use anywhere, for the ability modal. */
-  knownSituations: () => string[];
   /** An ability was added, edited or removed. */
   onChange: () => void;
 }
@@ -36,7 +35,7 @@ export function abilityList(options: AbilityListOptions): HTMLDivElement {
   const element = h('div', { class: 'ability-manager' }, list, empty, h('div', { class: 'panel-actions-group' }, add));
 
   const takenNames = (except?: UnitAbility) => abilities.filter((a) => a !== except).map((a) => a.name);
-  const modalOptions = (except?: UnitAbility) => ({ scope: options.scope, takenNames: takenNames(except), knownSituations: options.knownSituations() });
+  const modalOptions = (except?: UnitAbility) => ({ scope: options.scope, takenNames: takenNames(except) });
 
   const render = (focusSelector?: string) => {
     list.replaceChildren(
@@ -67,7 +66,7 @@ export function abilityList(options: AbilityListOptions): HTMLDivElement {
             { class: 'manage-text' },
             h('span', { class: 'manage-name' }, a.name),
             h('span', { class: 'manage-detail' }, abilityDetail(a, options.scope)),
-            a.description ? h('span', { class: 'manage-detail ability-description' }, a.description) : null,
+            a.description ? h('details', { class: 'ability-description' }, h('summary', {}, 'Rule text'), h('div', { class: 'markup' }, ...renderMarkup(a.description))) : null,
           ),
           h('div', { class: 'row-actions' }, edit, remove),
         );

@@ -247,7 +247,7 @@ describe('v4 → v5', () => {
   it('keeps the armies, units, conditions and iterations, and drops the rest', () => {
     const storage = memoryStorage({ [V4_STORAGE_KEY]: JSON.stringify(v4()) });
     const state = loadState(storage);
-    expect(Object.keys(state).sort()).toEqual(['armies', 'attacker', 'conditions', 'defender', 'iterations', 'situations', 'units']);
+    expect(Object.keys(state).sort()).toEqual(['armies', 'attacker', 'conditions', 'defender', 'iterations', 'toggles', 'units']);
     expect(state.armies).toEqual(v4().armies);
     expect(state.units).toEqual([intercessors()]);
     expect(state.conditions).toEqual({ halfRange: false, charged: true });
@@ -347,8 +347,8 @@ describe('weapon type on load', () => {
   });
 });
 
-describe('abilities, leader and situations on load', () => {
-  const oath = { id: 'a-oath', name: 'Oath', description: 'Oath of Moment', appliesTo: 'unit', when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] };
+describe('abilities, leader and toggles on load', () => {
+  const oath = { id: 'a-oath', name: 'Oath', description: 'Oath of **Moment**\n- re-roll', appliesTo: 'unit', when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] };
 
   it('gives units and armies saved without abilities none', () => {
     const { abilities: _, ...withoutAbilities } = intercessors();
@@ -356,23 +356,23 @@ describe('abilities, leader and situations on load', () => {
     expect(state.units[0].abilities).toEqual([]);
     expect(state.armies[0].abilities).toEqual([]);
     expect(state.attacker.leaderId).toBeNull();
-    expect(state.situations).toEqual([]);
+    expect(state.toggles).toEqual([]);
   });
 
-  it('round trips unit and army abilities, the leader and the situations', () => {
+  it('round trips unit and army abilities, the leader and the toggles', () => {
     const storage = memoryStorage();
-    const rites = { ...oath, id: 'a-rites', name: 'Rites', appliesTo: 'ledUnit', when: { situations: [], weaponType: 'melee', targetKeyword: 'monster' }, effects: [{ kind: 'critical', roll: 'hit', on: 5 }, { kind: 'grant', abilities: { ...noAbilities(), lethalHits: true } }] };
+    const rites = { ...oath, id: 'a-rites', name: 'Rites', appliesTo: 'ledUnit', when: { toggle: false, conditions: ['halfRange', 'charged'], weaponType: 'melee', targetKeyword: 'monster' }, effects: [{ kind: 'critical', roll: 'hit', on: 5 }, { kind: 'grant', abilities: { ...noAbilities(), lethalHits: true } }] };
     const state = load(
       v5({
         armies: [{ id: 'sm', name: 'Space Marines', abilities: [oath] }],
         units: [intercessors(), { ...intercessors(), id: 'cap', name: 'Captain', weapons: [], abilities: [rites] }],
         attacker: { ...v5().attacker, leaderId: 'cap' },
-        situations: ['oath target'],
+        toggles: ['a-oath'],
       }),
     );
     expect(state.attacker.leaderId).toBe('cap');
     expect(state.armies[0].abilities).toEqual([oath]);
-    expect(state.situations).toEqual(['oath target']);
+    expect(state.toggles).toEqual(['a-oath']);
     saveState(state, storage);
     expect(loadState(storage)).toEqual(state);
   });
@@ -381,7 +381,7 @@ describe('abilities, leader and situations on load', () => {
     const broken = {
       name: 'Kept',
       appliesTo: 'aura',
-      when: { situations: [{ builtin: 'charged' }, { builtin: 'flying' }, { name: '  ' }, 'x'], weaponType: 'psychic', targetKeyword: 'titan' },
+      when: { toggle: 'yes', conditions: ['charged', 'flying', 'charged', 3], weaponType: 'psychic', targetKeyword: 'titan' },
       effects: [
         { kind: 'stat', stat: 'attacks', amount: 9 },
         { kind: 'stat', stat: 'toughness', amount: 1 },
@@ -395,7 +395,7 @@ describe('abilities, leader and situations on load', () => {
     expect(abilities).toHaveLength(1);
     const [kept] = abilities;
     expect(kept.id).toMatch(/^ability-/);
-    expect(kept).toMatchObject({ name: 'Kept', description: '', appliesTo: 'unit', when: { situations: [{ builtin: 'charged' }], weaponType: 'any', targetKeyword: null } });
+    expect(kept).toMatchObject({ name: 'Kept', description: '', appliesTo: 'unit', when: { toggle: false, conditions: ['charged'], weaponType: 'any', targetKeyword: null } });
     // Out of range stays for validation to flag; unknown stats, rolls, re-rolls and kinds are dropped.
     expect(kept.effects).toEqual([{ kind: 'stat', stat: 'attacks', amount: 9 }]);
   });
@@ -415,8 +415,17 @@ describe('abilities, leader and situations on load', () => {
     expect(leaderOf('u1', [{ ...intercessors(), abilities: [lead] }])).toBeNull();
   });
 
-  it('keeps the switched-on situations as trimmed, lower-cased strings without duplicates', () => {
-    expect(load(v5({ situations: [' Oath Target ', 'oath target', '', 3, null, 'Ingress move'] })).situations).toEqual(['oath target', 'ingress move']);
-    expect(load(v5({ situations: 'oath' })).situations).toEqual([]);
+  it('turns the situations of older saves into built-in conditions and a toggle', () => {
+    const old = (situations: unknown[]) => load(v5({ units: [{ ...intercessors(), abilities: [{ ...oath, when: { situations, weaponType: 'any', targetKeyword: null } }] }] })).units[0].abilities[0].when;
+    expect(old([{ builtin: 'charged' }, { name: 'Oath target' }, { builtin: 'halfRange' }, { builtin: 'flying' }])).toEqual({ toggle: true, conditions: ['halfRange', 'charged'], weaponType: 'any', targetKeyword: null });
+    expect(old([{ name: '  ' }, { builtin: 'charged' }, 'x'])).toEqual({ toggle: false, conditions: ['charged'], weaponType: 'any', targetKeyword: null });
+  });
+
+  it('keeps the toggles of abilities switched on by hand, without duplicates', () => {
+    const armies = [{ id: 'sm', name: 'Space Marines', abilities: [oath, { ...oath, id: 'a-always', name: 'Always', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null } }] }];
+    expect(load(v5({ armies, toggles: ['a-oath', 'a-oath', '', 3, null, 'gone', 'a-always'] })).toggles).toEqual(['a-oath']);
+    expect(load(v5({ armies, toggles: 'a-oath' })).toggles).toEqual([]);
+    // The switched-on situations of older saves are not carried over.
+    expect(load(v5({ armies, situations: ['oath target'] })).toggles).toEqual([]);
   });
 });

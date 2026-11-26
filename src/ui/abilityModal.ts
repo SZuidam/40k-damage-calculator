@@ -1,8 +1,9 @@
-import { BUILTIN_SITUATIONS, conditionSummary, copyAbility, emptyGrant, newAbility, sameSituation, situationFromText, situationName } from '../state/unitAbilities';
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, WEAPON_TYPE_NAMES, type AbilityEffect, type AbilityTarget, type DefenderKeyword, type SituationRef, type UnitAbility, type WeaponType } from '../types';
+import { BUILTIN_CONDITIONS, conditionSummary, copyAbility, emptyGrant, newAbility, sortConditions } from '../state/unitAbilities';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, WEAPON_TYPE_NAMES, type AbilityEffect, type AbilityTarget, type DefenderKeyword, type UnitAbility, type WeaponType } from '../types';
 import { h, select, setFieldError } from './dom';
 import { openModal } from './modal';
-import { MAX_EFFECTS, MAX_WEAPON_NAME, hasErrors, validateAbility } from './validation';
+import { renderMarkup } from './markup';
+import { MAX_DESCRIPTION, MAX_EFFECTS, MAX_WEAPON_NAME, hasErrors, validateAbility } from './validation';
 import { weaponAbilityEditor } from './weaponAbilityEditor';
 
 export interface AbilityModalOptions {
@@ -10,11 +11,7 @@ export interface AbilityModalOptions {
   scope: 'unit' | 'army';
   /** Names the ability may not have (the other abilities of the same unit or army). */
   takenNames: readonly string[];
-  /** Custom situation names used anywhere, offered while typing a condition. */
-  knownSituations: readonly string[];
 }
-
-export const MAX_DESCRIPTION = 200;
 
 /** The effect choices of the "Effect" dropdown, each a kind with its first field fixed. */
 const EFFECT_CHOICES: { value: string; label: string; create: () => AbilityEffect; matches: (e: AbilityEffect) => boolean }[] = [
@@ -57,8 +54,8 @@ function segmented<T extends string>(name: string, legend: string, choices: { va
 
 /**
  * Create (no `initial`) or edit a unit ability or army rule in a modal: its name, an optional
- * description, whom it helps (units only), when it applies (situations, weapon type, target
- * keyword) and its effects. Resolves the saved ability, or null when cancelled.
+ * description (with markup and a live preview), whom it helps (units only), when it applies
+ * (switched on by hand, built-in conditions, weapon type, target keyword) and its effects. Resolves the saved ability, or null when cancelled.
  */
 export function openAbilityModal(initial: UnitAbility | undefined, options: AbilityModalOptions): Promise<UnitAbility | null> {
   const draft = initial ? copyAbility(initial) : newAbility();
@@ -76,58 +73,38 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
     content: (close) => {
       const name = h('input', { id: id('name'), type: 'text', value: draft.name, autocomplete: 'off', maxlength: MAX_WEAPON_NAME, placeholder: 'e.g. Shock Assault' });
       nameInput = name;
-      const description = h('input', { id: id('description'), type: 'text', value: draft.description, autocomplete: 'off', maxlength: MAX_DESCRIPTION, placeholder: 'Optional: the rule text, for your own reference' });
+      const description = h('textarea', { id: id('description'), class: 'ability-description-input', rows: 5, maxlength: MAX_DESCRIPTION, placeholder: 'Optional: the rule text, for your own reference' });
+      description.value = draft.description;
+      const descriptionCount = h('span', { class: 'field-count', id: id('description-count') });
+      const descriptionPreview = h('div', { class: 'markup ability-description-preview', 'aria-label': 'Preview of the description' });
+      description.setAttribute('aria-describedby', `${id('description-hint')} ${descriptionCount.id}`);
+      const renderDescription = () => {
+        descriptionCount.textContent = `${draft.description.length} / ${MAX_DESCRIPTION}`;
+        descriptionPreview.replaceChildren(...renderMarkup(draft.description));
+        descriptionPreview.hidden = draft.description.trim() === '';
+      };
       const errors = h('p', { class: 'row-errors', id: id('errors'), 'aria-live': 'polite' });
       const cancel = h('button', { type: 'button', class: 'button secondary' }, 'Cancel');
       const save = h('button', { type: 'submit', class: 'button primary' }, initial ? 'Save' : 'Create');
       cancel.addEventListener('click', () => close(null));
 
       // ---------- when ----------
-      const situationList = h('ul', { class: 'ability-list', 'aria-label': 'Situations this ability needs' });
-      const situationInput = h('input', { id: id('situation'), type: 'text', autocomplete: 'off', maxlength: MAX_WEAPON_NAME, list: id('situations'), placeholder: 'e.g. Charged, Ingress move' });
-      const datalist = h('datalist', { id: id('situations') });
-      const addSituation = h('button', { type: 'button', class: 'button secondary' }, 'Add');
       const summary = h('p', { class: 'modal-hint ability-when-summary', 'aria-live': 'polite' });
-
-      const renderSituations = () => {
-        situationList.replaceChildren(
-          ...(draft.when.situations.length === 0
-            ? [h('li', { class: 'ability-empty' }, 'Always (no situation needed)')]
-            : draft.when.situations.map((ref, i) => {
-                const label = situationName(ref);
-                const remove = h('button', { type: 'button', class: 'ability-remove', 'aria-label': `Remove ${label}`, title: 'Remove' }, '✕');
-                remove.addEventListener('click', () => {
-                  draft.when.situations.splice(i, 1);
-                  renderSituations();
-                  validate();
-                  situationInput.focus();
-                });
-                return h('li', { class: `chip ability-chip${'builtin' in ref ? '' : ' situation-custom'}`, title: 'builtin' in ref ? 'Built-in condition' : 'Your own situation: it gets a toggle on the main page' }, h('span', {}, label), remove);
-              })),
-        );
-        // Offer what isn't picked yet: the built-in conditions and every name already in use.
-        const offered: SituationRef[] = [...BUILTIN_SITUATIONS.map((b) => ({ builtin: b.key })), ...options.knownSituations.map((n) => ({ name: n }))];
-        datalist.replaceChildren(
-          ...offered.filter((ref) => !draft.when.situations.some((s) => sameSituation(s, ref))).map((ref) => h('option', { value: 'builtin' in ref ? BUILTIN_SITUATIONS.find((b) => b.key === ref.builtin)!.toggle : ref.name })),
-        );
+      const togglePill = (inputId: string, label: string, title: string, checked: boolean, onChange: (checked: boolean) => void) => {
+        const box = h('input', { id: inputId, type: 'checkbox', class: 'toggle-input', checked });
+        box.addEventListener('change', () => {
+          onChange(box.checked);
+          validate();
+        });
+        return h('label', { class: 'toggle-pill', title }, box, h('span', {}, label));
       };
-      const commitSituation = () => {
-        const text = situationInput.value.trim();
-        if (text === '') return;
-        const ref = situationFromText(text);
-        if (!draft.when.situations.some((s) => sameSituation(s, ref))) draft.when.situations.push(ref);
-        situationInput.value = '';
-        renderSituations();
-        validate();
-        situationInput.focus();
-      };
-      addSituation.addEventListener('click', commitSituation);
-      situationInput.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        // Add the situation instead of submitting the form.
-        event.preventDefault();
-        commitSituation();
-      });
+      const toggle = togglePill(id('toggle'), 'Switched on by hand', 'The ability’s name becomes a toggle on the main page, and it only applies while that is on.', draft.when.toggle, (on) => (draft.when.toggle = on));
+      const builtins = BUILTIN_CONDITIONS.map(({ key, toggle: label }) =>
+        togglePill(id(`condition-${key}`), label, `Only while “${label}” is on on the main page.`, draft.when.conditions.includes(key), (on) => {
+          draft.when.conditions = sortConditions(on ? [...draft.when.conditions, key] : draft.when.conditions.filter((k) => k !== key));
+        }),
+      );
+      const needs = h('fieldset', { class: 'toggle-group ability-needs' }, h('legend', {}, 'Needs (all must be on)'), h('div', { class: 'toggle-pills' }, toggle, ...builtins));
 
       const weaponType = segmented<WeaponType | 'any'>(
         id('weapon-type'),
@@ -256,19 +233,30 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
         draft.name = name.value;
         validate();
       });
-      description.addEventListener('input', () => (draft.description = description.value));
+      description.addEventListener('input', () => {
+        draft.description = description.value;
+        renderDescription();
+        validate();
+      });
 
       const form = h(
         'form',
         { class: 'modal-body ability-form', novalidate: true },
-        h('div', { class: 'ability-names' }, h('div', { class: 'field field--name' }, h('label', { for: name.id }, 'Name'), name), h('div', { class: 'field' }, h('label', { for: description.id }, 'Description'), description)),
+        h('div', { class: 'field field--name' }, h('label', { for: name.id }, 'Name'), name),
+        h(
+          'div',
+          { class: 'field ability-description-field' },
+          h('div', { class: 'field-label-row' }, h('label', { for: description.id }, 'Description'), descriptionCount),
+          description,
+          h('p', { class: 'modal-hint', id: id('description-hint') }, 'Markup: **bold**, *italic*, lines starting with "- " or "1. " for lists, a blank line for a new paragraph.'),
+          descriptionPreview,
+        ),
         appliesTo,
         h(
           'section',
           { class: 'ability-section', 'aria-labelledby': id('when-title') },
           h('h3', { id: id('when-title') }, 'When'),
-          h('div', { class: 'field' }, h('label', { for: situationInput.id }, 'Situations (all must be on)'), h('div', { class: 'situation-add' }, situationInput, addSituation), datalist),
-          situationList,
+          needs,
           h('div', { class: 'ability-when-grid' }, weaponType, h('div', { class: 'field' }, h('label', { for: target.id }, 'Target'), target)),
           summary,
         ),
@@ -280,7 +268,7 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
           h('div', { class: 'panel-actions-group' }, addEffect),
         ),
         errors,
-        h('p', { class: 'modal-hint' }, 'Type a situation of your own (e.g. "Ingress move") to get a toggle for it on the main page. Hit and wound modifiers add up to at most +1 / -1.'),
+        h('p', { class: 'modal-hint' }, 'Switch on by hand what the page can’t know, like “the Oath target” or “after an Ingress move”: the ability then gets its own toggle on the main page. Hit and wound modifiers add up to at most +1 / -1.'),
         h('div', { class: 'modal-actions' }, cancel, save),
       );
       form.addEventListener('submit', (event) => {
@@ -291,12 +279,11 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
           ...draft,
           name: draft.name.trim(),
           description: draft.description.trim(),
-          when: { ...draft.when, situations: draft.when.situations.map((s) => ('builtin' in s ? s : { name: s.name.trim() })) },
         });
       });
       // A new ability starts with one effect to fill in.
       if (!initial && draft.effects.length === 0) draft.effects.push(EFFECT_CHOICES[0].create());
-      renderSituations();
+      renderDescription();
       renderEffects();
       validate();
       return form;

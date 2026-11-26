@@ -40,7 +40,8 @@ src/
     presets.ts          pickStats, sameCombatStats, sameDefender, byName, statsSummary, statLine
     units.ts            armies and units: newUnit, copyUnit, sameUnit, isNameTaken, unitSummary, groupUnits, unitsInArmy, deleteArmy
     share.ts            unit export file (buildShareFile / serializeShareFile, version 3, with unit abilities and army rules), parseShareText, planImport, applyImport, mergeArmyRules, sameUnitContent, uniqueName
-    unitAbilities.ts    user-defined unit / leader / army abilities: abilitiesFor, isActive / activeFor / conditionNeeds, situationsInUse, situationFromText, applyAbilities (+ addToDice, grantAbilities), copies, comparison and summaries
+    unitAbilities.ts    user-defined unit / leader / army abilities: abilitiesFor, isActive / activeFor / abilityNeeds, pruneToggles, BUILTIN_CONDITIONS, applyAbilities (+ addToDice, grantAbilities), copies, comparison and summaries
+    banners.ts          unit banner images (unit id → data URL) under their own localStorage key: loadBanners / saveBanners / pruneBanners, isBannerData; never exported
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateLoadoutRow / validateDefender / validateUnit / validateIterations, abilityValueError, antiValueError, LIMITS
@@ -49,7 +50,9 @@ src/
     menu.ts             Menu class: ⋯ button + menu (arrow keys, Esc, click outside, disabled items with a reason)
     weaponModal.ts      openWeaponModal(initial?, { takenNames? }): create or edit a weapon profile of a unit (Ranged / Melee, stats, abilities)
     weaponAbilityEditor.ts  weaponAbilityEditor(): the "Add ability…" dropdown + chips, shared by the weapon modal and "Gain weapon abilities" effects
-    abilityModal.ts     openAbilityModal(initial?, { scope, takenNames, knownSituations }): create or edit a unit ability or army rule
+    abilityModal.ts     openAbilityModal(initial?, { scope, takenNames }): create or edit a unit ability or army rule
+    markup.ts           parseMarkup / renderMarkup / markupToText: light markup (bold, italic, lists, paragraphs) for ability descriptions, built as DOM nodes
+    bannerImage.ts      prepareBanner(file): scale a picked image to fit 1200 × 800 and encode it as a WebP data URL of at most 600k characters
     abilityList.ts      abilityList(): a list of abilities with ✎ / ✕ / + New, for the unit editor and the army rules dialog
     abilitiesLine.ts    renderAbilitiesLine() and abilityStatus(): the main page's "Abilities" line (active / "Needs: …")
     abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta or the Y of Anti-X Y+
@@ -60,7 +63,7 @@ src/
     unitsPanel.ts       UnitsPanel class (Units tab): army filter + ⋯ (New army… / Rename… / Delete), units grouped by army, unit editor on a draft with its own weapons
     statFields.ts       SAVE_OPTIONS / INVULN_OPTIONS and keywordToggles(), for the unit editor
     shareModal.ts       "Export…" (pick units grouped by army, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
-    conditionsForm.ts   renderAttackConditions() → { render() }: the "Within half range" / "Charged this turn" toggles plus one per custom situation in use
+    conditionsForm.ts   renderAttackConditions(): the "Within half range" / "Charged this turn" toggles
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
 ```
 
@@ -387,6 +390,26 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 **Storage / share / validation:** the key stays `damage-calculator:v5` (additive): units and armies without abilities get none, malformed abilities (no name) and effects (unknown kind or fields) are dropped, out-of-range numbers kept for validation, `leaderId` reconciled, `situations` trimmed, lower-cased and de-duplicated. Share files stay version 3: units carry `abilities` (no ids) and the file has `armies: { name, abilities }[]` for the exported units' armies that have rules. `sameUnitContent` compares abilities, so a changed ability is "Name in use in this army". Importing merges the rules into the armies of the imported units by ability name (`mergeArmyRules`: new names added, a changed rule replaced in place keeping its id, invalid rule sets skipped); the summary says "Added or updated N army rules." `validateAbility` (name 1–40 and unique within the unit / army, situation names, 1–10 effects, amounts 1–6, modifiers ±1, thresholds 2–6, a grant with at least one valid weapon ability) and `validateAbilities` (used by `validateUnit` and imports).
 
 **Verification:** `npm test` 318/318 (new `state/unitAbilities.test.ts`; engine tests for hit modifiers and caps, critical hits / wounds on 5+, re-roll 1s and failed hits incl. hand values (3+ with re-roll 1s: 2/3 + 1/6 · 2/3), re-rolled hits feeding Sustained / Lethal, wound re-rolls with Twin-linked, and sim-vs-exact for re-rolled hits + Sustained + Lethal, modifiers past the cap, criticals on 5+ with Devastating Wounds; storage round trip and repair of abilities, leader and situations; share round trip incl. army rules, conflicts and merging; loadout resolution and leader choices; validation; `abilityStatus`). `npm run build` is clean. Checked in Chrome: Shock Assault (Charged · Melee: +1 A) created through the modal on the Intercessor Squad, a Captain with Rites of Battle (re-roll hits of 1, for the unit it leads) and an army rule Oath of Moment (Oath target: re-roll failed hits). The Led by dropdown and the Oath target toggle appeared; 5 Intercessors with close combat weapons into 5 Intercessors gave 1.66 damage (hand: 1.667), 2.20 after charging (2.222), 2.62 led by the Captain (2.593) and 2.96 with the Oath target on (2.963); chips showed `A 3+1` and "Re-roll failed hits"; adding "Gain Lethal Hits" to the army rule showed a dashed Lethal Hits on every row; an export of both units re-imported as "Already saved" and into an empty state with the army rule and the leader ability intact; the leader and toggles survived a reload; no console errors. A real phone-width viewport was not checked.
+
+## Ability toggles and rule text (session 18, 2026-11-26, branch `unit-abilities`)
+
+**Why:** feedback on session 17: custom situations ("Oath target") were added to the Conditions row, which grows with long names. Instead, an ability that the page can't detect is its own toggle, by its name, in the Abilities line. And the description should hold the full rule text, with markup.
+
+**Model:** `SituationRef` is gone. `AbilityCondition` = `{ toggle: boolean, conditions: (keyof AttackConditions)[], weaponType, targetKeyword }`: `toggle` means "switched on by hand", `conditions` the built-in half range / charged (all must be on, kept in `BUILTIN_CONDITIONS` order by `sortConditions`). `StoredState.situations` became `toggles`: the ids of the switched-on abilities (page state only). `AbilityContext.toggles`, `LoadoutAbilities.toggles`; `abilityNeeds(ability, type, ctx)` replaces `conditionNeeds` and reports `toggle`. `conditionSummary` reads `Toggled · Charged · Melee`.
+
+**Storage / share:** still `damage-calculator:v5` and share version 3. Abilities saved with the old `situations` load with their `{ builtin }` refs as `conditions`, and any `{ name }` makes them `toggle: true` (so an export from before still imports). Old switched-on situations are not carried over; `toggles` are de-duplicated and pruned to abilities that still exist with `toggle` (`pruneToggles`, also after every Units-tab change).
+
+**UI:** the Conditions row only has the two built-ins (`renderAttackConditions` no longer re-renders). In the Abilities line an ability with `toggle` is a toggle pill with its name: filled while it applies, dashed with the reason ("Needs: Half range") when it is on but something else is missing; other abilities stay status chips. Ability modal: the situation text input and datalist are replaced by a "Needs (all must be on)" row of pills: *Switched on by hand*, *Within half range*, *Charged this turn*. Description is a textarea of up to 2000 characters (`MAX_DESCRIPTION` in validation.ts, also validated) with a counter, a markup hint and a live preview; the Units tab shows it folded under "Rule text", and the main-page tooltip shows it as plain text (`markupToText`).
+
+**Verification:** `npm test` 323/323 (new `ui/markup.test.ts`; toggles in `isActive` / `abilityNeeds` / `abilityStatus` / `resolveLoadout`, `pruneToggles`, legacy `situations` migration and `toggles` on load, description length). `npm run build` is clean. Checked in Chrome with a save in the old format: the Conditions row shows only the built-ins, Oath of Moment and Ingress move became toggle pills, Ingress move switched on read "Needs: Half range" until half range was on, both applied (BS 3+ (+1), Re-roll failed hits), the save held `toggles` and no `situations`; the army rule's rule text rendered bold, italic and a list in the Units tab and in the modal preview; unticking *Switched on by hand* turned Oath into a plain chip and dropped its toggle; no console errors. Light mode and phone width were not checked.
+
+## Unit banner images (session 18, 2026-11-26, branch `unit-abilities`)
+
+**What:** each unit can have a banner image picked from the local PC. When the unit attacks, it is shown faintly (22% opacity, `cover`, fading out at the bottom) as a header banner: from the top of the Attacker panel, behind the heading and explanation, down to the Army / Unit / Led by pickers, edge to edge with the panel's rounded top corners (`index.html` wraps the panel head and `#attacker-picker` in `#attacker-head`). It does not reach the conditions or weapons. Decided with the user: per unit, excluded from export.
+
+**How:** the unit editor has a **Banner** section (preview, *Choose image… / Replace image…*, *Remove*), part of the draft: written on Save, dropped on Back (and it counts as an unsaved change). `prepareBanner` scales the image down and encodes WebP, lowering the quality until it fits; the result goes into `banners` (unit id → data URL), stored under `damage-calculator:banners`, separate from `StoredState` so the big strings aren't rewritten on every input change and can't leak into exports. If storage is full, Save keeps the editor open with "There is no room left to store this image…" and the old banner stays. Banners of deleted units are pruned in `onUnitsChanged`. Only `data:image/(png|jpeg|webp|gif);base64,…` values are ever put in a style (`isBannerData`).
+
+**Verification:** `npm test` 328/328 (new `state/banners.test.ts`). `npm run build` is clean. Checked in Chrome: a 3000 × 1500 PNG (4.3 MB) became a 20 kB WebP, the editor preview showed it, Save stored it under its own key (the main state holds no image data), the banner appeared behind the heading and pickers only, hid when Captain was picked as attacker and came back for the Intercessor Squad; no console errors. The storage-full path and light mode were not checked in the browser.
 
 ## Housekeeping
 

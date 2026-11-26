@@ -210,8 +210,8 @@ describe('uniqueName', () => {
 });
 
 describe('abilities and army rules', () => {
-  const oath = (): UnitAbility => ({ id: 'a-oath', name: 'Oath', description: '', appliesTo: 'unit', when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] });
-  const shock = (): UnitAbility => ({ id: 'a-shock', name: 'Shock Assault', description: 'Charge!', appliesTo: 'unit', when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null }, effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }] });
+  const oath = (): UnitAbility => ({ id: 'a-oath', name: 'Oath', description: '', appliesTo: 'unit', when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'reroll', roll: 'hit', which: 'failed' }] });
+  const shock = (): UnitAbility => ({ id: 'a-shock', name: 'Shock Assault', description: 'Charge!', appliesTo: 'unit', when: { toggle: false, conditions: ['charged'], weaponType: 'melee', targetKeyword: null }, effects: [{ kind: 'stat', stat: 'attacks', amount: 1 }] });
   const content = ({ id: _, ...rest }: UnitAbility) => rest;
 
   const withAbilities = (): ShareState => {

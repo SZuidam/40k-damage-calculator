@@ -7,14 +7,13 @@ import {
   activeFor,
   addToDice,
   applyAbilities,
+  abilityNeeds,
   canLead,
-  conditionNeeds,
   copyAbility,
   grantAbilities,
   isActive,
+  pruneToggles,
   sameAbilityContent,
-  situationFromText,
-  situationsInUse,
   type AbilityContext,
 } from './unitAbilities';
 
@@ -23,7 +22,7 @@ const ability = (name: string, effects: AbilityEffect[], overrides: Partial<Unit
   name,
   description: '',
   appliesTo: 'unit',
-  when: { situations: [], weaponType: 'any', targetKeyword: null },
+  when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null },
   effects,
   ...overrides,
 });
@@ -42,9 +41,9 @@ const unit = (overrides: Partial<Unit> = {}): Unit => ({
   ...overrides,
 });
 
-const ctx = (overrides: Partial<AbilityContext> = {}): AbilityContext => ({ conditions: noConditions(), situations: [], keywords: ['infantry'], ...overrides });
+const ctx = (overrides: Partial<AbilityContext> = {}): AbilityContext => ({ conditions: noConditions(), toggles: [], keywords: ['infantry'], ...overrides });
 
-const shockAssault = ability('Shock Assault', [{ kind: 'stat', stat: 'attacks', amount: 1 }], { when: { situations: [{ builtin: 'charged' }], weaponType: 'melee', targetKeyword: null } });
+const shockAssault = ability('Shock Assault', [{ kind: 'stat', stat: 'attacks', amount: 1 }], { when: { toggle: false, conditions: ['charged'], weaponType: 'melee', targetKeyword: null } });
 
 describe('addToDice', () => {
   it('folds +X into the constant of a dice expression', () => {
@@ -57,25 +56,31 @@ describe('addToDice', () => {
 });
 
 describe('isActive', () => {
-  it('needs every situation on, the weapon type and the target keyword', () => {
+  it('needs its toggle and every condition on, the weapon type and the target keyword', () => {
     expect(isActive(shockAssault, 'melee', ctx())).toBe(false);
     expect(isActive(shockAssault, 'melee', ctx({ conditions: { halfRange: false, charged: true } }))).toBe(true);
     expect(isActive(shockAssault, 'ranged', ctx({ conditions: { halfRange: false, charged: true } }))).toBe(false);
 
-    const ingress = ability('Ingress', [{ kind: 'roll', roll: 'hit', amount: 1 }], { when: { situations: [{ name: 'Ingress move' }, { builtin: 'halfRange' }], weaponType: 'any', targetKeyword: null } });
-    expect(isActive(ingress, 'ranged', ctx({ situations: ['ingress move'] }))).toBe(false);
-    expect(isActive(ingress, 'ranged', ctx({ situations: ['ingress move'], conditions: { halfRange: true, charged: false } }))).toBe(true);
+    const ingress = ability('Ingress', [{ kind: 'roll', roll: 'hit', amount: 1 }], { when: { toggle: true, conditions: ['halfRange'], weaponType: 'any', targetKeyword: null } });
+    const halfRange = { halfRange: true, charged: false };
+    expect(isActive(ingress, 'ranged', ctx({ toggles: ['a-Ingress'] }))).toBe(false);
+    expect(isActive(ingress, 'ranged', ctx({ conditions: halfRange }))).toBe(false);
+    expect(isActive(ingress, 'ranged', ctx({ toggles: ['other'], conditions: halfRange }))).toBe(false);
+    expect(isActive(ingress, 'ranged', ctx({ toggles: ['a-Ingress'], conditions: halfRange }))).toBe(true);
 
-    const monsterHunter = ability('Monster hunter', [{ kind: 'roll', roll: 'wound', amount: 1 }], { when: { situations: [], weaponType: 'any', targetKeyword: 'monster' } });
+    const monsterHunter = ability('Monster hunter', [{ kind: 'roll', roll: 'wound', amount: 1 }], { when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: 'monster' } });
     expect(isActive(monsterHunter, 'ranged', ctx())).toBe(false);
     expect(isActive(monsterHunter, 'ranged', ctx({ keywords: ['monster'] }))).toBe(true);
     expect(isActive(monsterHunter, 'ranged', ctx({ keywords: null }))).toBe(false);
   });
 
   it('says what is still needed', () => {
-    const needs = conditionNeeds(shockAssault.when, 'ranged', ctx());
-    expect(needs).toEqual({ situations: [{ builtin: 'charged' }], weaponType: true, targetKeyword: false });
-    expect(conditionNeeds(shockAssault.when, null, ctx()).weaponType).toBe(false);
+    const needs = abilityNeeds(shockAssault, 'ranged', ctx());
+    expect(needs).toEqual({ toggle: false, conditions: ['charged'], weaponType: true, targetKeyword: false });
+    expect(abilityNeeds(shockAssault, null, ctx()).weaponType).toBe(false);
+    const oath = ability('Oath', [], { when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: null } });
+    expect(abilityNeeds(oath, null, ctx()).toggle).toBe(true);
+    expect(abilityNeeds(oath, null, ctx({ toggles: ['a-Oath'] })).toggle).toBe(false);
   });
 
   it('filters sourced abilities per weapon type', () => {
@@ -104,19 +109,12 @@ describe('abilitiesFor', () => {
   });
 });
 
-describe('situationFromText', () => {
-  it('maps the names of built-in conditions to them and keeps anything else as a custom situation', () => {
-    expect(situationFromText(' charged ')).toEqual({ builtin: 'charged' });
-    expect(situationFromText('Within half range')).toEqual({ builtin: 'halfRange' });
-    expect(situationFromText('  Ingress move ')).toEqual({ name: 'Ingress move' });
-  });
-});
-
-describe('situationsInUse', () => {
-  it('lists the custom names once (ignoring case and spaces), first spelling, without built-ins', () => {
-    const a = ability('A', [], { when: { situations: [{ name: 'Ingress move' }, { builtin: 'charged' }], weaponType: 'any', targetKeyword: null } });
-    const b = ability('B', [], { when: { situations: [{ name: ' ingress MOVE ' }, { name: 'Oath target' }], weaponType: 'any', targetKeyword: null } });
-    expect(situationsInUse([a, b])).toEqual(['Ingress move', 'Oath target']);
+describe('pruneToggles', () => {
+  it('keeps only the ids of abilities that are switched on by hand', () => {
+    const toggled = ability('Oath', [], { when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: null } });
+    const toggles = ['gone', 'a-Oath', 'a-Shock Assault'];
+    pruneToggles(toggles, [toggled, shockAssault]);
+    expect(toggles).toEqual(['a-Oath']);
   });
 });
 
@@ -181,7 +179,7 @@ describe('applyAbilities', () => {
 
 describe('copies, comparison and summaries', () => {
   it('copies deeply and compares content without ids', () => {
-    const a = ability('Grant', [{ kind: 'grant', abilities: { ...noAbilities(), anti: { vehicle: 4 } } }], { when: { situations: [{ name: 'Oath target' }], weaponType: 'any', targetKeyword: null } });
+    const a = ability('Grant', [{ kind: 'grant', abilities: { ...noAbilities(), anti: { vehicle: 4 } } }], { when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: null } });
     const b = copyAbility(a);
     expect(b).toEqual(a);
     if (b.effects[0].kind === 'grant') b.effects[0].abilities.anti.vehicle = 3;
@@ -189,7 +187,8 @@ describe('copies, comparison and summaries', () => {
     expect(sameAbilityContent(a, b)).toBe(false);
     const renumbered: UnitAbility = { ...copyAbility(a), id: 'other' };
     expect(sameAbilityContent(a, renumbered)).toBe(true);
-    expect(sameAbilityContent(a, { ...copyAbility(a), when: { ...a.when, situations: [{ name: ' oath TARGET' }] } })).toBe(true);
+    expect(sameAbilityContent(a, { ...copyAbility(a), when: { ...a.when, toggle: false } })).toBe(false);
+    expect(sameAbilityContent(a, { ...copyAbility(a), when: { ...a.when, conditions: ['charged'] } })).toBe(false);
   });
 
   it('summarises the condition and the effects', () => {
@@ -206,9 +205,9 @@ describe('copies, comparison and summaries', () => {
             { kind: 'reroll', roll: 'wound', which: 'failed' },
             { kind: 'grant', abilities: { ...noAbilities(), lethalHits: true, sustainedHits: '1' } },
           ],
-          { when: { situations: [{ name: 'Oath target' }, { builtin: 'halfRange' }], weaponType: 'ranged', targetKeyword: 'monster' } },
+          { when: { toggle: true, conditions: ['halfRange'], weaponType: 'ranged', targetKeyword: 'monster' } },
         ),
       ),
-    ).toBe('Oath target · Half range · Ranged · vs Monster: Improve AP by 1, -1 to wound, Critical wounds on 5+, Re-roll failed wounds, Gain Lethal Hits, Sustained Hits 1');
+    ).toBe('Toggled · Half range · Ranged · vs Monster: Improve AP by 1, -1 to wound, Critical wounds on 5+, Re-roll failed wounds, Gain Lethal Hits, Sustained Hits 1');
   });
 });

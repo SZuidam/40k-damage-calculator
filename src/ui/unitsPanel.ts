@@ -1,9 +1,10 @@
+import type { Banners } from '../state/banners';
 import { uid } from '../state/ids';
 import { byName, statsSummary } from '../state/presets';
-import { situationsInUse } from '../state/unitAbilities';
 import { copyUnit, deleteArmy, groupUnits, isNameTaken, newUnit, sameUnit, unitSummary, unitsInArmy, type ArmyFilter } from '../state/units';
-import type { Army, StoredWeapon, Unit, UnitAbility } from '../types';
+import type { Army, StoredWeapon, Unit } from '../types';
 import { abilityList } from './abilityList';
+import { prepareBanner } from './bannerImage';
 import { field, h, numberValue, select, setFieldError } from './dom';
 import { Menu } from './menu';
 import { MAX_PRESET_NAME, confirmDialog, openModal, promptName } from './modal';
@@ -18,6 +19,10 @@ export interface UnitsPanelOptions {
   units: Unit[];
   /** Armies or units changed (added, edited, deleted). */
   onChange: () => void;
+  /** Banner images by unit id (never exported), mutated in place. */
+  banners: Banners;
+  /** A unit's banner was set or removed: save them; false when that failed (storage full). */
+  onBannersChange: () => boolean;
 }
 
 const ARMY_TAKEN = 'An army with this name already exists';
@@ -131,12 +136,6 @@ export class UnitsPanel {
     );
   }
 
-  /** Custom situation names used by any unit or army (plus `extra`, e.g. a draft's abilities), for the ability modal. */
-  private knownSituations(extra: readonly UnitAbility[] = []): string[] {
-    const { armies, units } = this.options;
-    return situationsInUse([...extra, ...units.flatMap((u) => u.abilities), ...armies.flatMap((a) => a.abilities)]);
-  }
-
   // ---------- armies ----------
 
   /** "Army rules…": the abilities every unit of the selected army has, edited in place. */
@@ -160,7 +159,6 @@ export class UnitsPanel {
               scope: 'army',
               label: `Army rules of ${army.name}`,
               addLabel: '+ New army rule',
-              knownSituations: () => this.knownSituations(),
               onChange: () => {
                 this.options.onChange();
                 this.render();
@@ -238,6 +236,57 @@ export class UnitsPanel {
     const back = h('button', { type: 'button', class: 'button secondary' }, '‹ Back');
     const saveButton = h('button', { type: 'submit', class: 'button primary' }, isNew ? 'Create' : 'Save');
     const controls = { name, armyId: army, toughness, save, invuln, wounds };
+
+    // ---------- banner ----------
+    // Part of the draft: written to the banners on Save, dropped on Back.
+    const banners = this.options.banners;
+    const originalBanner: string | null = banners[draft.id] ?? null;
+    let bannerDraft: string | null = originalBanner;
+    const bannerFile = h('input', { id: id('banner-file'), type: 'file', accept: 'image/*', class: 'visually-hidden', tabindex: -1 });
+    const bannerPreview = h('div', { class: 'unit-banner-preview', role: 'img', 'aria-label': 'Banner image' });
+    const chooseBanner = h('button', { type: 'button', class: 'button secondary' }, 'Choose image…');
+    const removeBanner = h('button', { type: 'button', class: 'button secondary' }, 'Remove');
+    const bannerError = h('p', { class: 'row-errors', 'aria-live': 'polite' });
+    const renderBanner = () => {
+      bannerPreview.hidden = bannerDraft === null;
+      bannerPreview.style.backgroundImage = bannerDraft === null ? '' : `url("${bannerDraft}")`;
+      chooseBanner.textContent = bannerDraft === null ? 'Choose image…' : 'Replace image…';
+      removeBanner.hidden = bannerDraft === null;
+    };
+    chooseBanner.addEventListener('click', () => bannerFile.click());
+    bannerFile.addEventListener('change', async () => {
+      const file = bannerFile.files?.[0];
+      bannerFile.value = '';
+      if (!file) return;
+      bannerError.textContent = 'Reading the image…';
+      try {
+        bannerDraft = await prepareBanner(file);
+        bannerError.textContent = '';
+      } catch (error) {
+        bannerError.textContent = error instanceof Error ? error.message : 'This image could not be used.';
+      }
+      renderBanner();
+      chooseBanner.focus();
+    });
+    removeBanner.addEventListener('click', () => {
+      bannerDraft = null;
+      bannerError.textContent = '';
+      renderBanner();
+      chooseBanner.focus();
+    });
+    /** Store the draft's banner; false (with the error shown) when it doesn't fit in storage. */
+    const commitBanner = (): boolean => {
+      if (bannerDraft === originalBanner) return true;
+      if (bannerDraft === null) delete banners[draft.id];
+      else banners[draft.id] = bannerDraft;
+      if (this.options.onBannersChange()) return true;
+      if (originalBanner === null) delete banners[draft.id];
+      else banners[draft.id] = originalBanner;
+      this.options.onBannersChange();
+      bannerError.textContent = 'There is no room left to store this image. Remove the banners of other units, or pick a smaller image.';
+      chooseBanner.focus();
+      return false;
+    };
 
     /** Names of the other units in the draft's army. */
     const takenUnitNames = () => units.filter((u) => u.id !== draft.id && u.armyId === draft.armyId).map((u) => u.name);
@@ -327,7 +376,7 @@ export class UnitsPanel {
     const focusAfter = isNew ? '.manage-add' : `[data-id="${draft.id}"][data-action="edit"]`;
 
     back.addEventListener('click', async () => {
-      if (!sameUnit(draft, original)) {
+      if (!sameUnit(draft, original) || bannerDraft !== originalBanner) {
         const ok = await confirmDialog(isNew ? 'Discard this new unit?' : `Discard the changes to "${original.name}"?`, { confirmLabel: 'Discard', danger: true, title: 'Unsaved changes' });
         if (!ok) return;
       }
@@ -342,6 +391,16 @@ export class UnitsPanel {
       h('div', { class: 'defender-grid' }, field('T', toughness), field('Sv', save), field('Inv', invuln), field('W', wounds)),
       keywords.element,
       errors,
+      h(
+        'section',
+        { class: 'settings-section unit-weapons unit-banner-section' },
+        h('h3', {}, 'Banner'),
+        h('p', { class: 'panel-hint' }, 'An image from your PC, shown faintly behind the Army and Unit pickers when this unit attacks. It stays on this device and is not part of exports.'),
+        bannerPreview,
+        h('div', { class: 'panel-actions-group' }, chooseBanner, removeBanner),
+        bannerFile,
+        bannerError,
+      ),
       h(
         'section',
         { class: 'settings-section unit-weapons' },
@@ -361,7 +420,6 @@ export class UnitsPanel {
           scope: 'unit',
           label: 'Abilities of this unit',
           addLabel: '+ New ability',
-          knownSituations: () => this.knownSituations(draft.abilities),
           onChange: () => validate(),
         }),
       ),
@@ -370,6 +428,7 @@ export class UnitsPanel {
       event.preventDefault();
       nameTouched = true;
       if (hasErrors(validate())) return;
+      if (!commitBanner()) return;
       const saved = copyUnit({ ...draft, name: draft.name.trim() });
       const existing = units.find((u) => u.id === draft.id);
       if (existing) Object.assign(existing, saved);
@@ -385,6 +444,7 @@ export class UnitsPanel {
     this.editorView.replaceChildren(form);
     this.editorView.hidden = false;
     renderWeapons();
+    renderBanner();
     validate();
     name.focus();
   }
