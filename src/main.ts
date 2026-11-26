@@ -113,7 +113,7 @@ function onInputsChanged(): void {
   // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions,
   // unit abilities on the conditions, ability toggles, target and ticked weapons.
   loadoutRows.refreshStats();
-  renderAttackerBanner();
+  renderBanners();
   abilitiesLine.update(
     attackAbilities(),
     carried().map(({ weapon }) => weapon.type),
@@ -266,16 +266,23 @@ const attackerPicker = new UnitPicker({
     },
   },
 });
-// The attacking unit's banner image, faintly behind the Attacker heading and the Army / Unit
-// pickers (not the conditions or weapons).
+// The picked units' banner images, faintly behind each panel's heading and Army / Unit pickers
+// (not the conditions, weapons or defender stats).
 const attackerBanner = h('div', { class: 'unit-banner', 'aria-hidden': 'true', hidden: true });
+const defenderBanner = h('div', { class: 'unit-banner', 'aria-hidden': 'true', hidden: true });
 $('attacker-head').prepend(attackerBanner);
+$('defender-head').prepend(defenderBanner);
 $('attacker-picker').append(attackerPicker.element);
 
-function renderAttackerBanner(): void {
-  const image = bannerCss(state.attacker.unitId ? banners[state.attacker.unitId] : undefined);
-  if (attackerBanner.style.backgroundImage !== image) attackerBanner.style.backgroundImage = image;
-  attackerBanner.hidden = image === '';
+function renderBanner(element: HTMLElement, unitId: string | null): void {
+  const image = bannerCss(unitId ? banners[unitId] : undefined);
+  if (element.style.backgroundImage !== image) element.style.backgroundImage = image;
+  element.hidden = image === '';
+}
+
+function renderBanners(): void {
+  renderBanner(attackerBanner, state.attacker.unitId);
+  renderBanner(defenderBanner, state.defender.unitId);
 }
 
 /** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each, without a leader. */
@@ -338,7 +345,7 @@ const unitsPanel = new UnitsPanel({
   banners,
   onBannersChange: () => {
     const saved = saveBanners(banners);
-    renderAttackerBanner();
+    renderBanners();
     return saved;
   },
 });

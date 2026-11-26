@@ -421,6 +421,14 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 **Verification:** `npm test` 336/336 (new cases in `state/banners.test.ts` and `state/share.test.ts`). `npm run build` is clean. Not checked in the browser (the Chrome extension wasn't connected).
 
+## Defender banner (session 19, 2026-11-26, branch `banner-urls`)
+
+**What:** the defending unit's banner is shown too, the same way as the attacker's: faintly behind the Defender heading, hint and Army / Unit pickers, edge to edge from the panel's top, ending at the line under its own pickers. The two banners don't line up with each other: a first version padded the shorter head so they ended level, but that left a big gap between the Attacker's hint and its pickers, so it was dropped at the user's request.
+
+**How:** `index.html` wraps the defender's panel head and `#defender-picker` in `#defender-head`; both heads use the class `unit-head` (was `attacker-head`). `main.ts` renders both banners in `renderBanners`.
+
+**Verification:** `npm test` 336/336, `npm run build` clean. Checked in Chrome at 1536px wide with a test banner on the Intercessor Squad on both sides: each banner ends at the line under its own pickers, the Attacker head has no extra space, no console errors.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.

@@ -602,9 +602,9 @@ select[aria-invalid='true'] {
   flex: 1 1 160px;
 }
 
-/* The attacking unit's banner image: faint, behind the Attacker heading and the pickers only,
-   filling the top of the panel edge to edge and fading out towards the conditions. */
-.attacker-head {
+/* The picked unit's banner image on either side: faint, behind the panel heading and the
+   pickers only, filling the top of the panel edge to edge and fading out towards the rest. */
+.unit-head {
   position: relative;
   isolation: isolate;
 }
