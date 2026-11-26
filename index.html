@@ -22,16 +22,12 @@
         <section class="panel attacker" aria-labelledby="attacker-title">
           <div class="panel-head">
             <h2 id="attacker-title">Attacker</h2>
-            <p class="panel-hint">Weapons resolve top to bottom. A wounded model carries over to the next weapon.</p>
+            <p class="panel-hint">Tick the weapons the unit carries and how many. Weapons resolve top to bottom; a wounded model carries over to the next weapon.</p>
           </div>
-          <div id="profile-bar"></div>
+          <div id="attacker-picker"></div>
           <div id="attack-conditions"></div>
-          <div id="profile-rows"></div>
+          <div id="loadout"></div>
           <div class="attacker-actions">
-            <div class="add-weapon">
-              <select id="add-weapon" class="add-weapon-select" aria-label="Add weapon" aria-describedby="add-weapon-hint"></select>
-              <p id="add-weapon-hint" class="add-weapon-hint" hidden>Create weapon profiles under ☰ → Weapons.</p>
-            </div>
             <div class="optimise">
               <button type="button" id="optimise" class="button secondary" aria-describedby="optimise-status">Optimise order <span id="optimise-badge" class="badge" hidden></span></button>
               <p id="optimise-status" class="optimise-status" aria-live="polite"></p>
@@ -44,7 +40,7 @@
             <h2 id="defender-title">Defender</h2>
             <p class="panel-hint">Damage beyond a model's remaining wounds is lost.</p>
           </div>
-          <div id="defender-presets"></div>
+          <div id="defender-picker"></div>
           <div id="defender"></div>
         </section>
 
@@ -55,7 +51,7 @@
       </form>
 
       <section id="results" class="results" aria-label="Results">
-        <p class="empty">Pick a profile or add weapons, then press Simulate.</p>
+        <p class="empty">Pick the units, tick the weapons the attacker carries, then press Simulate.</p>
       </section>
     </main>
 

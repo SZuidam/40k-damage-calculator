@@ -1,6 +1,6 @@
 import { maxValue, tryParseDice } from '../engine/dice';
 import { parseAntiValue } from '../state/abilities';
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile, type ProfileRow, type Unit, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile, type Unit, type WeaponAbilities, type WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -84,15 +84,21 @@ export function abilityValueError(expr: string, label: string): string | undefin
   return parsed && maxValue(parsed) > max ? `${label}: X can roll at most ${max}` : undefined;
 }
 
+/** The errors of a loadout row: `count` (how many carried) and `weapon` (every weapon error on one line). */
+export interface LoadoutRowErrors {
+  count?: string;
+  weapon?: string;
+}
+
 /**
- * A profile row: models in range and a valid weapon copy. Every weapon error is joined into
- * `weapon`, so the row shows them on one line (a copy can only be wrong when it was imported
- * or stored invalid; the weapon modal never saves one).
+ * A carried weapon of the attacking unit: a count in range and a valid weapon. Every weapon
+ * error is joined into `weapon`, so the row shows them on one line (a weapon can only be wrong
+ * when it was stored invalid; the weapon modal never saves one).
  */
-export function validateRow(row: Pick<ProfileRow, 'models' | 'weapon'>): FieldErrors<ProfileRow> {
-  const weaponErrors = Object.values(validateWeaponStats(row.weapon));
-  const errors: FieldErrors<ProfileRow> = {
-    models: intInRange(row.models, LIMITS.weaponModels, 'Models'),
+export function validateLoadoutRow(count: number, weapon: WeaponStats): LoadoutRowErrors {
+  const weaponErrors = Object.values(validateWeaponStats(weapon));
+  const errors: LoadoutRowErrors = {
+    count: intInRange(count, LIMITS.weaponModels, 'Count'),
     weapon: weaponErrors.length > 0 ? weaponErrors.join(' · ') : undefined,
   };
   return prune(errors);
@@ -106,8 +112,9 @@ export function validateDefender(d: DefenderProfile): FieldErrors<DefenderProfil
     invuln: d.invuln === null ? undefined : intInRange(d.invuln, { min: 2, max: 6 }, 'Invulnerable save'),
     wounds: intInRange(d.wounds, LIMITS.wounds, 'Wounds'),
   };
+  // On models: the unit's stats come from the Units tab, its size is what the main page sets.
   if (!errors.models && !errors.wounds && d.models * d.wounds > MAX_DEFENDER_WOUND_POOL) {
-    errors.wounds = `Models × wounds must be at most ${MAX_DEFENDER_WOUND_POOL}`;
+    errors.models = `Models × wounds must be at most ${MAX_DEFENDER_WOUND_POOL}`;
   }
   return prune(errors);
 }

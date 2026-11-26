@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { noAbilities, type Army, type StoredWeapon, type Unit } from '../types';
-import { defenderSummary } from './presets';
 import { copyUnit, deleteArmy, groupUnits, isNameTaken, newUnit, sameUnit, unitSummary, unitsInArmy } from './units';
 
 const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
@@ -76,11 +75,6 @@ describe('unitSummary', () => {
     expect(unitSummary(unit())).toBe('T4 · Sv 3+ · W2 · Infantry · 2 weapons');
     expect(unitSummary(unit({ save: 2, invuln: 5, wounds: 12, keywords: ['vehicle', 'monster'], weapons: [bolt()] }))).toBe('T4 · Sv 2+ · Inv 5+ · W12 · Vehicle, Monster · 1 weapon');
     expect(unitSummary(unit({ save: 7, keywords: [], weapons: [] }))).toBe('T4 · Sv – · W2 · no weapons');
-  });
-
-  it('leaves the defender summary as it was', () => {
-    expect(defenderSummary({ models: 5, toughness: 8, save: 2, invuln: 4, wounds: 10, keywords: ['vehicle'] })).toBe('5 models · T8 · Sv 2+ · Inv 4+ · W10 · Vehicle');
-    expect(defenderSummary({ models: 1, toughness: 4, save: 7, invuln: null, wounds: 1, keywords: [] })).toBe('1 model · T4 · Sv – · W1');
   });
 });
 

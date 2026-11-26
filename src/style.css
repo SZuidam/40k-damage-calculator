@@ -430,7 +430,36 @@ select[aria-invalid='true'] {
   }
 }
 
-/* "Add weapon…" on the left, "Optimise order" with its status on the right; they stack when narrow. */
+/* ---------- Loadout rows (the attacking unit's weapons) ---------- */
+
+/* The checkbox and the weapon name share the name cell; the whole label toggles the weapon. */
+.row-carry {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.row-carry input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+/* A weapon the unit doesn't carry: kept in the list, but muted. */
+.loadout-row.is-off .row-carry {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.loadout-row.is-off .stat-chips {
+  opacity: 0.55;
+}
+
+/* "Optimise order" with its status under the rows. */
 .attacker-actions {
   display: flex;
   flex-wrap: wrap;
@@ -438,24 +467,6 @@ select[aria-invalid='true'] {
   align-items: flex-start;
   justify-content: space-between;
   margin-top: 12px;
-}
-
-.add-weapon {
-  display: flex;
-  flex: 1 1 200px;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 280px;
-}
-
-.add-weapon-hint {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-}
-
-.add-weapon-hint[hidden] {
-  display: none;
 }
 
 .attacker-actions .optimise {
@@ -478,11 +489,56 @@ select[aria-invalid='true'] {
   flex: 1 1 180px;
 }
 
-.preset-select.is-modified {
-  border-color: var(--highlight-border);
+/* ---------- Unit pickers (attacker and defender) ---------- */
+
+.unit-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.picker-field {
+  flex: 1 1 160px;
+}
+
+.picker-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.picker-hint[hidden] {
+  display: none;
 }
 
 /* ---------- Defender ---------- */
+
+/* The Models field with the unit's read-only stat chips beside it. */
+.defender-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-end;
+}
+
+.defender-body .field--count {
+  flex: 0 0 80px;
+}
+
+.defender-body .stat-chips {
+  flex: 1 1 200px;
+  margin-top: 0;
+  min-height: 34px;
+}
+
+#defender .row-errors {
+  margin-top: 8px;
+}
 
 .defender-grid {
   display: grid;
@@ -568,7 +624,7 @@ select[aria-invalid='true'] {
 
 /* ---------- Attack conditions ---------- */
 
-/* Situational toggles between the attack picker and the weapons: legend and pills on one line. */
+/* Situational toggles between the unit picker and the weapons: legend and pills on one line. */
 .attack-conditions {
   display: flex;
   flex-wrap: wrap;
@@ -630,10 +686,6 @@ select[aria-invalid='true'] {
 
 .button.danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 88%, black);
-}
-
-.button.danger-text:hover:not(:disabled) {
-  color: var(--danger);
 }
 
 .icon-button {
@@ -1258,10 +1310,6 @@ dialog.drawer[open]::backdrop {
   gap: 8px;
 }
 
-.modal-actions--split {
-  justify-content: space-between;
-}
-
 .weapon-stats-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1485,155 +1533,4 @@ dialog.drawer[open]::backdrop {
 
 .unit-weapons .panel-hint {
   margin: 0;
-}
-
-/* ---------- Import / export ---------- */
-
-.share-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.share-group,
-.share-policy {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-}
-
-.share-group legend,
-.share-policy legend {
-  padding: 0;
-  margin-bottom: 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.share-policy[hidden] {
-  display: none;
-}
-
-.share-group-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.share-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.share-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-
-.share-item.is-disabled .share-text {
-  opacity: 0.7;
-}
-
-input.share-check {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin: 3px 0 0;
-  padding: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.share-group-title input.share-check {
-  margin-top: 0;
-}
-
-input.share-check:disabled {
-  cursor: default;
-}
-
-.share-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  cursor: pointer;
-}
-
-.share-item.is-disabled .share-text {
-  cursor: default;
-}
-
-.share-tag {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  vertical-align: 1px;
-}
-
-.share-tag--muted {
-  background: var(--surface-1);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-}
-
-.share-tag--warn {
-  background: var(--highlight-bg);
-  color: var(--highlight);
-  border: 1px solid var(--highlight-border);
-}
-
-.share-tag--danger {
-  background: var(--danger-bg);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-}
-
-.share-radio {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 2px 0;
-}
-
-.share-radio label {
-  cursor: pointer;
-}
-
-.share-status:empty {
-  display: none;
-}
-
-.share-textarea {
-  width: 100%;
-  min-height: 160px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-1);
-  color: var(--text-primary);
-  font: 0.82rem/1.4 ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  resize: vertical;
-}
-
-.share-textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.share-textarea[aria-invalid='true'] {
-  border-color: var(--danger);
 }

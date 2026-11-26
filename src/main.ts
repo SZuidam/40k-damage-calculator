@@ -1,31 +1,26 @@
 import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
-import { uid } from './state/ids';
-import { copyDefender, copyRows, resolveRows, sameDefender, sameRows, sortedLibrary, uniqueName } from './state/presets';
+import { carriedWeapons, defenderOf, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
 import { loadState, saveState } from './state/storage';
-import type { Profile } from './types';
+import type { Unit, WeaponProfile } from './types';
 import { renderAttackConditions } from './ui/conditionsForm';
-import { renderDefenderForm } from './ui/defenderForm';
+import { renderDefenderPanel } from './ui/defenderPanel';
 import { field, h, numberValue, setFieldError } from './ui/dom';
 import { Drawer } from './ui/drawer';
-import { PresetBar } from './ui/presetBar';
-import { ProfileRows } from './ui/profileRows';
+import { LoadoutRows } from './ui/loadoutRows';
 import { createResultsView } from './ui/results';
-import { openExportModal, openImportModal } from './ui/shareModal';
+import { UnitPicker } from './ui/unitPicker';
 import { UnitsPanel } from './ui/unitsPanel';
-import { hasErrors, validateDefender, validateIterations, validateRow } from './ui/validation';
-import { WeaponsPanel } from './ui/weaponsPanel';
+import { hasErrors, validateDefender, validateIterations, validateLoadoutRow } from './ui/validation';
 
 const OPTIMISE_DEBOUNCE_MS = 200;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-/** All app state. Arrays are mutated in place: the views hold references to them. */
+/** All app state. Objects and arrays are mutated in place: the views hold references to them. */
 const state = loadState();
 const form = $<HTMLFormElement>('calculator');
-const addWeapon = $<HTMLSelectElement>('add-weapon');
-const addWeaponHint = $<HTMLParagraphElement>('add-weapon-hint');
 const optimiseButton = $<HTMLButtonElement>('optimise');
 const optimiseBadge = $<HTMLSpanElement>('optimise-badge');
 const optimiseStatus = $<HTMLParagraphElement>('optimise-status');
@@ -39,27 +34,39 @@ let lastOptimise: OptimiseResult | null = null;
 let reorderNote = '';
 let reordering = false;
 
-/** The working area: the rows on the main page, which the simulation fires. */
-const rows = () => state.rows;
+const findUnit = (id: string | null): Unit | undefined => state.units.find((u) => u.id === id);
+const attackingUnit = () => findUnit(state.attacker.unitId);
+const defendingUnit = () => findUnit(state.defender.unitId);
 
-/** The profile the working area was loaded from or saved to, if any. */
-function activeProfile(): Profile | undefined {
-  return state.profiles.find((p) => p.id === state.activeProfileId);
+/** The carried weapons of the attacking unit, in firing order (empty without a unit). */
+function carried() {
+  const unit = attackingUnit();
+  return unit ? carriedWeapons(unit, state.attacker.rows) : [];
 }
 
-function rowsValid(): boolean {
-  return rows().length > 0 && rows().every((r) => !hasErrors(validateRow(r)));
+/** Engine input for the attacker: its carried weapons (empty without a unit). */
+function attackerWeapons(): WeaponProfile[] {
+  const unit = attackingUnit();
+  return unit ? resolveLoadout(unit, state.attacker.rows, state.conditions) : [];
 }
 
-function inputsValid(): boolean {
-  return rowsValid() && !hasErrors(validateDefender(state.defender)) && validateIterations(state.iterations) === undefined;
+const carriedValid = () => carried().every(({ row, weapon }) => !hasErrors(validateLoadoutRow(row.count, weapon)));
+
+function defenderValid(): boolean {
+  const unit = defendingUnit();
+  return unit !== undefined && !hasErrors(validateDefender(defenderOf(unit, state.defender.models)));
 }
 
 /** Why Simulate is disabled, or '' when it isn't. */
 function blockedReason(): string {
-  if (rows().length === 0) return 'Add weapons to simulate.';
-  if (!rowsValid()) return 'Fix the highlighted rows to simulate.';
-  if (hasErrors(validateDefender(state.defender))) return 'Fix the highlighted defender fields to simulate.';
+  const unit = attackingUnit();
+  if (state.units.length === 0) return 'Create units under ☰ → Units to simulate.';
+  if (!unit) return 'Pick an attacking unit to simulate.';
+  if (unit.weapons.length === 0) return 'Give the attacking unit weapons under ☰ → Units to simulate.';
+  if (carried().length === 0) return 'Tick the weapons the attacking unit carries to simulate.';
+  if (!carriedValid()) return 'Fix the highlighted weapons to simulate.';
+  if (!defendingUnit()) return 'Pick a defending unit to simulate.';
+  if (!defenderValid()) return 'Fix the defender to simulate.';
   if (validateIterations(state.iterations) !== undefined) return 'Set a valid number of iterations under ☰ → Settings to simulate.';
   return '';
 }
@@ -69,42 +76,25 @@ function onInputsChanged(): void {
   saveState(state);
   // The Blast / Cleave extra attacks on the A chips depend on the defender's model count,
   // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions.
-  profileRows.refreshStats();
+  loadoutRows.refreshStats();
   if (!reordering) reorderNote = '';
   const reason = blockedReason();
   simulateButton.disabled = reason !== '';
   runStatus.textContent = reason;
   if (hasResults) results.markStale(true);
-  profileBar.refresh();
-  defenderBar.refresh();
   scheduleOptimise();
 }
 
-/**
- * A library profile was created, edited or deleted. Rows and profiles hold their own copies,
- * so only the views listing the library change.
- */
-function onLibraryChanged(): void {
-  saveState(state);
-  renderAddWeapon();
-  weaponsPanel.render();
+/** The Units tab changed armies or units: follow them on the main page (a deleted unit is unpicked, weapons sync). */
+function onUnitsChanged(): void {
+  reconcileAttacker(state.attacker, state.armies, state.units);
+  reconcileDefender(state.defender, state.armies, state.units);
+  attackerPicker.render();
+  defenderPicker.render();
+  loadoutRows.render();
+  defenderPanel.render();
+  onInputsChanged();
 }
-
-// ---------- Add weapon ----------
-
-function renderAddWeapon(): void {
-  const library = sortedLibrary(state.library);
-  addWeapon.replaceChildren(h('option', { value: '' }, 'Add weapon…'), ...library.map((w) => h('option', { value: w.id }, w.name)));
-  addWeapon.value = '';
-  addWeapon.disabled = library.length === 0;
-  addWeaponHint.hidden = library.length > 0;
-}
-
-addWeapon.addEventListener('change', () => {
-  const weapon = state.library.find((w) => w.id === addWeapon.value);
-  addWeapon.value = '';
-  if (weapon) profileRows.add(weapon);
-});
 
 // ---------- Optimiser ----------
 
@@ -116,10 +106,10 @@ function scheduleOptimise(): void {
 }
 
 function runOptimise(): void {
-  if (rows().length < 2) return setOptimiseState('single');
-  if (!inputsValid()) return setOptimiseState('invalid');
-  // Resolved index i is row i.
-  lastOptimise = optimiseOrder(resolveRows(rows(), state.conditions), state.defender);
+  if (carried().length < 2) return setOptimiseState('single');
+  if (blockedReason() !== '') return setOptimiseState('invalid');
+  // Resolved index i is carried row i.
+  lastOptimise = optimiseOrder(attackerWeapons(), defenderOf(defendingUnit()!, state.defender.models));
   setOptimiseState('ready');
 }
 
@@ -134,7 +124,7 @@ function setOptimiseState(kind: OptimiseState): void {
   optimiseBadge.hidden = !beneficial;
 
   if (kind === 'single') {
-    optimiseStatus.textContent = rows().length === 0 ? '' : 'Add a second weapon to compare orders.';
+    optimiseStatus.textContent = carried().length === 0 ? '' : 'Tick a second weapon to compare orders.';
     optimiseButton.title = '';
   } else if (kind === 'invalid') {
     optimiseStatus.textContent = '';
@@ -143,7 +133,8 @@ function setOptimiseState(kind: OptimiseState): void {
     optimiseButton.title = '';
   } else if (result.beneficial) {
     const gain = `+${result.gain.toFixed(2)}`;
-    const order = result.bestOrder.map((i) => rowLabel(i)).join(' → ');
+    const weapons = attackerWeapons();
+    const order = result.bestOrder.map((i) => weaponLabel(weapons, i)).join(' → ');
     const range = `${result.current.expectedModelsDestroyed.toFixed(2)} → ${result.best.expectedModelsDestroyed.toFixed(2)}`;
     optimiseBadge.textContent = `${gain} models`;
     optimiseStatus.textContent = `Better order found: ${gain} models destroyed on average (${range}).`;
@@ -156,9 +147,9 @@ function setOptimiseState(kind: OptimiseState): void {
   }
 }
 
-function rowLabel(index: number): string {
-  const row = rows()[index];
-  return row ? `${row.models}× ${row.weapon.name}` : `Weapon ${index + 1}`;
+function weaponLabel(weapons: WeaponProfile[], index: number): string {
+  const weapon = weapons[index];
+  return weapon ? `${weapon.models}× ${weapon.name}` : `Weapon ${index + 1}`;
 }
 
 function applyBestOrder(): void {
@@ -166,8 +157,12 @@ function applyBestOrder(): void {
   const { bestOrder, beneficial, gain } = lastOptimise;
   const changed = bestOrder.some((v, i) => v !== i);
   reorderNote = beneficial ? `Reordered: +${gain.toFixed(2)} models destroyed on average.` : '';
+  if (!changed) return;
+  const rows = state.attacker.rows;
+  rows.splice(0, rows.length, ...reorderCarried(rows, bestOrder));
   reordering = true;
-  if (changed) profileRows.reorder(bestOrder);
+  loadoutRows.render();
+  onInputsChanged();
   reordering = false;
 }
 
@@ -176,13 +171,13 @@ optimiseButton.addEventListener('click', applyBestOrder);
 // ---------- Simulation ----------
 
 function runSimulation(): void {
-  if (!inputsValid()) return;
+  if (blockedReason() !== '') return;
   simulateButton.disabled = true;
   runStatus.textContent = 'Simulating…';
   // Let the status paint before the (synchronous) simulation blocks the thread.
   window.setTimeout(() => {
-    const weapons = resolveRows(rows(), state.conditions);
-    const defender = copyDefender(state.defender);
+    const weapons = attackerWeapons();
+    const defender = defenderOf(defendingUnit()!, state.defender.models);
     const started = performance.now();
     const result = simulate(weapons, defender, state.iterations);
     const ms = Math.round(performance.now() - started);
@@ -195,127 +190,76 @@ function runSimulation(): void {
 
 // ---------- Attacker ----------
 
-const profileRows = new ProfileRows($('profile-rows'), state.rows, {
-  onChange: onInputsChanged,
-  defender: () => state.defender,
-  conditions: () => state.conditions,
-  focusWhenEmpty: () => (addWeapon.disabled ? profileBar.element.querySelector('select') : addWeapon)?.focus(),
+const attackerPicker = new UnitPicker({
+  idPrefix: 'attacker',
+  armies: state.armies,
+  units: state.units,
+  selection: () => state.attacker,
+  onArmyChange: (armyId) => {
+    state.attacker.armyId = armyId;
+    // The picked unit stays only when it belongs to the new army.
+    if (!unitsOfArmy(state.units, state.armies, armyId).some((u) => u.id === state.attacker.unitId)) pickAttacker(null);
+    attackerPicker.render();
+    onInputsChanged();
+  },
+  onUnitChange: (unitId) => {
+    pickAttacker(unitId);
+    attackerPicker.render();
+    onInputsChanged();
+  },
 });
-// Situational: saved with the page state, but not part of profiles or exports.
+$('attacker-picker').append(attackerPicker.element);
+
+/** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each. */
+function pickAttacker(unitId: string | null): void {
+  const unit = findUnit(unitId);
+  state.attacker.unitId = unit?.id ?? null;
+  state.attacker.rows = unit ? newLoadout(unit) : [];
+  loadoutRows.render();
+}
+
+// Situational: saved with the page state, but not part of a unit.
 renderAttackConditions($('attack-conditions'), state.conditions, onInputsChanged);
 
-const profileBar = new PresetBar({
-  label: 'Profile',
-  idPrefix: 'profile',
-  noun: 'profile',
-  markModified: false,
-  deleteNote: 'The weapons on the page stay as they are.',
-  items: () => state.profiles,
-  activeId: () => state.activeProfileId,
-  isDirty: () => {
-    const profile = activeProfile();
-    return profile !== undefined && !sameRows(state.rows, profile.rows);
+const loadoutRows = new LoadoutRows($('loadout'), state.attacker, {
+  onChange: onInputsChanged,
+  unit: attackingUnit,
+  defender: () => {
+    const unit = defendingUnit();
+    return unit ? { models: state.defender.models, keywords: unit.keywords } : undefined;
   },
-  // Unsaved rows that no profile holds would be lost by loading one.
-  hasUnsavedWork: () => state.rows.length > 0 && !state.profiles.some((p) => sameRows(p.rows, state.rows)),
-  saveBlockedReason: () => {
-    if (rows().length === 0) return 'Add weapons first';
-    return rowsValid() ? null : 'Fix the highlighted rows first';
-  },
-  onLoad: (id) => {
-    state.activeProfileId = id;
-    const profile = activeProfile();
-    if (profile) {
-      state.rows.splice(0, state.rows.length, ...copyRows(profile.rows));
-      profileRows.render();
-    }
-    onInputsChanged();
-  },
-  onSave: (id) => {
-    const profile = state.profiles.find((p) => p.id === id);
-    if (!profile) return;
-    profile.rows = copyRows(state.rows);
-    state.activeProfileId = id;
-    onInputsChanged();
-  },
-  onSaveAs: (name) => {
-    const profile: Profile = { id: uid('profile'), name, rows: copyRows(state.rows) };
-    state.profiles.push(profile);
-    state.activeProfileId = profile.id;
-    onInputsChanged();
-  },
-  onRename: (id, name) => {
-    const profile = state.profiles.find((p) => p.id === id);
-    if (!profile) return;
-    profile.name = uniqueName(
-      state.profiles.filter((p) => p !== profile).map((p) => p.name),
-      name,
-    );
-    onInputsChanged();
-  },
-  onDelete: (id) => {
-    state.profiles.splice(
-      state.profiles.findIndex((p) => p.id === id),
-      1,
-    );
-    if (state.activeProfileId === id) state.activeProfileId = null;
-    onInputsChanged();
-  },
+  conditions: () => state.conditions,
 });
-$('profile-bar').append(profileBar.element);
 
 // ---------- Defender ----------
 
-const defenderForm = renderDefenderForm($('defender'), state.defender, onInputsChanged);
-
-const defenderBar = new PresetBar({
-  label: 'Defender preset',
-  idPrefix: 'defender-preset',
-  items: () => state.defenderPresets,
-  activeId: () => state.activeDefenderPresetId,
-  isDirty: () => {
-    const preset = state.defenderPresets.find((p) => p.id === state.activeDefenderPresetId);
-    return preset !== undefined && !sameDefender(state.defender, preset.defender);
-  },
-  saveBlockedReason: () => (hasErrors(validateDefender(state.defender)) ? 'Fix the highlighted fields first' : null),
-  onLoad: (id) => {
-    state.activeDefenderPresetId = id;
-    const preset = state.defenderPresets.find((p) => p.id === id);
-    if (preset) {
-      Object.assign(state.defender, copyDefender(preset.defender));
-      defenderForm.setValues();
-    }
+const defenderPicker = new UnitPicker({
+  idPrefix: 'defender',
+  armies: state.armies,
+  units: state.units,
+  selection: () => state.defender,
+  onArmyChange: (armyId) => {
+    state.defender.armyId = armyId;
+    if (!unitsOfArmy(state.units, state.armies, armyId).some((u) => u.id === state.defender.unitId)) state.defender.unitId = null;
+    defenderPicker.render();
+    defenderPanel.render();
     onInputsChanged();
   },
-  onSave: (id) => {
-    const preset = state.defenderPresets.find((p) => p.id === id);
-    if (!preset) return;
-    preset.defender = copyDefender(state.defender);
-    state.activeDefenderPresetId = id;
-    onInputsChanged();
-  },
-  onSaveAs: (name) => {
-    const preset = { id: uid('defender'), name, defender: copyDefender(state.defender) };
-    state.defenderPresets.push(preset);
-    state.activeDefenderPresetId = preset.id;
-    onInputsChanged();
-  },
-  onDelete: (id) => {
-    state.defenderPresets.splice(
-      state.defenderPresets.findIndex((p) => p.id === id),
-      1,
-    );
-    if (state.activeDefenderPresetId === id) state.activeDefenderPresetId = null;
+  onUnitChange: (unitId) => {
+    // The number of models stays: it is the size of whatever unit is picked.
+    state.defender.unitId = findUnit(unitId)?.id ?? null;
+    defenderPicker.render();
+    defenderPanel.render();
     onInputsChanged();
   },
 });
-$('defender-presets').append(defenderBar.element);
+$('defender-picker').append(defenderPicker.element);
+
+const defenderPanel = renderDefenderPanel($('defender'), state.defender, defendingUnit, onInputsChanged);
 
 // ---------- Configuration drawer ----------
 
-const weaponsPanel = new WeaponsPanel({ library: state.library, onChange: onLibraryChanged });
-// Armies and units are configuration only for now: nothing else on the page uses them yet.
-const unitsPanel = new UnitsPanel({ armies: state.armies, units: state.units, onChange: () => saveState(state) });
+const unitsPanel = new UnitsPanel({ armies: state.armies, units: state.units, onChange: onUnitsChanged });
 
 function settingsPanel(): HTMLElement {
   const iterations = h('input', { id: 'iterations', type: 'number', inputmode: 'numeric', min: 100, max: 1_000_000, step: 1000, value: state.iterations });
@@ -327,21 +271,6 @@ function settingsPanel(): HTMLElement {
   });
   sync();
 
-  const importButton = h('button', { type: 'button', class: 'button secondary' }, 'Import…');
-  const exportButton = h('button', { type: 'button', class: 'button secondary' }, 'Export…');
-  exportButton.addEventListener('click', () => openExportModal(state));
-  importButton.addEventListener('click', () =>
-    openImportModal({
-      state,
-      onImported: () => {
-        // Weapons, profiles and defender presets may have been added or replaced. The working
-        // area is not touched; a replaced active profile may now differ from it.
-        onLibraryChanged();
-        onInputsChanged();
-      },
-    }),
-  );
-
   return h(
     'div',
     { class: 'settings-panel' },
@@ -352,19 +281,11 @@ function settingsPanel(): HTMLElement {
       field('Iterations', iterations, 'field--iterations'),
       h('p', { class: 'panel-hint' }, 'Simulated runs per press of Simulate, from 100 to 1,000,000. More runs give smoother results but take longer.'),
     ),
-    h(
-      'section',
-      { class: 'settings-section' },
-      h('h3', {}, 'Import and export'),
-      h('p', { class: 'panel-hint' }, 'Share profiles, defender presets and weapon profiles with another browser or device as a JSON file.'),
-      h('div', { class: 'panel-actions-group' }, importButton, exportButton),
-    ),
   );
 }
 
 const drawer = new Drawer([
   { tab: 'units', label: 'Units', content: unitsPanel.element, onShow: () => unitsPanel.render() },
-  { tab: 'weapons', label: 'Weapons', content: weaponsPanel.element, onShow: () => weaponsPanel.render() },
   { tab: 'settings', label: 'Settings', content: settingsPanel() },
 ]);
 
@@ -375,5 +296,4 @@ form.addEventListener('submit', (event) => {
   runSimulation();
 });
 
-renderAddWeapon();
 onInputsChanged();
