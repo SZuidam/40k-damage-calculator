@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type WeaponStats } from '../types';
-import { abilityValueError, antiValueError, validateRow, validateWeaponStats } from './validation';
+import { noAbilities, type Unit, type WeaponStats } from '../types';
+import { abilityValueError, antiValueError, validateLoadoutRow, validateUnit, validateWeaponStats } from './validation';
 
 const stats: WeaponStats = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
 
@@ -81,22 +81,57 @@ describe('validateWeaponStats', () => {
   });
 });
 
-describe('validateRow', () => {
-  it('accepts a row with valid models and a valid weapon copy', () => {
-    expect(validateRow({ models: 10, weapon: stats })).toEqual({});
-    expect(validateRow({ models: 50, weapon: stats })).toEqual({});
+describe('validateUnit', () => {
+  const unit: Unit = { id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'], weapons: [{ ...stats, id: 'w1' }] };
+
+  it('accepts a valid unit, also one without weapons', () => {
+    expect(validateUnit(unit)).toEqual({});
+    expect(validateUnit({ ...unit, weapons: [], save: 7, invuln: 4, toughness: 20, wounds: 40 })).toEqual({});
   });
 
-  it('keeps the models limits', () => {
-    expect(validateRow({ models: 0, weapon: stats }).models).toBe('Models must be between 1 and 50');
-    expect(validateRow({ models: 51, weapon: stats }).models).toBe('Models must be between 1 and 50');
-    expect(validateRow({ models: 1.5, weapon: stats }).models).toBe('Models must be a whole number');
-    expect(validateRow({ models: Number.NaN, weapon: stats }).models).toBeDefined();
+  it('requires a name of at most 40 characters', () => {
+    expect(validateUnit({ ...unit, name: '  ' }).name).toBe('Name is required');
+    expect(validateUnit({ ...unit, name: 'x'.repeat(41) }).name).toBe('Name must be at most 40 characters');
   });
 
-  it('joins every error of an invalid weapon copy into one line', () => {
-    expect(validateRow({ models: 1, weapon: { ...stats, attacks: 'D7' } })).toEqual({ weapon: 'Attacks: use 3, D3, D6, 2D6, D6+1, …' });
-    expect(validateRow({ models: 1, weapon: { ...stats, strength: 40, ap: 2 } })).toEqual({ weapon: 'Strength must be between 1 and 30 · AP must be between -6 and 0' });
-    expect(validateRow({ models: 0, weapon: { ...stats, name: '' } })).toEqual({ models: 'Models must be between 1 and 50', weapon: 'Name is required' });
+  it('rejects a name another unit in the same army has, ignoring case', () => {
+    expect(validateUnit({ ...unit, name: ' intercessors ' }, ['Intercessors']).name).toBe('Another unit in this army already has this name');
+    expect(validateUnit(unit, ['Terminators'])).toEqual({});
+  });
+
+  it('flags each invalid stat, without a models × wounds limit', () => {
+    const errors = validateUnit({ ...unit, toughness: 0, save: 1, invuln: 7, wounds: 41 });
+    expect(errors).toEqual({
+      toughness: 'Toughness must be between 1 and 20',
+      save: 'Save must be between 2 and 7',
+      invuln: 'Invulnerable save must be between 2 and 6',
+      wounds: 'Wounds must be between 1 and 40',
+    });
+  });
+
+  it('flags an invalid weapon and two weapons with the same name', () => {
+    expect(validateUnit({ ...unit, weapons: [{ ...stats, id: 'w1', attacks: 'D7' }] }).weapons).toBe('Bolt rifle: Attacks: use 3, D3, D6, 2D6, D6+1, …');
+    expect(validateUnit({ ...unit, weapons: [{ ...stats, id: 'w1' }, { ...stats, id: 'w2', name: 'BOLT RIFLE ', ap: -2 }] }).weapons).toBe('Two weapons are named "BOLT RIFLE"');
+  });
+});
+
+describe('validateLoadoutRow', () => {
+  it('accepts a valid count and a valid weapon', () => {
+    expect(validateLoadoutRow(5, stats)).toEqual({});
+    expect(validateLoadoutRow(1, stats)).toEqual({});
+    expect(validateLoadoutRow(50, stats)).toEqual({});
+  });
+
+  it('keeps the count between 1 and 50', () => {
+    expect(validateLoadoutRow(0, stats).count).toBe('Count must be between 1 and 50');
+    expect(validateLoadoutRow(51, stats).count).toBe('Count must be between 1 and 50');
+    expect(validateLoadoutRow(1.5, stats).count).toBe('Count must be a whole number');
+    expect(validateLoadoutRow(Number.NaN, stats).count).toBeDefined();
+  });
+
+  it('joins every error of an invalid weapon into one line', () => {
+    expect(validateLoadoutRow(1, { ...stats, attacks: 'D7' })).toEqual({ weapon: 'Attacks: use 3, D3, D6, 2D6, D6+1, …' });
+    expect(validateLoadoutRow(1, { ...stats, strength: 40, ap: 2 })).toEqual({ weapon: 'Strength must be between 1 and 30 · AP must be between -6 and 0' });
+    expect(validateLoadoutRow(0, { ...stats, name: '' })).toEqual({ count: 'Count must be between 1 and 50', weapon: 'Name is required' });
   });
 });

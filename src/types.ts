@@ -58,7 +58,7 @@ export function noAbilities(): WeaponAbilities {
 
 /**
  * Situational conditions of the attack that switch abilities on. They apply to every weapon
- * in the attack and are part of the page state only (not of profiles or exports).
+ * in the attack and are part of the page state only (not of units).
  */
 export interface AttackConditions {
   /** The target is within half range: Rapid Fire X adds its attacks, Melta X its damage. */
@@ -91,46 +91,37 @@ export interface WeaponStats {
   abilities: WeaponAbilities;
 }
 
-/** A weapon profile in the user's library. */
+/** A weapon profile of a unit: its stats plus an id that is unique within the unit. */
 export interface StoredWeapon extends WeaponStats {
   id: string;
 }
 
 /**
- * A row of a profile (and of the working area on the main page): `models` models firing
- * `weapon`. The weapon is a copy, taken from the library when the row was added, so editing
- * or deleting a library profile never changes a row.
+ * One weapon of the attacking unit on the main page: whether the unit carries it and how many
+ * of it. Only carried rows fire; `count` models fire the weapon. The weapon itself is looked up
+ * in the unit by `weaponId`, so editing the unit's weapon changes the attack straight away.
  */
-export interface ProfileRow {
-  id: string;
-  models: number;
-  weapon: WeaponStats;
-}
-
-/**
- * A row of v2 saved data and v1 export files: a weapon copy plus the id of the library weapon
- * it was taken from. Only read for migration and import; nothing writes it any more.
- */
-export interface RowSnapshot {
-  models: number;
+export interface LoadoutRow {
   weaponId: string;
-  weapon: WeaponStats;
+  carried: boolean;
+  count: number;
 }
 
-/**
- * A profile: the saved complete attack of a unit, with its own weapon copies. The main page
- * works on a copy of its rows and saves them back with Save.
- */
-export interface Profile {
-  id: string;
-  name: string;
-  rows: ProfileRow[];
+/** The attacker on the main page: an army and unit picked from the user's units, and its loadout. */
+export interface AttackerSelection {
+  /** The army dropdown: an army id, or null for "No army". */
+  armyId: string | null;
+  unitId: string | null;
+  /** One row per weapon of the unit, in firing order (empty without a unit). */
+  rows: LoadoutRow[];
 }
 
-export interface DefenderPreset {
-  id: string;
-  name: string;
-  defender: DefenderProfile;
+/** The defender on the main page: an army and unit picked from the user's units, and its size. */
+export interface DefenderSelection {
+  /** The army dropdown: an army id, or null for "No army". */
+  armyId: string | null;
+  unitId: string | null;
+  models: number;
 }
 
 /** Engine input: one attacking weapon profile, fired by `models` models. */
@@ -164,6 +155,28 @@ export interface DefenderProfile {
   wounds: number;
   /** Keywords of the unit (Vehicle, Monster, …), in DEFENDER_KEYWORDS order without duplicates. */
   keywords: DefenderKeyword[];
+}
+
+/** An army the user defined (any 40k army, the name is free text). Units can belong to one. */
+export interface Army {
+  id: string;
+  name: string;
+}
+
+/** The defensive stat line of a unit: a DefenderProfile without the model count. */
+export type UnitStats = Omit<DefenderProfile, 'models'>;
+
+/**
+ * A unit the user defined: its stat line, keywords and its own weapon profiles. Weapons are
+ * never shared: two units with a "Bolt rifle" each hold their own profile. Weapon names are
+ * unique within a unit.
+ */
+export interface Unit extends UnitStats {
+  id: string;
+  name: string;
+  /** The army the unit belongs to, or null for "No army". */
+  armyId: string | null;
+  weapons: StoredWeapon[];
 }
 
 /** Average values per step of the attack sequence. */

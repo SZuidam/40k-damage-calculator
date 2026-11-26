@@ -47,7 +47,7 @@ export function statChips(weapon: WeaponStats | undefined, defender: ChipDefende
   }
   const abilities = activeAbilities(weapon.abilities);
   if (abilities.length === 0) return chips;
-  // Read-only; abilities are edited in the weapon profile modal (Weapons tab), and rows keep their copy.
+  // Read-only; abilities are edited in the weapon profile modal (Units tab).
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
   abilities.forEach(({ label, description, anti, condition }, i) => {
     if (i > 0) text.append(', ');

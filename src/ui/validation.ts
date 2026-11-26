@@ -1,6 +1,6 @@
 import { maxValue, tryParseDice } from '../engine/dice';
 import { parseAntiValue } from '../state/abilities';
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile, type ProfileRow, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type DefenderProfile, type Unit, type WeaponAbilities, type WeaponStats } from '../types';
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -84,15 +84,21 @@ export function abilityValueError(expr: string, label: string): string | undefin
   return parsed && maxValue(parsed) > max ? `${label}: X can roll at most ${max}` : undefined;
 }
 
+/** The errors of a loadout row: `count` (how many carried) and `weapon` (every weapon error on one line). */
+export interface LoadoutRowErrors {
+  count?: string;
+  weapon?: string;
+}
+
 /**
- * A profile row: models in range and a valid weapon copy. Every weapon error is joined into
- * `weapon`, so the row shows them on one line (a copy can only be wrong when it was imported
- * or stored invalid; the weapon modal never saves one).
+ * A carried weapon of the attacking unit: a count in range and a valid weapon. Every weapon
+ * error is joined into `weapon`, so the row shows them on one line (a weapon can only be wrong
+ * when it was stored invalid; the weapon modal never saves one).
  */
-export function validateRow(row: Pick<ProfileRow, 'models' | 'weapon'>): FieldErrors<ProfileRow> {
-  const weaponErrors = Object.values(validateWeaponStats(row.weapon));
-  const errors: FieldErrors<ProfileRow> = {
-    models: intInRange(row.models, LIMITS.weaponModels, 'Models'),
+export function validateLoadoutRow(count: number, weapon: WeaponStats): LoadoutRowErrors {
+  const weaponErrors = Object.values(validateWeaponStats(weapon));
+  const errors: LoadoutRowErrors = {
+    count: intInRange(count, LIMITS.weaponModels, 'Count'),
     weapon: weaponErrors.length > 0 ? weaponErrors.join(' · ') : undefined,
   };
   return prune(errors);
@@ -106,10 +112,50 @@ export function validateDefender(d: DefenderProfile): FieldErrors<DefenderProfil
     invuln: d.invuln === null ? undefined : intInRange(d.invuln, { min: 2, max: 6 }, 'Invulnerable save'),
     wounds: intInRange(d.wounds, LIMITS.wounds, 'Wounds'),
   };
+  // On models: the unit's stats come from the Units tab, its size is what the main page sets.
   if (!errors.models && !errors.wounds && d.models * d.wounds > MAX_DEFENDER_WOUND_POOL) {
-    errors.wounds = `Models × wounds must be at most ${MAX_DEFENDER_WOUND_POOL}`;
+    errors.models = `Models × wounds must be at most ${MAX_DEFENDER_WOUND_POOL}`;
   }
   return prune(errors);
+}
+
+/**
+ * A unit: name (required, at most 40 characters, not in `takenNames`: the names of the other
+ * units in the same army), the stat line (same limits as the defender, without models) and its
+ * weapons (each valid, no two with the same name). Weapon errors are joined into `weapons`.
+ */
+export function validateUnit(u: Unit, takenNames: readonly string[] = []): FieldErrors<Unit> {
+  const name = u.name.trim();
+  const key = name.toLowerCase();
+  const errors: FieldErrors<Unit> = {
+    name:
+      name === ''
+        ? 'Name is required'
+        : name.length > MAX_WEAPON_NAME
+          ? `Name must be at most ${MAX_WEAPON_NAME} characters`
+          : takenNames.some((n) => n.trim().toLowerCase() === key)
+            ? 'Another unit in this army already has this name'
+            : undefined,
+    toughness: intInRange(u.toughness, LIMITS.toughness, 'Toughness'),
+    save: intInRange(u.save, { min: 2, max: 7 }, 'Save'),
+    invuln: u.invuln === null ? undefined : intInRange(u.invuln, { min: 2, max: 6 }, 'Invulnerable save'),
+    wounds: intInRange(u.wounds, LIMITS.wounds, 'Wounds'),
+    weapons: unitWeaponsError(u.weapons),
+  };
+  return prune(errors);
+}
+
+/** The first problem with a unit's weapons: an invalid profile, or two weapons with the same name. */
+function unitWeaponsError(weapons: readonly WeaponStats[]): string | undefined {
+  const seen = new Set<string>();
+  for (const w of weapons) {
+    const problems = Object.values(validateWeaponStats(w));
+    if (problems.length > 0) return `${w.name.trim() || 'Unnamed weapon'}: ${problems.join(' · ')}`;
+    const key = w.name.trim().toLowerCase();
+    if (seen.has(key)) return `Two weapons are named "${w.name.trim()}"`;
+    seen.add(key);
+  }
+  return undefined;
 }
 
 export function validateIterations(n: number): string | undefined {

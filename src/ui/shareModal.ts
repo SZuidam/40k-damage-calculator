@@ -1,27 +1,16 @@
-import { byName, defenderSummary, rowsSummary, statsSummary } from '../state/presets';
-import {
-  SHARE_KINDS,
-  applyImport,
-  buildShareFile,
-  parseShareText,
-  planImport,
-  serializeShareFile,
-  type ConflictPolicy,
-  type ImportItem,
-  type ImportSummary,
-  type ShareData,
-  type ShareKind,
-  type ShareState,
-} from '../state/share';
 import { uid } from '../state/ids';
+import { statLine } from '../state/presets';
+import { applyImport, buildShareFile, parseShareText, planImport, serializeShareFile, type ConflictPolicy, type ImportItem, type ImportSummary, type ShareData, type ShareState } from '../state/share';
+import { groupUnits } from '../state/units';
+import type { UnitStats } from '../types';
 import { h } from './dom';
 import { openModal } from './modal';
 
-const KIND_TITLES: Record<ShareKind, string> = {
-  attacks: 'Profiles',
-  defenders: 'Defenders',
-  weapons: 'Weapon profiles',
-};
+/** "T4 · Sv 3+ · W2 · Infantry · 2 weapons", for a saved or an imported unit. */
+function unitDetail(u: UnitStats & { weapons: unknown[] }): string {
+  const count = u.weapons.length;
+  return `${statLine(u)} · ${count === 0 ? 'no weapons' : `${count} weapon${count === 1 ? '' : 's'}`}`;
+}
 
 // ---------- checkbox picker ----------
 
@@ -103,22 +92,16 @@ function itemPicker(groups: PickerGroup[], onChange: () => void): { element: HTM
   return { element, selected };
 }
 
-const entryKey = (kind: ShareKind, id: string | number) => `${kind}:${id}`;
-
 // ---------- export ----------
 
-/** "Export…": pick saved items and download them as JSON or copy them to the clipboard. */
+/** "Export…": pick units (grouped by army) and download them as JSON or copy them to the clipboard. */
 export function openExportModal(state: ShareState): Promise<void> {
   return openModal<void>({
     title: 'Export',
     cancelValue: undefined,
     className: 'modal--wide',
     content: (close) => {
-      const sources: Record<ShareKind, { id: string; name: string; detail: string }[]> = {
-        attacks: byName(state.profiles).map((p) => ({ id: p.id, name: p.name, detail: rowsSummary(p.rows) || 'No weapons' })),
-        defenders: byName(state.defenderPresets).map((p) => ({ id: p.id, name: p.name, detail: defenderSummary(p.defender) })),
-        weapons: byName(state.library).map((w) => ({ id: w.id, name: w.name, detail: statsSummary(w) })),
-      };
+      const groups = groupUnits(state.units, state.armies, 'all');
       const status = h('p', { class: 'modal-hint share-status', 'aria-live': 'polite' });
       const copy = h('button', { type: 'button', class: 'button secondary' }, 'Copy');
       const download = h('button', { type: 'button', class: 'button primary' }, 'Download');
@@ -126,22 +109,18 @@ export function openExportModal(state: ShareState): Promise<void> {
       cancel.addEventListener('click', () => close());
 
       const picker = itemPicker(
-        SHARE_KINDS.map((kind) => ({
-          title: KIND_TITLES[kind],
-          entries: sources[kind].map((s) => ({ key: entryKey(kind, s.id), name: s.name, detail: s.detail, checked: true })),
+        groups.map((g) => ({
+          title: g.army?.name ?? 'No army',
+          entries: g.units.map((u) => ({ key: u.id, name: u.name, detail: unitDetail(u), checked: true })),
         })),
         () => sync(),
       );
 
-      const json = () => {
-        const chosen = picker.selected();
-        const ids = (kind: ShareKind) => sources[kind].filter((s) => chosen.has(entryKey(kind, s.id))).map((s) => s.id);
-        return serializeShareFile(buildShareFile(state, { attacks: ids('attacks'), defenders: ids('defenders'), weapons: ids('weapons') }));
-      };
+      const json = () => serializeShareFile(buildShareFile(state, [...picker.selected()]));
       const sync = () => {
         const count = picker.selected().size;
         copy.disabled = download.disabled = count === 0;
-        status.textContent = count === 0 ? 'Select at least one item.' : `${count} item${count === 1 ? '' : 's'} selected.`;
+        status.textContent = count === 0 ? 'Select at least one unit.' : `${count} unit${count === 1 ? '' : 's'} selected.`;
       };
 
       copy.addEventListener('click', async () => {
@@ -163,19 +142,15 @@ export function openExportModal(state: ShareState): Promise<void> {
         status.textContent = 'Downloaded. Open it with Import… to load it.';
       });
 
-      const total = SHARE_KINDS.reduce((sum, kind) => sum + sources[kind].length, 0);
-      if (total === 0) {
-        return [
-          h('p', { class: 'modal-text' }, 'Nothing to export yet. Save a profile or defender preset, or create a weapon profile first.'),
-          h('div', { class: 'modal-actions' }, cancel),
-        ];
+      if (state.units.length === 0) {
+        return [h('p', { class: 'modal-text' }, 'Nothing to export yet. Create units in the Units tab first.'), h('div', { class: 'modal-actions' }, cancel)];
       }
       sync();
       return [
         h(
           'div',
           { class: 'modal-body' },
-          h('p', { class: 'modal-hint' }, 'Choose what to share. Profiles include their own copy of every weapon.'),
+          h('p', { class: 'modal-hint' }, 'Choose the units to share. Each unit takes its stats, keywords, weapons and the name of its army along.'),
           picker.element,
           status,
         ),
@@ -193,18 +168,12 @@ export interface ImportContext {
   onImported: (summary: ImportSummary) => void;
 }
 
-function itemDetail(data: ShareData, item: ImportItem): string {
-  if (item.kind === 'weapons') return statsSummary(data.weapons[item.index]);
-  if (item.kind === 'defenders') return defenderSummary(data.defenders[item.index].defender);
-  return rowsSummary(data.attacks[item.index].rows) || 'No weapons';
-}
-
 function itemTag(item: ImportItem): PickerEntry['tag'] {
   switch (item.status) {
     case 'duplicate':
       return { text: 'Already saved', tone: 'muted' };
     case 'conflict':
-      return { text: 'Name in use', tone: 'warn' };
+      return { text: 'Name in use in this army', tone: 'warn' };
     case 'invalid':
       return { text: item.problem ?? 'Invalid', tone: 'danger' };
     default:
@@ -212,14 +181,16 @@ function itemTag(item: ImportItem): PickerEntry['tag'] {
   }
 }
 
-function summaryText({ added, renamed, replaced }: ImportSummary): string {
+function summaryText({ added, renamed, replaced, armies }: ImportSummary): string {
   const parts = [
     added > 0 ? `${added} added` : '',
     renamed > 0 ? `${renamed} added under a new name` : '',
     replaced > 0 ? `${replaced} replaced` : '',
   ].filter(Boolean);
   const total = added + renamed + replaced;
-  return total === 0 ? 'Nothing was imported.' : `Imported ${total} item${total === 1 ? '' : 's'}: ${parts.join(', ')}.`;
+  if (total === 0) return 'Nothing was imported.';
+  const created = armies > 0 ? ` Created ${armies} new arm${armies === 1 ? 'y' : 'ies'}.` : '';
+  return `Imported ${total} unit${total === 1 ? '' : 's'}: ${parts.join(', ')}.${created}`;
 }
 
 /** "Import…": paste or open an export, review what it contains, and add the chosen items. */
@@ -285,20 +256,22 @@ export function openImportModal(ctx: ImportContext): Promise<void> {
 
       const showReview = (data: ShareData) => {
         const items = planImport(data, ctx.state);
-        const keyOf = (item: ImportItem) => entryKey(item.kind, item.index);
+        const keyOf = (item: ImportItem) => String(item.index);
+        // One group per army name in the file, in file order ("No army" as its own group).
+        const armyNames = [...new Set(items.map((item) => item.army))];
         const importButton = h('button', { type: 'button', class: 'button primary' }, 'Import');
         const back = h('button', { type: 'button', class: 'button secondary' }, 'Back');
         const status = h('p', { class: 'modal-hint share-status', 'aria-live': 'polite' });
 
         const picker = itemPicker(
-          SHARE_KINDS.map((kind) => ({
-            title: KIND_TITLES[kind],
+          armyNames.map((army) => ({
+            title: army === null ? 'No army' : items.some((item) => item.army === army && item.newArmy) ? `${army} (new army)` : army,
             entries: items
-              .filter((item) => item.kind === kind)
+              .filter((item) => item.army === army)
               .map((item) => ({
                 key: keyOf(item),
                 name: item.name,
-                detail: itemDetail(data, item),
+                detail: unitDetail(data.units[item.index]),
                 checked: item.status === 'new' || item.status === 'conflict',
                 disabled: item.status === 'duplicate' || item.status === 'invalid',
                 tag: itemTag(item),
@@ -316,8 +289,8 @@ export function openImportModal(ctx: ImportContext): Promise<void> {
           'fieldset',
           { class: 'share-policy' },
           h('legend', {}, 'When a name is already in use'),
-          radio('rename', 'Keep both: import under a numbered name, e.g. “MEQ (2)”', true),
-          radio('replace', 'Replace the saved item', false),
+          radio('rename', 'Keep both: import under a numbered name, e.g. “Intercessors (2)”', true),
+          radio('replace', 'Replace the saved unit', false),
         );
         const policy = (): ConflictPolicy => (policyBox.querySelector<HTMLInputElement>('input:checked')?.value === 'replace' ? 'replace' : 'rename');
 
@@ -331,7 +304,7 @@ export function openImportModal(ctx: ImportContext): Promise<void> {
           importButton.textContent = selected.length === 0 ? 'Import' : `Import ${selected.length}`;
           policyBox.hidden = !selected.some((item) => item.status === 'conflict');
           const skipped = items.length - selected.length;
-          status.textContent = skipped > 0 ? `${skipped} item${skipped === 1 ? '' : 's'} won't be imported.` : '';
+          status.textContent = skipped > 0 ? `${skipped} unit${skipped === 1 ? '' : 's'} won't be imported.` : '';
         };
 
         back.addEventListener('click', showInput);
@@ -353,7 +326,7 @@ export function openImportModal(ctx: ImportContext): Promise<void> {
         done.addEventListener('click', () => close());
         body.replaceChildren(
           h('p', { class: 'modal-text' }, summaryText(summary)),
-          h('p', { class: 'modal-hint' }, 'Pick imported profiles and defender presets from their lists on the main page.'),
+          h('p', { class: 'modal-hint' }, 'Pick the imported units from the Army and Unit lists on the main page.'),
         );
         actions.className = 'modal-actions';
         actions.replaceChildren(done);

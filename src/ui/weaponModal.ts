@@ -13,6 +13,7 @@ import {
   type ValueAbilityKey,
 } from '../state/abilities';
 import { pickStats } from '../state/presets';
+import { isNameTaken } from '../state/units';
 import { noAbilities, type DefenderKeyword, type WeaponStats } from '../types';
 import { AP_OPTIONS, SKILL_OPTIONS, field, h, numberValue, select, setFieldError } from './dom';
 import { openAbilityValuePopover } from './abilityValuePopover';
@@ -26,11 +27,22 @@ const NEW_WEAPON: WeaponStats = { name: '', attacks: '1', skill: 3, strength: 4,
 
 let modalCounter = 0;
 
+export interface WeaponModalOptions {
+  /**
+   * Names the weapon may not have (case-insensitive), e.g. the other weapons of the same unit.
+   * Leave out when names may repeat (the weapon library).
+   */
+  takenNames?: readonly string[];
+}
+
+/** Shown when the name is in `WeaponModalOptions.takenNames`. */
+export const NAME_TAKEN_IN_UNIT = 'This unit already has a weapon with this name';
+
 /**
  * Create (no `initial`) or edit a weapon profile in a modal.
  * Resolves the saved stats, or null when cancelled.
  */
-export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | null> {
+export function openWeaponModal(initial?: WeaponStats, { takenNames }: WeaponModalOptions = {}): Promise<WeaponStats | null> {
   const draft = pickStats(initial ?? NEW_WEAPON);
   modalCounter += 1;
   const id = (name: string) => `weapon-modal-${modalCounter}-${name}`;
@@ -61,6 +73,7 @@ export function openWeaponModal(initial?: WeaponStats): Promise<WeaponStats | nu
       let nameTouched = initial !== undefined;
       const validate = () => {
         const result = validateWeaponStats(draft);
+        if (!result.name && takenNames && isNameTaken(takenNames, draft.name)) result.name = NAME_TAKEN_IN_UNIT;
         for (const [key, control] of Object.entries(controls)) {
           const message = key === 'name' && !nameTouched ? undefined : result[key as keyof WeaponStats];
           setFieldError(control, message);

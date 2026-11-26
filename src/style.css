@@ -3,6 +3,7 @@
   --bg: #f4f4f2;
   --surface-1: #fcfcfb;
   --surface-2: #f0efec;
+  --surface-3: #e3e2dd;
   --border: #dddcd7;
   --text-primary: #0b0b0b;
   --text-secondary: #52514e;
@@ -31,6 +32,7 @@
     --bg: #121211;
     --surface-1: #1a1a19;
     --surface-2: #232321;
+    --surface-3: #1b1b1a;
     --border: #34332f;
     --text-primary: #f0efec;
     --text-secondary: #c3c2b7;
@@ -57,6 +59,7 @@
   --bg: #121211;
   --surface-1: #1a1a19;
   --surface-2: #232321;
+  --surface-3: #1b1b1a;
   --border: #34332f;
   --text-primary: #f0efec;
   --text-secondary: #c3c2b7;
@@ -289,39 +292,6 @@ select[aria-invalid='true'] {
   display: none;
 }
 
-.weapon-row {
-  display: grid;
-  grid-template-columns: 20px 64px minmax(120px, 2fr) minmax(0, 3fr) auto;
-  gap: 8px;
-  align-items: end;
-  padding: 10px;
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-
-/* A weapon copy with invalid stats (only possible from an import or old saved data). */
-.weapon-row.is-invalid {
-  box-shadow: inset 3px 0 0 var(--danger);
-}
-
-/* The weapon name: read-only text, the copy's stats are not edited here. */
-.row-name {
-  align-self: center;
-  margin-top: 16px;
-  min-width: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.row-index {
-  align-self: center;
-  margin-top: 16px;
-  color: var(--text-muted);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 .stat-chips {
   display: flex;
   flex-wrap: wrap;
@@ -390,47 +360,186 @@ select[aria-invalid='true'] {
   white-space: nowrap;
 }
 
+/* ---------- Loadout rows (the attacking unit's weapons) ---------- */
+
+/*
+ * A two-toned pill per weapon: a darker equip cell (checkbox and firing number) and the weapon
+ * itself on two fixed lines, count × name with its abilities and the order buttons, then the
+ * stat chips. Equipped weapons get an accent outline around the whole pill.
+ */
+.weapon-row {
+  display: grid;
+  grid-template-columns: clamp(40px, 10%, 64px) minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.weapon-row:not(.is-off) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* A weapon copy with invalid stats (only possible from an import or old saved data). */
+.weapon-row.is-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+/* The equip cell: the whole cell toggles the weapon. */
+.row-equip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 0;
+  background: var(--surface-3);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.row-equip input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.row-index {
+  min-height: 1.2em;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.row-head .row-count {
+  flex: none;
+  width: 52px;
+  height: 28px;
+  padding: 0 6px;
+}
+
+.row-times {
+  margin-left: -2px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* The weapon name: read-only text, the copy's stats are not edited here. */
+.row-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+/* Name and abilities; long abilities wrap under the name, the order buttons stay on the right. */
+.row-title {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  min-width: 0;
+}
+
+.row-ability-slot {
+  min-width: 0;
+}
+
+.row-ability-slot:empty {
+  display: none;
+}
+
 .row-actions {
   display: flex;
+  flex: none;
   gap: 4px;
   align-items: center;
 }
 
-/* Medium: the actions move beside the weapon, the chips to a line of their own. */
-@container (max-width: 680px) {
-  .weapon-row {
-    grid-template-columns: 20px 64px minmax(0, 1fr) auto;
-  }
-  .weapon-row .row-actions {
-    grid-column: 4;
-    grid-row: 1;
-  }
-  .weapon-row .stat-chips {
-    grid-column: 2 / -1;
-    grid-row: 2;
-    margin-top: 0;
-  }
+.row-actions .icon-button {
+  width: 28px;
+  height: 28px;
 }
 
-/* Narrow (phones): models and weapon name, then the chips, then the actions. */
+.loadout-row .stat-chips {
+  flex-wrap: nowrap;
+  align-self: stretch;
+  margin-top: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Every chip at least as wide as a plain value, so the chips line up from row to row. */
+.loadout-row .chip {
+  min-width: 4.6em;
+  justify-content: center;
+}
+
+/* A weapon the unit doesn't carry: kept in the list, but muted. */
+.loadout-row.is-off .row-name {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.loadout-row.is-off .stat-chips,
+.loadout-row.is-off .row-ability-slot {
+  opacity: 0.55;
+}
+
+/* Narrow (phones): the abilities get a line of their own under the name, the chips five equal columns. */
 @container (max-width: 440px) {
-  .weapon-row {
-    grid-template-columns: 64px minmax(0, 1fr);
+  .row-head {
+    flex-wrap: wrap;
+    row-gap: 2px;
   }
-  .weapon-row .row-index {
-    display: none;
+  .row-title {
+    display: contents;
   }
-  .weapon-row .stat-chips {
-    grid-column: 1 / -1;
+  .row-name {
+    flex: 1 1 0;
   }
-  .weapon-row .row-actions {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    justify-content: flex-end;
+  .row-ability-slot {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .loadout-row .stat-chips {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(min-content, 1fr));
+  }
+  .loadout-row .chip {
+    min-width: 0;
+    padding: 2px 5px;
   }
 }
 
-/* "Add weapon…" on the left, "Optimise order" with its status on the right; they stack when narrow. */
+/* "Optimise order" with its status under the rows. */
 .attacker-actions {
   display: flex;
   flex-wrap: wrap;
@@ -438,24 +547,6 @@ select[aria-invalid='true'] {
   align-items: flex-start;
   justify-content: space-between;
   margin-top: 12px;
-}
-
-.add-weapon {
-  display: flex;
-  flex: 1 1 200px;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 280px;
-}
-
-.add-weapon-hint {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-}
-
-.add-weapon-hint[hidden] {
-  display: none;
 }
 
 .attacker-actions .optimise {
@@ -478,11 +569,56 @@ select[aria-invalid='true'] {
   flex: 1 1 180px;
 }
 
-.preset-select.is-modified {
-  border-color: var(--highlight-border);
+/* ---------- Unit pickers (attacker and defender) ---------- */
+
+.unit-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.picker-field {
+  flex: 1 1 160px;
+}
+
+.picker-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.picker-hint[hidden] {
+  display: none;
 }
 
 /* ---------- Defender ---------- */
+
+/* The Models field with the unit's read-only stat chips beside it. */
+.defender-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-end;
+}
+
+.defender-body .field--count {
+  flex: 0 0 80px;
+}
+
+.defender-body .stat-chips {
+  flex: 1 1 200px;
+  margin-top: 0;
+  min-height: 34px;
+}
+
+#defender .row-errors {
+  margin-top: 8px;
+}
 
 .defender-grid {
   display: grid;
@@ -568,7 +704,7 @@ select[aria-invalid='true'] {
 
 /* ---------- Attack conditions ---------- */
 
-/* Situational toggles between the attack picker and the weapons: legend and pills on one line. */
+/* Situational toggles between the unit picker and the weapons: legend and pills on one line. */
 .attack-conditions {
   display: flex;
   flex-wrap: wrap;
@@ -630,10 +766,6 @@ select[aria-invalid='true'] {
 
 .button.danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 88%, black);
-}
-
-.button.danger-text:hover:not(:disabled) {
-  color: var(--danger);
 }
 
 .icon-button {
@@ -1410,6 +1542,81 @@ dialog.drawer[open]::backdrop {
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+/* ---------- Units tab: army filter, units grouped by army, unit editor ---------- */
+
+/* .manage-panel sets display: flex, which would beat the hidden attribute. */
+.units-panel > [hidden] {
+  display: none;
+}
+
+.units-toolbar {
+  margin-bottom: 0;
+}
+
+.unit-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.unit-groups:empty {
+  display: none;
+}
+
+.unit-group-title {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.unit-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.unit-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.unit-editor-head h3 {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.unit-editor-names {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .unit-editor-names {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.unit-editor-form .toggle-group {
+  margin: 0;
+}
+
+.unit-weapons {
+  padding-top: 12px;
+  border-top: 1px solid var(--grid);
+}
+
+.unit-weapons .panel-hint {
+  margin: 0;
 }
 
 /* ---------- Import / export ---------- */

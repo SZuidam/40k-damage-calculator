@@ -91,8 +91,15 @@ export function confirmDialog(text: string, { confirmLabel = 'OK', danger = fals
 
 export const MAX_PRESET_NAME = 40;
 
+export interface PromptNameOptions {
+  label?: string;
+  confirmLabel?: string;
+  /** Checks the trimmed name; a message is shown under the field and blocks confirming. */
+  validate?: (name: string) => string | undefined;
+}
+
 /** Ask for a name. Resolves the trimmed name, or null when cancelled. */
-export function promptName(title: string, initial = '', { label = 'Name', confirmLabel = 'Save' } = {}): Promise<string | null> {
+export function promptName(title: string, initial = '', { label = 'Name', confirmLabel = 'Save', validate }: PromptNameOptions = {}): Promise<string | null> {
   let input: HTMLInputElement | undefined;
   return openModal<string | null>({
     title,
@@ -106,7 +113,22 @@ export function promptName(title: string, initial = '', { label = 'Name', confir
       input = nameInput;
       const cancel = h('button', { type: 'button', class: 'button secondary' }, 'Cancel');
       const save = h('button', { type: 'submit', class: 'button primary' }, confirmLabel);
-      const sync = () => (save.disabled = nameInput.value.trim() === '');
+      const error = h('p', { class: 'row-errors', id: `${id}-error`, 'aria-live': 'polite' });
+      /** Whether the current name can be confirmed. */
+      const sync = (): boolean => {
+        const name = nameInput.value.trim();
+        const message = name === '' ? undefined : validate?.(name);
+        error.textContent = message ?? '';
+        if (message) {
+          nameInput.setAttribute('aria-invalid', 'true');
+          nameInput.setAttribute('aria-describedby', error.id);
+        } else {
+          nameInput.removeAttribute('aria-invalid');
+          nameInput.removeAttribute('aria-describedby');
+        }
+        save.disabled = name === '' || message !== undefined;
+        return !save.disabled;
+      };
       nameInput.addEventListener('input', sync);
       sync();
       cancel.addEventListener('click', () => close(null));
@@ -114,12 +136,12 @@ export function promptName(title: string, initial = '', { label = 'Name', confir
         'form',
         { class: 'modal-body', novalidate: true },
         h('div', { class: 'field' }, h('label', { for: id }, label), nameInput),
+        error,
         h('div', { class: 'modal-actions' }, cancel, save),
       );
       form.addEventListener('submit', (event) => {
         event.preventDefault();
-        const name = nameInput.value.trim();
-        if (name) close(name);
+        if (sync()) close(nameInput.value.trim());
       });
       queueMicrotask(() => nameInput.select());
       return form;

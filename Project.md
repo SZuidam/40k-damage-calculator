@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (284 tests, about 9 s)
+- `npm test`: Vitest, run once (268 tests, about 4 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -18,11 +18,11 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 ## Layout
 
 ```
-index.html              static shell: sticky app bar (☰), attacker panel (profile bar host, conditions, rows host, Add weapon… select, Optimise order), defender panel, run bar, results section
+index.html              static shell: sticky app bar (☰), attacker panel (unit picker host, conditions, loadout host, Optimise order), defender panel (unit picker host, defender host), run bar, results section
 src/
-  main.ts               app state, the working area and active profile, wiring of the main page (profile bar, rows, Add weapon…, Optimise order), the drawer and its tabs, optimiser debounce, simulate button
-  style.css             design tokens on :root, dark mode, app bar, drawer + tabs, ⋯ menus, rows (container queries), chart, dialog styles
-  types.ts              WeaponStats, WeaponAbilities (+ copyAbilities), AttackConditions (+ noConditions), DEFENDER_KEYWORDS / KEYWORD_NAMES, StoredWeapon, ProfileRow, Profile, RowSnapshot (v2 data / v1 export files only), DefenderPreset, WeaponProfile (engine input), DefenderProfile, results
+  main.ts               app state, wiring of the main page (attacker and defender pickers, loadout rows, defender panel, Optimise order), the drawer and its tabs (Units · Settings), optimiser debounce, simulate button
+  style.css             design tokens on :root, dark mode, app bar, drawer + tabs, ⋯ menus, unit pickers, rows (container queries), chart, dialog styles
+  types.ts              WeaponStats, WeaponAbilities (+ copyAbilities), AttackConditions (+ noConditions), DEFENDER_KEYWORDS / KEYWORD_NAMES, StoredWeapon, LoadoutRow, AttackerSelection, DefenderSelection, WeaponProfile (engine input), DefenderProfile, Army, UnitStats, Unit, results
   engine/
     rng.ts              Rng type, mulberry32(seed), rollDie, d6 (default rng = Math.random)
     dice.ts             tryParseDice/parseDice, rollDice, diceDistribution (exact PMF), convolve, repeatDice, sums of expressions (rollDiceSum, diceSumDistribution, formatDiceSum)
@@ -34,25 +34,27 @@ src/
     *.test.ts           tests next to each module
   state/                pure, DOM-free, unit-tested
     ids.ts              uid()
-    storage.ts          loadState / saveState (key damage-calculator:v4), v3 → v4 (fromV3), v2 / v1 → v3 migration, shape checks, defaults (incl. the attack conditions)
-    legacy.ts           v3 linked rows (LinkedRow, LinkedAttack), findWeapon, snapshotRows, materialiseRows: only for the v2 → v3 step of the migration
+    storage.ts          loadState / saveState (key damage-calculator:v5), v4 → v5 (fromV4: armies, units, conditions, iterations), shape checks (incl. toArmy / toUnit / toLoadoutRow), defaults (the example army and unit)
+    loadout.ts          the main page's picks: newLoadout, syncLoadout, armyOf, unitsOfArmy, armyChoices, defaultArmyId, reconcileAttacker / reconcileDefender, carriedWeapons, resolveLoadout (engine input), defenderOf, reorderCarried
     abilities.ts        ability labels, "Add ability…" choices, withAbilityValue, withAntiValue / withoutAnti, parseAntiValue, sameAbilities
-    presets.ts          pickStats, copyDefender, sameCombatStats, resolveRows, copyRows, sameRows, sameDefender, uniqueName, byName, summaries
-    share.ts            export file (build/serialise), parseShareText, planImport, applyImport (re-exports uniqueName)
+    presets.ts          pickStats, sameCombatStats, sameDefender, byName, statsSummary, statLine
+    units.ts            armies and units: newUnit, copyUnit, sameUnit, isNameTaken, unitSummary, groupUnits, unitsInArmy, deleteArmy
+    share.ts            unit export file (buildShareFile / serializeShareFile, version 3), parseShareText, planImport, applyImport, sameUnitContent, uniqueName
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
-    validation.ts       validateWeaponStats / validateRow / validateDefender / validateIterations, abilityValueError, antiValueError, LIMITS
-    modal.ts            openModal() around a native <dialog>, confirmDialog(), promptName()
-    drawer.ts           Drawer class: the configuration <dialog> sliding in from the right, ARIA tabs (Weapons · Settings), open(tab?)
+    validation.ts       validateWeaponStats / validateLoadoutRow / validateDefender / validateUnit / validateIterations, abilityValueError, antiValueError, LIMITS
+    modal.ts            openModal() around a native <dialog>, confirmDialog(), promptName() (optional validate)
+    drawer.ts           Drawer class: the configuration <dialog> sliding in from the right, ARIA tabs (Units · Settings), open(tab?)
     menu.ts             Menu class: ⋯ button + menu (arrow keys, Esc, click outside, disabled items with a reason)
-    weaponModal.ts      openWeaponModal(initial?): create or edit a weapon profile
+    weaponModal.ts      openWeaponModal(initial?, { takenNames? }): create or edit a weapon profile of a unit
     abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta or the Y of Anti-X Y+
     statChips.ts        statChips(): read-only stat chips + ability text (Blast / Rapid Fire / Melta bonuses, active Anti / condition outlines) for the rows
-    profileRows.ts      ProfileRows class: the working area on the main page (Models + weapon name + chips + ↑ ↓ ✕), add(weapon), reorder(), refreshStats()
-    weaponsPanel.ts     WeaponsPanel class (Weapons tab): list, create, edit, delete (never blocked)
-    presetBar.ts        PresetBar class: [Preset ▾] [⋯ Save / Save as… / Rename… / Delete] with dirty detection, for profiles and defender presets
-    shareModal.ts       "Export…" (pick items, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
-    defenderForm.ts     renderDefenderForm() → { setValues() }: stats plus the keyword toggles
+    unitPicker.ts       UnitPicker class: the Army and Unit dropdowns of the attacker and the defender
+    loadoutRows.ts      LoadoutRows class: the attacking unit's weapons (firing number, Count, checkbox + name, chips, ↑ ↓), refreshStats()
+    defenderPanel.ts    renderDefenderPanel() → { render() }: Models plus the defending unit's read-only stat chips and keywords
+    unitsPanel.ts       UnitsPanel class (Units tab): army filter + ⋯ (New army… / Rename… / Delete), units grouped by army, unit editor on a draft with its own weapons
+    statFields.ts       SAVE_OPTIONS / INVULN_OPTIONS and keywordToggles(), for the unit editor
+    shareModal.ts       "Export…" (pick units grouped by army, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
     conditionsForm.ts   renderAttackConditions() → { setValues() }: the "Within half range" / "Charged this turn" toggles
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
 ```
@@ -79,13 +81,13 @@ src/
 
 ## Inputs
 
-- **Weapon profile** (library, edited in a modal): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression), abilities.
+- **Weapon profile** (a weapon of a unit, edited in a modal from the Units tab): name (required, max 40), A (dice expression), BS/WS (2–6), S, AP (0 to -6), D (dice expression), abilities.
 - **Abilities** (`WeaponAbilities` = `{ lethalHits, sustainedHits, devastatingWounds, blast, cleave, anti, rapidFire, melta, lance, twinLinked }`, the X fields `string | null` dice expressions, `anti` a `Partial<Record<DefenderKeyword, number>>` of Y per keyword, e.g. `{ vehicle: 4, monster: 4 }`): in the modal an "Add ability…" dropdown with one entry per ability (`ABILITY_CHOICES` in `state/abilities.ts`) plus a removable chip per ability. Picking `Sustained Hits X…`, `Blast X…`, `Cleave X…`, `Rapid Fire X…` or `Melta X…` opens a small pop-up beside the dropdown (`ui/abilityValuePopover.ts`) with a text input that takes the same dice expressions as A and D; OK is disabled while the value is invalid, Enter confirms without submitting the weapon form, Esc / Cancel / a click outside closes only the pop-up. Clicking the label of an X chip reopens the pop-up prefilled to change X. Values are stored normalised (`withAbilityValue`: ` d6 + 2 ` → `D6+2`). Validation (`abilityValueError`): the expression must parse and its highest roll must be at most 12 (`LIMITS.abilityValue.max`, allows 2D6 / D6+6 and keeps the exact engine's attack PMF small).
-- **Attack conditions** (`AttackConditions` = `{ halfRange, charged }`): two pill toggles, "Within half range" and "Charged this turn", in their own segment of the Attacker panel between the profile bar and the rows. They apply to every weapon and are situational: saved with the page state (`StoredState.conditions`) but not in profiles or exports.
-- **Row** (main page): models + a **copy** of a library weapon, added with "Add weapon…". Only the models can change; the copy's stats are read-only chips with the abilities as read-only text below them. Editing the library never changes a row.
-- **Defender:** models, T, Sv (2–6, or 7 for none), Inv (none or 2–6), W, and keywords (Vehicle, Monster, Psyker, Infantry, Fly; `DefenderProfile.keywords`, always in `DEFENDER_KEYWORDS` order without duplicates) as pill-shaped checkbox toggles under the stats.
+- **Attack conditions** (`AttackConditions` = `{ halfRange, charged }`): two pill toggles, "Within half range" and "Charged this turn", in their own segment of the Attacker panel between the unit picker and the rows. They apply to every weapon and are situational: saved with the page state (`StoredState.conditions`) but not in profiles or exports.
+- **Attacker** (main page): Army and Unit dropdowns, then one row per weapon of the unit: a checkbox (carried or not), Count (how many of that weapon the unit carries, i.e. models firing it) and the weapon's read-only chips. Only carried rows fire, numbered in firing order. See "Units on the main page" below.
+- **Defender** (main page): Army and Unit dropdowns, Models, and the unit's stat line (T, Sv 2–6 or 7 for none, Inv none or 2–6, W, keywords Vehicle / Monster / Psyker / Infantry / Fly) as read-only chips; the stats are edited in the Units tab.
 - **Dice expressions:** `3`, `D3`, `D6`, `2D6`, `D6+1`, `2D3+2`. Case and spaces don't matter. Only **D3 and D6** are allowed, only a **`+` bonus** (no minus), at most 20 dice, and constants from 1 to 200.
-- **Limits** (`ui/validation.ts`): weapon models 1–50, S 1–30, defender models 1–40, T 1–20, W 1–40, **models × wounds ≤ 400** (keeps the exact engine responsive), iterations 100 to 1,000,000 (default 10,000).
+- **Limits** (`ui/validation.ts`): weapon count 1–50, S 1–30, defender models 1–40, T 1–20, W 1–40, **models × wounds ≤ 400** (keeps the exact engine responsive), iterations 100 to 1,000,000 (default 10,000).
 
 ## Engine design
 
@@ -108,7 +110,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## UI behaviour
 
-- Edits mutate the state objects in place and call `onInputsChanged()`. That function saves to `localStorage` (key `damage-calculator:v4`), refreshes the rows' chips and validation, enables or disables Simulate (the run status says why it is disabled), marks old results as stale, refreshes the profile and defender preset bars (their dirty state can change) and schedules the optimiser. Library changes call `onLibraryChanged()` instead (save, refresh the Add weapon… select and the Weapons tab): rows hold copies, so nothing else changes. State arrays (`library`, `rows`, `profiles`, `defenderPresets`) are always mutated in place (`splice`), because the views hold references to them; loading a profile splices copies into `state.rows` and calls `profileRows.render()`.
+- Edits mutate the state objects in place and call `onInputsChanged()`. That function saves to `localStorage` (key `damage-calculator:v5`), refreshes the rows' chips and validation, enables or disables Simulate (the run status says why it is disabled), marks old results as stale, refreshes the profile and defender preset bars (their dirty state can change) and schedules the optimiser. Library changes call `onLibraryChanged()` instead (save, refresh the Add weapon… select and the Weapons tab): rows hold copies, so nothing else changes. State arrays (`library`, `rows`, `profiles`, `defenderPresets`) are always mutated in place (`splice`), because the views hold references to them; loading a profile splices copies into `state.rows` and calls `profileRows.render()`.
 - All pop-ups are native `<dialog>`s through `ui/modal.ts` (Esc and backdrop click cancel, nested dialogs stack), and so is the configuration drawer (`ui/drawer.ts`). Don't use `window.confirm`/`prompt`: they block browser automation.
 - Invalid fields get `aria-invalid` and an error line under their row. Simulate is disabled until every field is valid.
 - **Optimise order** (main page, under the rows) is disabled with fewer than two weapons or while inputs are invalid. It gets the amber `.is-recommended` style and a badge (`+0.12 models`) when it would help. The status line explains the result, and the tooltip lists the best order. Clicking it applies `bestOrder`. When the gain is below the threshold, it only moves weapons if that applies more damage without changing kills.
@@ -295,6 +297,69 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 **Verification:** `npm test` 284/284 (storage rewritten for v4: round trip under the v4 key only, empty library / profiles kept, row repair and drops, stale ids; v3 → v4 copies, dropped missing weapon, active id and working area, empty v3 fallback, v3 key kept; v2 / v1 → v4 through v3 with the modified / unsaved / name-clash cases and the materialised copies; presets: `resolveRows` from copies, `copyRows` deep copy, `sameRows`, a library edit or delete not changing a profile or the working area; new `state/legacy.test.ts` keeps the `materialiseRows` cases; share: v2 export rows have no ids, a v1 file imports as copies without touching the library, conflicts use `sameRows` on the saved copies; validation: `validateRow`). Engine tests unchanged. `npm run build` is clean. Checked in Chrome: a v3 save migrates (profiles appear, the active one is loaded, the row with a deleted weapon dropped, the v3 key kept); with "— Unsaved —" Add weapon… appends a row and focuses its Models field; Models, ↑ ↓ ✕ work; Save as… creates a profile, a models change enables Save, switching asks to discard (Cancel keeps the rows), Save, Rename… and Delete work, a detached unsaved working area asks before loading; editing Bolt rifle (S8) in the Weapons tab leaves the rows and profiles at S4, deleting it is allowed and the rows keep it; Optimise order on a 3-weapon list shows "+0.07 models" and reorders; an export holds version 2 rows `{ models, weapon }` and re-importing it shows everything "Already saved"; a version 1 file imports as a profile with copies; empty library disables Add weapon… with the hint; no rows → "Add weapons to simulate."; 10 bolt rifles into 10 MEQ give 20.00 / 13.33 / 6.65 / 3.32 (expected 20 / 13.33 / 6.67 / 3.33); dark and light; 390px in a same-origin iframe with no sideways scroll; no console errors.
 
+## Army configuration (session 14, 2026-11-26, branch `armyconfig`)
+
+**Why:** the user wants to move to a unit-centric model that will eventually replace the Weapons tab (global library) and the defender form. The user defines **armies** (free-text names: Space Marines, Chaos Daemons, …; no data source) and **units**, which can belong to an army (for filtering later). A unit has a name, T, Sv, Inv, W, keywords and **its own weapons**. Weapons are never shared: two units can both have a "Bolt rifle", each with its own profile. This first step is **configuration only** (user decision): nothing on the main page, the simulation, profiles or export/import uses armies or units yet.
+
+**Data model** (`types.ts`): `Army` = `{ id, name }`; `UnitStats` = `Omit<DefenderProfile, 'models'>` (no model count: it isn't part of the stat line and is chosen when a unit is used); `Unit` = `UnitStats` + `{ id, name, armyId: string | null, weapons: StoredWeapon[] }`.
+
+**Rules:** army names unique (case-insensitive); unit names unique **within an army** (the same name may exist in two armies); weapon names unique **within a unit**. Names at most 40 characters. Unit stats use the defender limits (T 1–20, Sv 2–7, Inv 2–6 or none, W 1–40) without the models × wounds rule.
+
+**Storage:** `StoredState.armies` / `units`, still under `damage-calculator:v4` (older v4 saves, the v3 / v2 / v1 migrations and the defaults give `[]`). `toArmy` drops entries without an id or name; `toUnit` reuses the number checks of `toDefender` and `toKeywords`, drops malformed weapons, generates missing unit and weapon ids, and moves a unit whose army is gone to "No army". The old session-11/12 row-based units are unrelated and are still never migrated.
+
+**UI (`ui/unitsPanel.ts`, first drawer tab "Units"):**
+
+- List view: `Army` filter (All armies, the armies by name, No army) with a ⋯ menu: **New army…** and **Rename…** use `promptName` with a `validate` callback (a duplicate name shows an error and blocks confirming); **Delete** confirms and moves the army's units to "No army". Rename / Delete are disabled with "Select an army first" for All armies / No army. Units are listed grouped by army (armies by name, "No army" last), sorted by name, with `unitSummary` (`T4 · Sv 3+ · W2 · Infantry · 2 weapons`), ✎ and ✕ (confirm).
+- Editor view (replaces the list in the same panel): works on a `copyUnit` draft. `‹ Back` asks "Discard …?" when `sameUnit` says the draft changed; Create / Save is disabled while `validateUnit` fails, with the errors under the keywords. Fields: Name, Army, T, Sv, Inv, W, keyword toggles. Weapons section: the unit's weapons (`statsSummary`), ✎ / ✕ (confirm) and `+ New weapon`, all through `openWeaponModal(…, { takenNames })`, which shows "This unit already has a weapon with this name" and blocks saving. A saved unit that moved out of the filtered army switches the filter to All armies so it stays visible. Like the other tabs, a half-edited unit stays open while the drawer is closed.
+- Shared with the defender form: `ui/statFields.ts` (save / invuln options and `keywordToggles`). `statLine` in `state/presets.ts` is shared by `defenderSummary` and `unitSummary`.
+
+**Deferred:** using units on the main page (done in session 15, see below), and armies / units in export / import (done in session 16).
+
+**Verification:** `npm test` 302/302 (new `state/units.test.ts`: `newUnit`, `copyUnit` deep copy, `sameUnit`, `isNameTaken`, `unitSummary` and an unchanged `defenderSummary`, `groupUnits` ordering / filters / empty groups, `deleteArmy`; storage: defaults and an older v4 save without armies / units, round trip with weapons and abilities, repair of stale army ids, missing ids, unknown keywords and broken weapons; validation: `validateUnit` names, limits and weapon errors; two old "no `units` property" assertions now check that `units` is `[]`). `npm run build` is clean. Checked in Chrome: the drawer opens on Units; New army… creates "Space Marines" and blocks a second "space marines " with an error; "Chaos Daemons" created; + New unit while Space Marines is filtered preselects that army; Intercessors (T4 Sv3+ W2, Infantry) with a Bolt rifle and a Bolt pistol, a second "BOLT RIFLE" blocked; the list shows `T4 · Sv 3+ · W2 · Infantry · 2 weapons`; localStorage holds the armies and the unit with its own weapons while the library still only has its Bolt rifle; deleting Space Marines (confirm "Its unit stays, without an army.") moves Intercessors to No army, which survives a reload; editing the name and pressing Back asks "Discard the changes to "Intercessors"?", and discarding keeps the old name and focuses its ✎; no console errors. Not checked in the browser: light mode and the 390px layout.
+
+## Units on the main page (session 15, 2026-11-26, branch `armyconfig`)
+
+**Why:** units replace the manual flow (user decision: "replace it now"). The attacker and the defender are each picked with an **Army** and a **Unit** dropdown. A unit's weapon list is every option it *can* take; a checkbox per weapon says which ones the unit actually carries, and a Count says how many (10 models: 8 × weapon A, 2 × weapon B). The simulation fires only the carried weapons, each with its count. The defender only needs the unit plus a model count.
+
+**Removed:** the weapon library and the Weapons tab, profiles and the profile bar, "Add weapon…", defender presets and the editable defender form, Import / Export (its file format was built on profiles and presets; unit export / import is still to do), and the v1 / v2 / v3 migrations. Files: `ui/presetBar.ts`, `ui/profileRows.ts`, `ui/defenderForm.ts`, `ui/weaponsPanel.ts`, `ui/shareModal.ts`, `state/share.ts`, `state/legacy.ts` (+ tests), and their CSS. Types `ProfileRow`, `Profile`, `RowSnapshot`, `DefenderPreset` are gone; `presets.ts` keeps only the weapon / stat-line helpers. Earlier sections describe these as they were.
+
+**Data model** (`types.ts`): `LoadoutRow` = `{ weaponId, carried, count }`; `AttackerSelection` = `{ armyId: string | null (null = "No army"), unitId: string | null, rows: LoadoutRow[] }`; `DefenderSelection` = `{ armyId, unitId, models }`. Rows **link** to the unit's weapon by id (weapon ids are unique within a unit), so editing a unit in the Units tab changes the attack straight away.
+
+**Storage v5** (`damage-calculator:v5`): `{ armies, units, attacker, defender, conditions, iterations }`.
+
+- `loadState`: v5 → `normalise`; else v4 → `fromV4` (keeps armies, units, conditions and iterations; the library, profiles, working area and defender presets are dropped; no unit picked). Older keys, including v4, are left in place, so the old data is still in the browser.
+- `normalise` reconciles both sides with the units (`reconcileAttacker` / `reconcileDefender`): a unit that is gone is unpicked (and its rows cleared); the army dropdown follows the picked unit's army; otherwise it must be an existing choice, else `defaultArmyId` (first army by name that has units). A side with nothing saved starts on `defaultArmyId`. The loadout goes through `syncLoadout`: rows keep order, ticks and counts; rows of removed weapons and duplicates are dropped; new weapons are appended unticked. Counts and models out of range are kept for validation to flag.
+- **Defaults** (brand-new state, or a v4 save without armies and units): the example army "Space Marines" with "Intercessor Squad" (T4 Sv 3+ W2 Infantry; Bolt rifle A2 S4 AP-1 D1, Bolt pistol A1 S4 AP0 D1, Close combat weapon A3 S4 AP0 D1, all BS/WS 3+), picked on both sides, with 5 bolt rifles carried into 5 models. A v5 save with no units stays empty.
+
+**Rules of the page:**
+
+- Picking an attacking unit starts every weapon **unticked with Count 5** (`DEFAULT_WEAPON_COUNT`; user: 5 is the usual base unit size). Switching to another unit resets the loadout; picking a unit again later starts fresh too. Changing the army unpicks the unit unless it belongs to that army.
+- The defender's Models starts at 5 (`DEFAULT_UNIT_MODELS`) and stays when another unit is picked. The models × wounds ≤ 400 error now sits on **models** (`validateDefender`), the only field the page edits.
+- Only carried rows are validated (`validateLoadoutRow(count, weapon)`: Count 1–50 plus the weapon's errors on one line), numbered and fired. Unticked rows stay in the list, muted, with their count kept and still editable.
+- ↑ ↓ move rows among all rows. **Optimise order** works on the carried weapons; `reorderCarried` moves them between the slots they already hold, so unticked rows stay put.
+- Edits in the Units tab call `onUnitsChanged()`: reconcile both sides, re-render pickers, rows and defender, then `onInputsChanged()`.
+- Simulate blocked reasons, in order: "Create units under ☰ → Units to simulate." / "Pick an attacking unit to simulate." / "Give the attacking unit weapons under ☰ → Units to simulate." / "Tick the weapons the attacking unit carries to simulate." / "Fix the highlighted weapons to simulate." / "Pick a defending unit to simulate." / "Fix the defender to simulate." / iterations.
+
+**UI:** `UnitPicker` (Army: armies by name plus "No army" when a unit has none or there are no armies; Unit: "Pick a unit…" plus that army's units by name, "No units in this army" / "No units yet" when empty; both disabled with the hint "Create armies and units under ☰ → Units." without units). The picker containers are `#attacker-picker` / `#defender-picker` (the selects own `attacker-unit` etc.). `LoadoutRows` reuses the `.weapon-row` grid: firing number, Count, a label with the checkbox and name (`.row-carry`), chips, ↑ ↓; unticked rows get `.is-off`. `renderDefenderPanel`: Models plus chips `T` `Sv` `Inv` `W` and the keywords. The drawer has Units · Settings; Settings holds Iterations (and Import / Export again since session 16).
+
+**Verification:** `npm test` 255/255 (new `state/loadout.test.ts`; `storage.test.ts` rewritten for v5: example defaults, round trip under the v5 key, an empty v5 save stays empty, unit repair, loadout sync / stale unit / army follow on load, v4 → v5 incl. the default army with army-less units and the example for an empty v4 save, ability repair through unit weapons; `validateLoadoutRow`; `presets.test.ts` trimmed to the kept helpers). `npm run build` is clean. Checked in Chrome: the example page (5 bolt rifles); ticking the pistol with counts 8 / 2 gives 16 / 10.70 / 5.34 / 2.68 and 2 / 1.33 / 0.67 / 0.22 into 5 Intercessors as expected; firing numbers skip unticked rows; editing the unit (T5, removing the pistol) updates the defender chips and drops the row; deleting the only unit disables the pickers with the hint and blocks Simulate; a v4 save with two armies and an army-less unit migrates (conditions kept, Chaos Daemons first), army switching filters the units, 40 models of W12 flags Models, and 8 plasma incinerators + 2 bolt pistols into 10 Bloodletters give 8.86 wounds / 5.89 unsaved as expected; the v4 key stays; no console errors. A real phone-width viewport was not checked (the window could not be resized).
+
+## Unit export and import (session 16, 2026-11-26, branch `armyconfig`)
+
+**Why:** Import / Export was removed with profiles in session 15; it now shares units instead.
+
+**File format** (`state/share.ts`, `SHARE_VERSION` 3): `{ format: "damage-calculator-share", version: 3, exportedAt, units: SharedUnit[] }`, where `SharedUnit` = the unit's stat line and keywords, `name`, `army` (the army's **name**, or null for "No army") and `weapons` (`WeaponStats`, no ids). No ids travel: the importer matches armies by name and gives units and weapons new ids. Version 1–2 files (profiles, defender presets, weapon profiles) are refused with "This export holds profiles and weapon profiles from an older version of the app, which now uses armies and units instead."
+
+**Parsing** reuses the storage checks (`toUnit` is now exported): malformed units and weapons are dropped, abilities repaired, names and army names trimmed and cut to 40 characters, an empty army name means "No army". Same errors as before for empty input, invalid JSON, a non-export, a newer version, nothing to import, and over 1,000,000 characters.
+
+**Review** (`planImport`): per unit, compared with the units **in the army with the same name** (case-insensitive): new; **Already saved** (same name and `sameUnitContent`: stat line, keywords, weapons by name and combat stats in order; not selectable); **Name in use in this army** (same name, different content); invalid (`validateUnit` without the name check; first error shown; not selectable). The same unit name in another army is no clash. Groups follow the file's army names; an army that doesn't exist yet is titled `Name (new army)`.
+
+**Apply** (`applyImport`): a missing army is created (counted in the summary: "Created 1 new army."). Keep both adds `Name (2)`, `Name (3)`, … within the army (`uniqueName`, which moved here from presets). **Replace** keeps the saved unit's id, name and army and takes the stats, keywords and weapons from the file; weapons that keep their name keep their id, so a loadout on the main page that uses the unit stays linked (ticks and counts kept), new weapons are appended unticked by the reconcile. After an import `main.ts` re-renders the Units tab and calls `onUnitsChanged()`.
+
+**UI:** Settings → "Import and export" with Import… / Export… (the session-4 modal, `ui/shareModal.ts`, adapted): Export lists the units grouped by army (`groupUnits`), all checked with a select-all box per army; Copy / Download (`damage-calculator-YYYY-MM-DD.json`). The share CSS and `.modal-actions--split` are back.
+
+**Verification:** `npm test` 268/268 (new `state/share.test.ts`: export picks units and army names without ids, a stale army exports as "No army", round trip incl. abilities, error texts incl. old versions, repair and trimming, review statuses per army and case-insensitive army match, `sameUnitContent`, adding with army creation, keep both, replace keeping unit and weapon ids, chosen items only, `uniqueName`). `npm run build` is clean. Checked in Chrome: Export lists Chaos Daemons / Space Marines / No army with unit summaries; importing a file with a changed Hellblasters, a Custodian Guard in a new army and an invalid unit shows "Name in use in this army", "(new army)" and the Toughness error; Replace gives "Imported 2 units: 1 added, 1 replaced. Created 1 new army."; the attacker's Hellblasters loadout kept its ticked plasma incinerator and gained the new heavy bolt pistol unticked; no console errors.
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -307,4 +372,5 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - A share link (export encoded in the URL hash) next to Copy / Download.
+- Cloud save / load, e.g. Google Drive (discussed in session 16, not built): Google Identity Services token client + Drive API v3 from the browser with the narrow `drive.file` scope, one JSON file (the export format) the app creates and reads back; needs a Google Cloud project with an OAuth client ID whose authorised JavaScript origins are `https://szuidam.github.io` and the dev server.
 - Undo for row edits on the main page.

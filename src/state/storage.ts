@@ -1,40 +1,23 @@
-import { DEFENDER_KEYWORDS, noAbilities, noConditions, type AttackConditions, type DefenderKeyword, type DefenderPreset, type DefenderProfile, type Profile, type ProfileRow, type RowSnapshot, type StoredWeapon, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, noAbilities, noConditions, type Army, type AttackConditions, type AttackerSelection, type DefenderKeyword, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitStats, type WeaponAbilities, type WeaponStats } from '../types';
 import { uid } from './ids';
-import { findWeapon, materialiseRows, snapshotRows, type LinkedAttack, type LinkedRow } from './legacy';
-import { copyRows, pickStats, sameCombatStats, sameRows, uniqueName } from './presets';
+import { DEFAULT_UNIT_MODELS, DEFAULT_WEAPON_COUNT, defaultArmyId, newLoadout, reconcileAttacker, reconcileDefender } from './loadout';
+import { pickStats } from './presets';
 
-export const STORAGE_KEY = 'damage-calculator:v4';
-export const V3_STORAGE_KEY = 'damage-calculator:v3';
-export const V2_STORAGE_KEY = 'damage-calculator:v2';
-export const LEGACY_STORAGE_KEY = 'damage-calculator:v1';
+export const STORAGE_KEY = 'damage-calculator:v5';
+/** The v4 state (sessions 13–14): weapon library, profiles and defender presets, plus armies and units. */
+export const V4_STORAGE_KEY = 'damage-calculator:v4';
 
-/** Everything the app keeps in localStorage (v4). */
+/** Everything the app keeps in localStorage (v5). */
 export interface StoredState {
-  library: StoredWeapon[];
-  /** The working area: the weapon rows on the main page, which the simulation fires. */
-  rows: ProfileRow[];
-  /** Saved profiles, each with its own weapon copies. May be empty. */
-  profiles: Profile[];
-  /** The profile the working area was loaded from or saved to, or null when it is unsaved. */
-  activeProfileId: string | null;
-  defender: DefenderProfile;
-  defenderPresets: DefenderPreset[];
-  activeDefenderPresetId: string | null;
-  /** Situational attack conditions (half range, charged): page state only, never in profiles or exports. */
-  conditions: AttackConditions;
-  iterations: number;
-}
-
-/** The v3 state (sessions 11–12): attacks whose rows link to the library. Only read for migration. */
-export interface V3State {
-  library: StoredWeapon[];
-  /** There is always at least one. */
-  attacks: LinkedAttack[];
-  /** Always the id of one of `attacks`. */
-  activeAttackId: string;
-  defender: DefenderProfile;
-  defenderPresets: DefenderPreset[];
-  activeDefenderPresetId: string | null;
+  /** Armies the user defined (free-text names). May be empty. */
+  armies: Army[];
+  /** Units the user defined, each with its own weapons. May be empty. */
+  units: Unit[];
+  /** The attacking unit on the main page and the weapons it carries. */
+  attacker: AttackerSelection;
+  /** The defending unit on the main page and its size. */
+  defender: DefenderSelection;
+  /** Situational attack conditions (half range, charged): page state only. */
   conditions: AttackConditions;
   iterations: number;
 }
@@ -43,52 +26,53 @@ export interface V3State {
 export type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 const DEFAULT_ITERATIONS = 10_000;
-/** Names of attacks and profiles: same limit as `MAX_PRESET_NAME` in ui/modal.ts. */
-const MAX_NAME = 40;
 
-export function defaultDefender(): DefenderProfile {
-  return { models: 10, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: [] };
-}
-
-function boltRifle(): StoredWeapon {
-  return { id: uid('weapon'), name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
-}
+const exampleWeapon = (name: string, attacks: string, ap: number): StoredWeapon => ({
+  id: uid('weapon'),
+  name,
+  attacks,
+  skill: 3,
+  strength: 4,
+  ap,
+  damage: '1',
+  abilities: noAbilities(),
+});
 
 /**
- * A brand-new state: one "Bolt rifle" weapon profile, a "Bolt rifles" profile of 10 models
- * firing a copy of it, loaded into the working area, into 10 MEQ (the same loadout as v1).
+ * A brand-new state: the example army "Space Marines" with an "Intercessor Squad" (bolt rifle,
+ * bolt pistol, close combat weapon), picked on both sides: 5 bolt rifles into 5 Intercessors.
  */
 export function defaultState(): StoredState {
-  const weapon = boltRifle();
-  const profile: Profile = { id: uid('profile'), name: 'Bolt rifles', rows: [{ id: uid('row'), models: 10, weapon: pickStats(weapon) }] };
+  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), iterations: DEFAULT_ITERATIONS });
+}
+
+/** `state` plus the example army and unit, picked on both sides with the bolt rifle carried. Only for a state without armies or units. */
+function withExample(state: StoredState): StoredState {
+  const army: Army = { id: uid('army'), name: 'Space Marines' };
+  const unit: Unit = {
+    id: uid('unit'),
+    name: 'Intercessor Squad',
+    armyId: army.id,
+    toughness: 4,
+    save: 3,
+    invuln: null,
+    wounds: 2,
+    keywords: ['infantry'],
+    weapons: [exampleWeapon('Bolt rifle', '2', -1), exampleWeapon('Bolt pistol', '1', 0), exampleWeapon('Close combat weapon', '3', 0)],
+  };
+  const rows = newLoadout(unit);
+  rows[0].carried = true;
   return {
-    library: [weapon],
-    rows: copyRows(profile.rows),
-    profiles: [profile],
-    activeProfileId: profile.id,
-    defender: defaultDefender(),
-    defenderPresets: [],
-    activeDefenderPresetId: null,
-    conditions: noConditions(),
-    iterations: DEFAULT_ITERATIONS,
+    ...state,
+    armies: [army],
+    units: [unit],
+    attacker: { armyId: army.id, unitId: unit.id, rows },
+    defender: { armyId: army.id, unitId: unit.id, models: DEFAULT_UNIT_MODELS },
   };
 }
 
-/** The v3 defaults, for repairing v3 and v2 data before it is converted. */
-function defaultV3(): V3State {
-  const weapon = boltRifle();
-  const attack: LinkedAttack = { id: uid('attack'), name: 'Bolt rifles', rows: [{ id: uid('row'), models: 10, weaponId: weapon.id }] };
-  return {
-    library: [weapon],
-    attacks: [attack],
-    activeAttackId: attack.id,
-    defender: defaultDefender(),
-    defenderPresets: [],
-    activeDefenderPresetId: null,
-    conditions: noConditions(),
-    iterations: DEFAULT_ITERATIONS,
-  };
-}
+const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, rows: [] });
+const noDefender = (): DefenderSelection => ({ armyId: null, unitId: null, models: DEFAULT_UNIT_MODELS });
 
 function browserStorage(): KeyValueStorage | undefined {
   try {
@@ -99,20 +83,17 @@ function browserStorage(): KeyValueStorage | undefined {
 }
 
 /**
- * Load v4 state, migrate v3, v2 or v1 state, or fall back to the defaults. Never throws. Older
- * keys are left in place: saving writes the v4 key only.
+ * Load v5 state, take the armies and units (plus conditions and iterations) from v4 state, or
+ * fall back to the defaults. Never throws. The v4 key and older keys are left in place: saving
+ * writes the v5 key only.
  */
 export function loadState(storage: KeyValueStorage | undefined = browserStorage()): StoredState {
   if (!storage) return defaultState();
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (raw) return normalise(JSON.parse(raw));
-    const v3 = storage.getItem(V3_STORAGE_KEY);
-    if (v3) return fromV3(normaliseV3(JSON.parse(v3)));
-    const v2 = storage.getItem(V2_STORAGE_KEY);
-    if (v2) return fromV3(migrateV2(JSON.parse(v2)));
-    const legacy = storage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy) return fromV3(migrateV1(JSON.parse(legacy)));
+    const v4 = storage.getItem(V4_STORAGE_KEY);
+    if (v4) return fromV4(JSON.parse(v4));
   } catch {
     // Corrupt JSON or storage blocked: start fresh.
   }
@@ -127,243 +108,55 @@ export function saveState(state: StoredState, storage: KeyValueStorage | undefin
   }
 }
 
-// ---------- v4 ----------
-
 /**
- * Check the shape of parsed v4 data and repair what can be repaired. Rows whose weapon copy
- * is malformed are dropped; out-of-range values are kept for validation to flag. An empty
- * library or no profiles is fine: nothing depends on them.
+ * Check the shape of parsed v5 data and repair what can be repaired: malformed entries are
+ * dropped, out-of-range values are kept for validation to flag, and the attacker and defender
+ * are reconciled with the units (a missing unit is unpicked, the loadout follows the weapons).
  */
 function normalise(raw: unknown): StoredState {
   if (!isRecord(raw)) return defaultState();
-  const profiles = list(raw.profiles, toProfile);
-  const defenderPresets = list(raw.defenderPresets, toDefenderPreset);
-  return {
-    library: list(raw.library, toStoredWeapon),
-    rows: list(raw.rows, toProfileRow),
-    profiles,
-    activeProfileId: activeId(raw.activeProfileId, profiles),
-    defender: toDefender(raw.defender) ?? defaultDefender(),
-    defenderPresets,
-    activeDefenderPresetId: activeId(raw.activeDefenderPresetId, defenderPresets),
-    conditions: toConditions(raw.conditions),
-    iterations: num(raw.iterations, DEFAULT_ITERATIONS),
-  };
-}
-
-// ---------- v3 → v4 ----------
-
-/**
- * v3 → v4. Every attack becomes a profile with the same id and name whose rows copy the
- * library weapon they linked to; rows whose weapon is missing are dropped. The working area
- * gets a copy of the active attack's rows, and that profile stays active.
- */
-export function fromV3(v3: V3State): StoredState {
-  const copy = (row: LinkedRow): ProfileRow[] => {
-    const weapon = findWeapon(v3.library, row.weaponId);
-    return weapon ? [{ id: row.id, models: row.models, weapon: pickStats(weapon) }] : [];
-  };
-  const profiles: Profile[] = v3.attacks.map((a) => ({ id: a.id, name: a.name, rows: a.rows.flatMap(copy) }));
-  const active = profiles.find((p) => p.id === v3.activeAttackId) ?? null;
-  return {
-    library: v3.library,
-    rows: active ? copyRows(active.rows) : [],
-    profiles,
-    activeProfileId: active?.id ?? null,
-    defender: v3.defender,
-    defenderPresets: v3.defenderPresets,
-    activeDefenderPresetId: v3.activeDefenderPresetId,
-    conditions: v3.conditions,
-    iterations: v3.iterations,
-  };
-}
-
-/** Check the shape of parsed v3 data and repair what can be repaired. */
-function normaliseV3(raw: unknown): V3State {
-  const fallback = defaultV3();
-  if (!isRecord(raw)) return fallback;
-
-  let library = list(raw.library, toStoredWeapon);
-  const emptyLibrary = library.length === 0;
-  if (emptyLibrary) library = fallback.library;
-  // Rows pointing at a missing weapon are unlinked (and dropped by fromV3).
-  const link = (attack: LinkedAttack): LinkedAttack => ({
-    ...attack,
-    rows: attack.rows.map((r) => (findWeapon(library, r.weaponId) ? r : { ...r, weaponId: null })),
-  });
-
-  let attacks = list(raw.attacks, toLinkedAttack).map(link);
-  if (attacks.length === 0) {
-    attacks = emptyLibrary ? fallback.attacks : [{ id: uid('attack'), name: 'Attack', rows: [{ id: uid('row'), models: 1, weaponId: library[0].id }] }];
-  }
-  const activeAttackId = typeof raw.activeAttackId === 'string' && attacks.some((a) => a.id === raw.activeAttackId) ? raw.activeAttackId : attacks[0].id;
-  const defenderPresets = list(raw.defenderPresets, toDefenderPreset);
-
-  return {
-    library,
-    attacks,
-    activeAttackId,
-    defender: toDefender(raw.defender) ?? fallback.defender,
-    defenderPresets,
-    activeDefenderPresetId: activeId(raw.activeDefenderPresetId, defenderPresets),
-    conditions: toConditions(raw.conditions),
-    iterations: num(raw.iterations, DEFAULT_ITERATIONS),
-  };
-}
-
-const activeId = (id: unknown, items: { id: string }[]): string | null => (typeof id === 'string' && items.some((p) => p.id === id) ? id : null);
-
-// ---------- v2 → v3 (then v3 → v4) ----------
-
-/** A v2 attack preset: a name plus snapshot copies of its rows. */
-interface SnapshotPreset {
-  id: string;
-  name: string;
-  rows: RowSnapshot[];
+  const armies = list(raw.armies, toArmy);
+  // A unit whose army is gone moves to "No army".
+  const units = list(raw.units, toUnit).map((u) => (u.armyId === null || armies.some((a) => a.id === u.armyId) ? u : { ...u, armyId: null }));
+  const attacker = toAttacker(raw.attacker);
+  const defender = toDefenderSelection(raw.defender);
+  // Nothing saved for a side (a v4 save): its army dropdown starts on the first army with units.
+  if (!isRecord(raw.attacker)) attacker.armyId = defaultArmyId(armies, units);
+  if (!isRecord(raw.defender)) defender.armyId = defaultArmyId(armies, units);
+  reconcileAttacker(attacker, armies, units);
+  reconcileDefender(defender, armies, units);
+  return { armies, units, attacker, defender, conditions: toConditions(raw.conditions), iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
 }
 
 /**
- * The v2 state: one live attack (`rows`) plus attack presets holding snapshot copies. v2 also
- * had unit presets; those are dropped on migration (units no longer exist).
+ * v4 → v5: keep the armies and units, the attack conditions and the iterations. The weapon
+ * library, profiles, working area and defender presets are dropped (units replaced them), and
+ * no unit is picked yet. Without any armies or units the example is added, as for a
+ * brand-new state.
  */
-interface V2State {
-  library: StoredWeapon[];
-  rows: LinkedRow[];
-  defender: DefenderProfile;
-  iterations: number;
-  attackPresets: SnapshotPreset[];
-  defenderPresets: DefenderPreset[];
-  activeAttackPresetId: string | null;
-  activeDefenderPresetId: string | null;
-  conditions: AttackConditions;
+function fromV4(raw: unknown): StoredState {
+  if (!isRecord(raw)) return defaultState();
+  const state = normalise({ armies: raw.armies, units: raw.units, conditions: raw.conditions, iterations: raw.iterations });
+  return state.armies.length === 0 && state.units.length === 0 ? withExample(state) : state;
 }
 
-/** The v2 defaults: one "Bolt rifle" profile and a row of 10 models. */
-function defaultV2(): V2State {
-  const { library, attacks } = defaultV3();
-  return {
-    library,
-    rows: attacks[0].rows,
-    defender: defaultDefender(),
-    iterations: DEFAULT_ITERATIONS,
-    attackPresets: [],
-    defenderPresets: [],
-    activeAttackPresetId: null,
-    activeDefenderPresetId: null,
-    conditions: noConditions(),
-  };
+/** The attacker: ids as saved (reconciled afterwards) and its loadout rows. */
+function toAttacker(value: unknown): AttackerSelection {
+  if (!isRecord(value)) return noAttacker();
+  return { armyId: optionalId(value.armyId), unitId: optionalId(value.unitId), rows: list(value.rows, toLoadoutRow) };
 }
 
-/** Parse v2 data and convert it to v3. */
-export function migrateV2(raw: unknown): V3State {
-  return fromV2(normaliseV2(raw));
+function toLoadoutRow(value: unknown): LoadoutRow | null {
+  if (!isRecord(value) || typeof value.weaponId !== 'string') return null;
+  return { weaponId: value.weaponId, carried: value.carried === true, count: num(value.count, DEFAULT_WEAPON_COUNT) };
 }
 
-/**
- * v2 → v3. Attack presets become linked attacks through `materialiseRows`, which
- * reuses library entries with the same stats instead of duplicating them. The live rows
- * become the active attack: the active preset itself when they still match it (no unlinked
- * row and the same snapshot, the v2 "not modified" check), otherwise a new attack named
- * `Preset (modified)`, or `Current attack` when no preset was active, so no work is lost.
- */
-function fromV2(v2: V2State): V3State {
-  let library = [...v2.library];
-  const active = v2.attackPresets.find((p) => p.id === v2.activeAttackPresetId);
-  const clean = active !== undefined && v2.rows.every((r) => findWeapon(library, r.weaponId)) && sameRows(snapshotRows(v2.rows, library), active.rows);
-
-  const link = (preset: SnapshotPreset): LinkedAttack => {
-    // The clean active preset is the live attack: keep its rows, linked as they were.
-    if (clean && preset === active) return { id: preset.id, name: preset.name, rows: v2.rows };
-    const linked = materialiseRows(preset.rows, library, preset.name);
-    library = linked.library;
-    return { id: preset.id, name: preset.name, rows: linked.rows };
-  };
-  const attacks = v2.attackPresets.map(link);
-
-  let activeAttackId: string;
-  if (clean) {
-    activeAttackId = active.id;
-  } else {
-    const suffix = ' (modified)';
-    const base = active ? `${active.name.slice(0, MAX_NAME - suffix.length).trimEnd()}${suffix}` : 'Current attack';
-    const current: LinkedAttack = { id: uid('attack'), name: uniqueName(attacks.map((a) => a.name), base), rows: v2.rows };
-    attacks.push(current);
-    activeAttackId = current.id;
-  }
-
-  return {
-    library,
-    attacks,
-    activeAttackId,
-    defender: v2.defender,
-    defenderPresets: v2.defenderPresets,
-    activeDefenderPresetId: v2.activeDefenderPresetId,
-    conditions: v2.conditions,
-    iterations: v2.iterations,
-  };
+function toDefenderSelection(value: unknown): DefenderSelection {
+  if (!isRecord(value)) return noDefender();
+  return { armyId: optionalId(value.armyId), unitId: optionalId(value.unitId), models: num(value.models, DEFAULT_UNIT_MODELS) };
 }
 
-/** Check the shape of parsed v2 data and repair what can be repaired. */
-function normaliseV2(raw: unknown): V2State {
-  const fallback = defaultV2();
-  if (!isRecord(raw)) return fallback;
-
-  let library = list(raw.library, toStoredWeapon);
-  let rows = list(raw.rows, toLinkedRow).map((r) => (library.some((w) => w.id === r.weaponId) ? r : { ...r, weaponId: null }));
-  if (library.length === 0) {
-    library = fallback.library;
-    rows = fallback.rows;
-  } else if (rows.length === 0) {
-    rows = [{ id: uid('row'), models: 1, weaponId: library[0].id }];
-  }
-
-  const attackPresets = list(raw.attackPresets, toSnapshotPreset);
-  const defenderPresets = list(raw.defenderPresets, toDefenderPreset);
-
-  return {
-    library,
-    rows,
-    defender: toDefender(raw.defender) ?? fallback.defender,
-    iterations: num(raw.iterations, DEFAULT_ITERATIONS),
-    attackPresets,
-    defenderPresets,
-    activeAttackPresetId: activeId(raw.activeAttackPresetId, attackPresets),
-    activeDefenderPresetId: activeId(raw.activeDefenderPresetId, defenderPresets),
-    conditions: toConditions(raw.conditions),
-  };
-}
-
-// ---------- v1 → v3 (then v3 → v4) ----------
-
-/**
- * v1 stored `{ weapons: WeaponProfile[], defender, iterations }`. Each weapon becomes a
- * library entry (deduplicated by name + stats) plus a row linked to it. Those rows are a
- * v2 live attack without a preset, so they become the attack "Current attack".
- */
-export function migrateV1(raw: unknown): V3State {
-  return fromV2(v1ToV2(raw));
-}
-
-function v1ToV2(raw: unknown): V2State {
-  const fallback = defaultV2();
-  if (!isRecord(raw) || !Array.isArray(raw.weapons)) return fallback;
-
-  const library: StoredWeapon[] = [];
-  const rows: LinkedRow[] = [];
-  for (const item of raw.weapons) {
-    const stats = toWeaponStats(item);
-    if (!stats || !isRecord(item)) continue;
-    let entry = library.find((w) => w.name === stats.name && sameCombatStats(w, stats));
-    if (!entry) {
-      entry = { ...stats, id: uid('weapon') };
-      library.push(entry);
-    }
-    rows.push({ id: uid('row'), models: num(item.models, 1), weaponId: entry.id });
-  }
-  const defender = toDefender(raw.defender) ?? fallback.defender;
-  if (library.length === 0) return { ...fallback, defender };
-  return { ...fallback, library, rows, defender, iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
-}
+const optionalId = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
 /** States saved before conditions existed have none switched on. */
 function toConditions(value: unknown): AttackConditions {
@@ -450,61 +243,40 @@ function toAbilityDice(value: unknown): string | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? String(value) : null;
 }
 
-function toStoredWeapon(value: unknown): StoredWeapon | null {
-  const stats = toWeaponStats(value);
-  return stats && isRecord(value) && typeof value.id === 'string' ? { ...stats, id: value.id } : null;
-}
-
-function toLinkedRow(value: unknown): LinkedRow | null {
-  if (!isRecord(value) || typeof value.id !== 'string') return null;
-  return { id: value.id, models: num(value.models, 1), weaponId: typeof value.weaponId === 'string' ? value.weaponId : null };
-}
-
-function toSnapshot(value: unknown): RowSnapshot | null {
-  if (!isRecord(value) || typeof value.weaponId !== 'string') return null;
-  const weapon = toWeaponStats(value.weapon);
-  return weapon ? { models: num(value.models, 1), weaponId: value.weaponId, weapon } : null;
-}
-
-function toSnapshotPreset(value: unknown): SnapshotPreset | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
-  return { id: value.id, name: value.name, rows: list(value.rows, toSnapshot) };
-}
-
-/** A v3 attack: rows linked to the library by `weaponId`. */
-function toLinkedAttack(value: unknown): LinkedAttack | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
-  return { id: value.id, name: value.name, rows: list(value.rows, toLinkedRow) };
-}
-
-/** A v4 row: models plus a weapon copy. A row without a usable weapon copy is dropped. */
-function toProfileRow(value: unknown): ProfileRow | null {
-  if (!isRecord(value)) return null;
-  const weapon = toWeaponStats(value.weapon);
-  if (!weapon) return null;
-  return { id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('row'), models: num(value.models, 1), weapon };
-}
-
-function toProfile(value: unknown): Profile | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
-  return { id: value.id, name: value.name, rows: list(value.rows, toProfileRow) };
-}
-
-export function toDefender(value: unknown): DefenderProfile | null {
-  if (!isRecord(value)) return null;
-  const d = defaultDefender();
+/** The stat line of a unit; non-numbers get T4, Sv 3+, W2. */
+function toUnitStats(value: Record<string, unknown>): UnitStats {
   return {
-    models: num(value.models, d.models),
-    toughness: num(value.toughness, d.toughness),
-    save: num(value.save, d.save),
+    toughness: num(value.toughness, 4),
+    save: num(value.save, 3),
     invuln: typeof value.invuln === 'number' && Number.isFinite(value.invuln) ? value.invuln : null,
-    wounds: num(value.wounds, d.wounds),
+    wounds: num(value.wounds, 2),
     keywords: toKeywords(value.keywords),
   };
 }
 
-function toDefenderPreset(value: unknown): DefenderPreset | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
-  const defender = toDefender(value.defender);
-  return defender ? { id: value.id, name: value.name, defender } : null;
+function toArmy(value: unknown): Army | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id === '' || typeof value.name !== 'string') return null;
+  return { id: value.id, name: value.name };
+}
+
+/** A weapon of a unit: a usable weapon profile, with a new id when it has none. */
+function toUnitWeapon(value: unknown): StoredWeapon | null {
+  const stats = toWeaponStats(value);
+  if (!stats || !isRecord(value)) return null;
+  return { ...stats, id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('weapon') };
+}
+
+/**
+ * A unit: a name, its stat line and keywords, and its weapons.
+ * Malformed weapons are dropped; out-of-range stats are kept for validation to flag.
+ */
+export function toUnit(value: unknown): Unit | null {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  return {
+    id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('unit'),
+    name: value.name,
+    armyId: typeof value.armyId === 'string' ? value.armyId : null,
+    ...toUnitStats(value),
+    weapons: list(value.weapons, toUnitWeapon),
+  };
 }
