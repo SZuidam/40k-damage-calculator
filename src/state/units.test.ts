@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { noAbilities, type Army, type StoredWeapon, type Unit } from '../types';
 import { copyUnit, deleteArmy, groupUnits, isNameTaken, newUnit, sameUnit, unitSummary, unitsInArmy } from './units';
 
-const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
-const pistol = (): StoredWeapon => ({ id: 'w-pistol', name: 'Bolt pistol', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() });
+const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
+const pistol = (): StoredWeapon => ({ id: 'w-pistol', name: 'Bolt pistol', type: 'ranged', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() });
 
 const unit = (overrides: Partial<Unit> = {}): Unit => ({
   id: 'u1',

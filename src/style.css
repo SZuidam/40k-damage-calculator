@@ -327,6 +327,15 @@ select[aria-invalid='true'] {
   font-weight: 700;
 }
 
+/* "Melee" in front of the stat chips of a melee weapon. */
+.chip-tag {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .chips-empty {
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -700,6 +709,24 @@ select[aria-invalid='true'] {
 .toggle-input:focus-visible + span {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Segmented pills (Ranged / Melee): radio pills joined into one control. */
+.segmented .toggle-pills {
+  gap: 0;
+}
+
+.segmented .toggle-pill span {
+  border-radius: 0;
+}
+
+.segmented .toggle-pill:first-child span {
+  border-radius: 999px 0 0 999px;
+}
+
+.segmented .toggle-pill:last-child span {
+  margin-left: -1px;
+  border-radius: 0 999px 999px 0;
 }
 
 /* ---------- Attack conditions ---------- */

@@ -3,7 +3,7 @@ import { abilitiesSummary, sameAbilities } from './abilities';
 
 /** Copy only the WeaponStats fields (drops `id` and anything else). The abilities are copied too. */
 export function pickStats(w: WeaponStats): WeaponStats {
-  return { name: w.name, attacks: w.attacks, skill: w.skill, strength: w.strength, ap: w.ap, damage: w.damage, abilities: copyAbilities(w.abilities) };
+  return { name: w.name, type: w.type, attacks: w.attacks, skill: w.skill, strength: w.strength, ap: w.ap, damage: w.damage, abilities: copyAbilities(w.abilities) };
 }
 
 /**
@@ -12,6 +12,7 @@ export function pickStats(w: WeaponStats): WeaponStats {
  */
 export function sameCombatStats(a: WeaponStats, b: WeaponStats): boolean {
   return (
+    a.type === b.type &&
     a.attacks.trim().toUpperCase() === b.attacks.trim().toUpperCase() &&
     a.skill === b.skill &&
     a.strength === b.strength &&
@@ -38,10 +39,14 @@ export function byName<T extends { name: string }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 }
 
-/** Short stats line: "A 2 · BS 3+ · S 4 · AP -1 · D 1", plus " · Lethal Hits, …" when it has abilities. */
+/**
+ * Short stats line: "A 2 · BS 3+ · S 4 · AP -1 · D 1", plus " · Lethal Hits, …" when it has
+ * abilities. A melee weapon reads "Melee · A 3 · WS 3+ · …".
+ */
 export function statsSummary(w: WeaponStats): string {
   const abilities = abilitiesSummary(w.abilities);
-  return `A ${w.attacks} · BS ${w.skill}+ · S ${w.strength} · AP ${w.ap} · D ${w.damage}${abilities ? ` · ${abilities}` : ''}`;
+  const melee = w.type === 'melee';
+  return `${melee ? 'Melee · ' : ''}A ${w.attacks} · ${melee ? 'WS' : 'BS'} ${w.skill}+ · S ${w.strength} · AP ${w.ap} · D ${w.damage}${abilities ? ` · ${abilities}` : ''}`;
 }
 
 /** "T4 · Sv 3+ · Inv 4+ · W2", plus " · Vehicle, Monster" when it has keywords. */

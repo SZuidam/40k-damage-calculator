@@ -7,7 +7,7 @@ import { h } from './dom';
 /** What the stat chips need to know about the defender: its size (Blast / Cleave) and keywords (Anti). */
 export type ChipDefender = Pick<DefenderProfile, 'models' | 'keywords'>;
 
-export const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities'>; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
+export const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities' | 'type'>; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
   { key: 'attacks', label: 'A', title: 'Attacks' },
   { key: 'skill', label: 'BS', title: 'Ballistic / Weapon Skill', format: (w) => `${w.skill}+` },
   { key: 'strength', label: 'S', title: 'Strength' },
@@ -29,9 +29,12 @@ export const CONDITION_REASONS: Record<keyof AttackConditions, string> = {
  */
 export function statChips(weapon: WeaponStats | undefined, defender: ChipDefender | undefined, conditions: AttackConditions): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
+  const melee = weapon.type === 'melee';
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
-    h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, label), ' ', format ? format(weapon) : String(weapon[key])),
+    h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, key === 'skill' && melee ? 'WS' : label), ' ', format ? format(weapon) : String(weapon[key])),
   );
+  // A small tag in front of the chips of a melee weapon (ranged is the default and gets none).
+  const tag = melee ? [h('span', { class: 'chip chip-tag', title: 'Melee weapon' }, 'Melee')] : [];
   const bonus = attacksBonus(weapon, defender?.models, conditions);
   if (bonus) {
     // The A chip comes first: "A 4+2" or "A D6+2D6+4", with the Blast / Cleave / Rapid Fire extra attacks in blue.
@@ -46,7 +49,7 @@ export function statChips(weapon: WeaponStats | undefined, defender: ChipDefende
     chip.title = `Damage: ${weapon.damage}, plus ${extraDamage.value} from ${extraDamage.sources}`;
   }
   const abilities = activeAbilities(weapon.abilities);
-  if (abilities.length === 0) return chips;
+  if (abilities.length === 0) return [...tag, ...chips];
   // Read-only; abilities are edited in the weapon profile modal (Units tab).
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
   abilities.forEach(({ label, description, anti, condition }, i) => {
@@ -67,7 +70,7 @@ export function statChips(weapon: WeaponStats | undefined, defender: ChipDefende
     }
     text.append(h('span', { class: 'ability-active', title: `${description} ${active}` }, label, h('span', { class: 'visually-hidden' }, ' (active)')));
   });
-  return [...chips, text];
+  return [...tag, ...chips, text];
 }
 
 /**

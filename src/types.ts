@@ -76,9 +76,17 @@ export function copyAbilities(a: WeaponAbilities): WeaponAbilities {
   return { ...a, anti: { ...a.anti } };
 }
 
+/** Whether a weapon shoots or fights in melee: unit abilities can target one kind only. */
+export const WEAPON_TYPES = ['ranged', 'melee'] as const;
+export type WeaponType = (typeof WEAPON_TYPES)[number];
+
+export const WEAPON_TYPE_NAMES: Record<WeaponType, string> = { ranged: 'Ranged', melee: 'Melee' };
+
 /** The stats of a weapon profile, without the number of models firing it. */
 export interface WeaponStats {
   name: string;
+  /** Ranged or melee (weapons saved before this existed are ranged). */
+  type: WeaponType;
   /** Attacks per model, as a dice expression ("2", "D6", "2D3+1"). */
   attacks: string;
   /** Ballistic / Weapon Skill target (2–6). */
@@ -128,6 +136,7 @@ export interface DefenderSelection {
 export interface WeaponProfile {
   id: string;
   name: string;
+  type: WeaponType;
   /** Number of models firing this weapon. */
   models: number;
   /** Attacks per model, as a dice expression ("2", "D6", "2D3+1"). */

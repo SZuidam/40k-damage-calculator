@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { noAbilities, type DefenderProfile, type StoredWeapon } from '../types';
-import { byName, pickStats, sameCombatStats, sameDefender, statLine } from './presets';
+import { byName, pickStats, sameCombatStats, sameDefender, statLine, statsSummary } from './presets';
 
-const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
+const boltRifle = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
 
 describe('sameCombatStats', () => {
   it('ignores the name and dice case or spacing, but not a stat or ability change', () => {
@@ -11,6 +11,14 @@ describe('sameCombatStats', () => {
     expect(sameCombatStats({ ...a, attacks: 'd6+1' }, { ...a, attacks: ' D6+1 ' })).toBe(true);
     expect(sameCombatStats(a, { ...a, ap: -2 })).toBe(false);
     expect(sameCombatStats(a, { ...a, abilities: { ...noAbilities(), lethalHits: true } })).toBe(false);
+    expect(sameCombatStats(a, { ...a, type: 'melee' })).toBe(false);
+  });
+});
+
+describe('statsSummary', () => {
+  it('reads BS for a ranged weapon and Melee · WS for a melee weapon', () => {
+    expect(statsSummary(boltRifle())).toBe('A 2 · BS 3+ · S 4 · AP -1 · D 1');
+    expect(statsSummary({ ...boltRifle(), type: 'melee' })).toBe('Melee · A 2 · WS 3+ · S 4 · AP -1 · D 1');
   });
 });
 

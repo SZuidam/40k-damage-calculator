@@ -13,8 +13,8 @@ function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & 
   };
 }
 
-const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
-const las = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: noAbilities() });
+const bolt = (): StoredWeapon => ({ id: 'w-bolt', name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() });
+const las = (): StoredWeapon => ({ id: 'w-las', name: 'Lascannon', type: 'ranged', attacks: '1', skill: 3, strength: 12, ap: -3, damage: 'D6+1', abilities: noAbilities() });
 
 const intercessors = (overrides: Partial<Unit> = {}): Unit => ({
   id: 'u1',
@@ -83,7 +83,8 @@ describe('loadState', () => {
     const [unit] = state.units;
     expect(unit).toMatchObject({ name: 'Intercessor Squad', armyId: state.armies[0].id, toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'] });
     expect(unit.weapons.map((w) => w.name)).toEqual(['Bolt rifle', 'Bolt pistol', 'Close combat weapon']);
-    expect(unit.weapons[0]).toMatchObject({ attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' });
+    expect(unit.weapons[0]).toMatchObject({ type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1' });
+    expect(unit.weapons.map((w) => w.type)).toEqual(['ranged', 'ranged', 'melee']);
     // 5 bolt rifles fire; the other weapons start unticked at the default count.
     expect(state.attacker).toEqual({
       armyId: unit.armyId,
@@ -333,5 +334,13 @@ describe('conditions on load', () => {
     expect(load(withoutConditions).conditions).toEqual(noConditions());
     expect(load(v5({ conditions: 'on' })).conditions).toEqual(noConditions());
     expect(load(v5({ conditions: { halfRange: 'yes', charged: true } })).conditions).toEqual({ halfRange: false, charged: true });
+  });
+});
+
+describe('weapon type on load', () => {
+  it('makes weapons saved without a type (or with an unknown one) ranged, and keeps melee', () => {
+    const { type: _, ...untyped } = bolt();
+    const state = load(v5({ units: [{ ...intercessors(), weapons: [untyped, { ...las(), type: 'psychic' }, { ...bolt(), id: 'w-ccw', name: 'Chainsword', type: 'melee' }] }] }));
+    expect(state.units[0].weapons.map((w) => w.type)).toEqual(['ranged', 'ranged', 'melee']);
   });
 });

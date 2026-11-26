@@ -14,7 +14,7 @@ import {
 } from '../state/abilities';
 import { pickStats } from '../state/presets';
 import { isNameTaken } from '../state/units';
-import { noAbilities, type DefenderKeyword, type WeaponStats } from '../types';
+import { WEAPON_TYPES, WEAPON_TYPE_NAMES, noAbilities, type DefenderKeyword, type WeaponStats } from '../types';
 import { AP_OPTIONS, SKILL_OPTIONS, field, h, numberValue, select, setFieldError } from './dom';
 import { openAbilityValuePopover } from './abilityValuePopover';
 import { openModal } from './modal';
@@ -23,7 +23,7 @@ import { MAX_WEAPON_NAME, abilityValueError, antiValueError, hasErrors, validate
 /** `data-ability` of an Anti chip, used to focus it again after a change: "anti-vehicle-monster". */
 const antiChipId = (keywords: DefenderKeyword[]) => `anti-${keywords.join('-')}`;
 
-const NEW_WEAPON: WeaponStats = { name: '', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() };
+const NEW_WEAPON: WeaponStats = { name: '', type: 'ranged', attacks: '1', skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() };
 
 let modalCounter = 0;
 
@@ -98,6 +98,19 @@ export function openWeaponModal(initial?: WeaponStats, { takenNames }: WeaponMod
         nameTouched = true;
         draft.name = name.value;
       });
+      // Ranged / Melee: a segmented pair of radio pills. Unit abilities can target one kind only.
+      const skillField = field(draft.type === 'melee' ? 'WS' : 'BS', skill);
+      const typeRadios = WEAPON_TYPES.map((type) => {
+        const radio = h('input', { id: id(`type-${type}`), type: 'radio', name: id('type'), value: type, class: 'toggle-input', checked: draft.type === type });
+        radio.addEventListener('change', () => {
+          if (!radio.checked) return;
+          draft.type = type;
+          skillField.querySelector('label')!.textContent = type === 'melee' ? 'WS' : 'BS';
+        });
+        return h('label', { class: 'toggle-pill' }, radio, h('span', {}, WEAPON_TYPE_NAMES[type]));
+      });
+      const typeGroup = h('fieldset', { class: 'toggle-group segmented' }, h('legend', {}, 'Type'), h('div', { class: 'toggle-pills' }, ...typeRadios));
+
       bind(attacks, () => (draft.attacks = attacks.value));
       bind(skill, () => (draft.skill = numberValue(skill)));
       bind(strength, () => (draft.strength = numberValue(strength)));
@@ -219,7 +232,8 @@ export function openWeaponModal(initial?: WeaponStats, { takenNames }: WeaponMod
         'form',
         { class: 'modal-body', novalidate: true },
         field('Name', name, 'field--name'),
-        h('div', { class: 'weapon-stats-grid' }, field('A', attacks), field('BS/WS', skill), field('S', strength), field('AP', ap), field('D', damage)),
+        typeGroup,
+        h('div', { class: 'weapon-stats-grid' }, field('A', attacks), skillField, field('S', strength), field('AP', ap), field('D', damage)),
         abilityEditor,
         errors,
         h('p', { class: 'modal-hint' }, 'A, D and ability X take dice expressions: 3, D3, D6, 2D6, D6+1. Anti Y takes 2+ to 6+.'),

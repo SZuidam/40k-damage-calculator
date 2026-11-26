@@ -1,4 +1,4 @@
-import { DEFENDER_KEYWORDS, noAbilities, noConditions, type Army, type AttackConditions, type AttackerSelection, type DefenderKeyword, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitStats, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, noAbilities, noConditions, type Army, type AttackConditions, type AttackerSelection, type DefenderKeyword, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitStats, type WeaponAbilities, type WeaponStats, type WeaponType } from '../types';
 import { uid } from './ids';
 import { DEFAULT_UNIT_MODELS, DEFAULT_WEAPON_COUNT, defaultArmyId, newLoadout, reconcileAttacker, reconcileDefender } from './loadout';
 import { pickStats } from './presets';
@@ -27,9 +27,10 @@ export type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 const DEFAULT_ITERATIONS = 10_000;
 
-const exampleWeapon = (name: string, attacks: string, ap: number): StoredWeapon => ({
+const exampleWeapon = (name: string, attacks: string, ap: number, type: WeaponType = 'ranged'): StoredWeapon => ({
   id: uid('weapon'),
   name,
+  type,
   attacks,
   skill: 3,
   strength: 4,
@@ -58,7 +59,7 @@ function withExample(state: StoredState): StoredState {
     invuln: null,
     wounds: 2,
     keywords: ['infantry'],
-    weapons: [exampleWeapon('Bolt rifle', '2', -1), exampleWeapon('Bolt pistol', '1', 0), exampleWeapon('Close combat weapon', '3', 0)],
+    weapons: [exampleWeapon('Bolt rifle', '2', -1), exampleWeapon('Bolt pistol', '1', 0), exampleWeapon('Close combat weapon', '3', 0, 'melee')],
   };
   const rows = newLoadout(unit);
   rows[0].carried = true;
@@ -186,6 +187,7 @@ export function toWeaponStats(value: unknown): WeaponStats | null {
   if (typeof name !== 'string' || typeof attacks !== 'string' || typeof damage !== 'string') return null;
   return pickStats({
     name,
+    type: value.type === 'melee' ? 'melee' : 'ranged',
     attacks,
     damage,
     skill: num(value.skill, 3),

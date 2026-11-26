@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { noAbilities, type Unit, type WeaponStats } from '../types';
 import { abilityValueError, antiValueError, validateLoadoutRow, validateUnit, validateWeaponStats } from './validation';
 
-const stats: WeaponStats = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
+const stats: WeaponStats = { name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
 
 describe('validateWeaponStats', () => {
   it('accepts a valid profile', () => {
@@ -16,7 +16,7 @@ describe('validateWeaponStats', () => {
 
   it('flags each invalid stat', () => {
     const abilities = { ...noAbilities(), sustainedHits: 'D7' };
-    const errors = validateWeaponStats({ name: 'X', attacks: '', skill: 7, strength: 31, ap: 1, damage: '2D', abilities });
+    const errors = validateWeaponStats({ name: 'X', type: 'ranged', attacks: '', skill: 7, strength: 31, ap: 1, damage: '2D', abilities });
     expect(Object.keys(errors).sort()).toEqual(['abilities', 'ap', 'attacks', 'damage', 'skill', 'strength']);
   });
 

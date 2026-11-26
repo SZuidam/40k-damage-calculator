@@ -15,7 +15,7 @@ import {
   unitsOfArmy,
 } from './loadout';
 
-const weapon = (id: string, name: string, attacks = '1'): StoredWeapon => ({ id, name, attacks, skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() });
+const weapon = (id: string, name: string, attacks = '1'): StoredWeapon => ({ id, name, type: 'ranged', attacks, skill: 3, strength: 4, ap: 0, damage: '1', abilities: noAbilities() });
 
 const unit = (overrides: Partial<Unit> = {}): Unit => ({
   id: 'u1',
