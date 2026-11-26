@@ -13,6 +13,7 @@ import { PresetBar } from './ui/presetBar';
 import { ProfileRows } from './ui/profileRows';
 import { createResultsView } from './ui/results';
 import { openExportModal, openImportModal } from './ui/shareModal';
+import { UnitsPanel } from './ui/unitsPanel';
 import { hasErrors, validateDefender, validateIterations, validateRow } from './ui/validation';
 import { WeaponsPanel } from './ui/weaponsPanel';
 
@@ -313,6 +314,8 @@ $('defender-presets').append(defenderBar.element);
 // ---------- Configuration drawer ----------
 
 const weaponsPanel = new WeaponsPanel({ library: state.library, onChange: onLibraryChanged });
+// Armies and units are configuration only for now: nothing else on the page uses them yet.
+const unitsPanel = new UnitsPanel({ armies: state.armies, units: state.units, onChange: () => saveState(state) });
 
 function settingsPanel(): HTMLElement {
   const iterations = h('input', { id: 'iterations', type: 'number', inputmode: 'numeric', min: 100, max: 1_000_000, step: 1000, value: state.iterations });
@@ -360,6 +363,7 @@ function settingsPanel(): HTMLElement {
 }
 
 const drawer = new Drawer([
+  { tab: 'units', label: 'Units', content: unitsPanel.element, onShow: () => unitsPanel.render() },
   { tab: 'weapons', label: 'Weapons', content: weaponsPanel.element, onShow: () => weaponsPanel.render() },
   { tab: 'settings', label: 'Settings', content: settingsPanel() },
 ]);

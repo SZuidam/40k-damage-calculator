@@ -143,6 +143,60 @@ describe('loadState', () => {
     expect(loadState(storage)).toEqual(state);
   });
 
+  it('starts without armies or units, and loads a v4 save from before they existed with none', () => {
+    expect(defaultState().armies).toEqual([]);
+    expect(defaultState().units).toEqual([]);
+    const { armies: _a, units: _u, ...older } = defaultState();
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(older) }));
+    expect(state.armies).toEqual([]);
+    expect(state.units).toEqual([]);
+    expect(state.profiles).toHaveLength(1);
+  });
+
+  it('round trips armies and units with their own weapons', () => {
+    const storage = memoryStorage();
+    const state = defaultState();
+    state.armies.push({ id: 'sm', name: 'Space Marines' }, { id: 'cd', name: 'Chaos Daemons' });
+    state.units.push(
+      { id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'], weapons: [bolt(), { ...las(), abilities: { ...noAbilities(), anti: { vehicle: 4 } } }] },
+      { id: 'u2', name: 'Test dummy', armyId: null, toughness: 10, save: 2, invuln: 4, wounds: 12, keywords: ['vehicle', 'fly'], weapons: [{ ...bolt(), strength: 5 }] },
+    );
+    saveState(state, storage);
+    expect(loadState(storage)).toEqual(state);
+  });
+
+  it('repairs units: stale army, missing ids, unknown keywords, broken weapons', () => {
+    const saved = JSON.parse(JSON.stringify(defaultState()));
+    saved.armies = [{ id: 'sm', name: 'Space Marines' }, { id: 'broken' }, 'nope', { id: '', name: 'No id' }];
+    saved.units = [
+      {
+        name: 'Intercessors',
+        armyId: 'gone',
+        toughness: 4,
+        save: 3,
+        wounds: 2,
+        keywords: ['infantry', 'tank', 'infantry'],
+        weapons: [{ name: 'Bolt rifle', attacks: '2', damage: '1', skill: 3, strength: 4, ap: -1 }, { name: 'Broken' }, null],
+      },
+      { id: 'u2', name: 'Tough', armyId: 'sm', toughness: 'x', save: 99, invuln: 'no', wounds: 3 },
+      { id: 'u3' },
+      42,
+    ];
+    const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
+    expect(state.armies).toEqual([{ id: 'sm', name: 'Space Marines' }]);
+    expect(state.units).toHaveLength(2);
+    const [first, second] = state.units;
+    expect(first.id).toMatch(/^unit-/);
+    expect(first.armyId).toBeNull();
+    expect(first.invuln).toBeNull();
+    expect(first.keywords).toEqual(['infantry']);
+    expect(first.weapons).toHaveLength(1);
+    expect(first.weapons[0].id).toMatch(/^weapon-/);
+    expect(first.weapons[0].abilities).toEqual(noAbilities());
+    // Out-of-range numbers are kept for validation to flag; non-numbers get the defaults.
+    expect(second).toEqual({ id: 'u2', name: 'Tough', armyId: 'sm', toughness: 4, save: 99, invuln: null, wounds: 3, keywords: [], weapons: [] });
+  });
+
   it('keeps an empty library, no profiles and an empty working area', () => {
     const saved = { ...defaultState(), library: [], profiles: [], rows: [], activeProfileId: null, iterations: 2_000 };
     const state = loadState(memoryStorage({ [STORAGE_KEY]: JSON.stringify(saved) }));
@@ -392,7 +446,8 @@ describe('v3 → v4 migration', () => {
 
   it('ignores the units of a v3 save made while units existed', () => {
     const state = loadV3({ ...v3(), units: [{ id: 'u1', name: 'Squad', rows: [{ id: 'r8', models: 4, weaponId: 'w-bolt' }] }] });
-    expect(state).not.toHaveProperty('units');
+    // The old row-based units are not migrated; the new `units` (unit datasheets) start empty.
+    expect(state.units).toEqual([]);
     expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters']);
   });
 
@@ -427,7 +482,8 @@ describe('v2 → v4 migration (through v3)', () => {
 
   it('drops the unit presets without restoring their weapons', () => {
     const state = loadV2(v2());
-    expect(state).not.toHaveProperty('units');
+    // The old row-based units are not migrated; the new `units` (unit datasheets) start empty.
+    expect(state.units).toEqual([]);
     expect(state.profiles.map((p) => p.name)).toEqual(['Gunline', 'Bolters']);
     expect(state.library.map((w) => w.id)).toEqual(['w-bolt', 'w-las']);
   });

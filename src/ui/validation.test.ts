@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, type WeaponStats } from '../types';
-import { abilityValueError, antiValueError, validateRow, validateWeaponStats } from './validation';
+import { noAbilities, type Unit, type WeaponStats } from '../types';
+import { abilityValueError, antiValueError, validateRow, validateUnit, validateWeaponStats } from './validation';
 
 const stats: WeaponStats = { name: 'Bolt rifle', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
 
@@ -78,6 +78,40 @@ describe('validateWeaponStats', () => {
 
   it('accepts abilities with a valid Sustained Hits value', () => {
     expect(validateWeaponStats({ ...stats, abilities: { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true } })).toEqual({});
+  });
+});
+
+describe('validateUnit', () => {
+  const unit: Unit = { id: 'u1', name: 'Intercessors', armyId: 'sm', toughness: 4, save: 3, invuln: null, wounds: 2, keywords: ['infantry'], weapons: [{ ...stats, id: 'w1' }] };
+
+  it('accepts a valid unit, also one without weapons', () => {
+    expect(validateUnit(unit)).toEqual({});
+    expect(validateUnit({ ...unit, weapons: [], save: 7, invuln: 4, toughness: 20, wounds: 40 })).toEqual({});
+  });
+
+  it('requires a name of at most 40 characters', () => {
+    expect(validateUnit({ ...unit, name: '  ' }).name).toBe('Name is required');
+    expect(validateUnit({ ...unit, name: 'x'.repeat(41) }).name).toBe('Name must be at most 40 characters');
+  });
+
+  it('rejects a name another unit in the same army has, ignoring case', () => {
+    expect(validateUnit({ ...unit, name: ' intercessors ' }, ['Intercessors']).name).toBe('Another unit in this army already has this name');
+    expect(validateUnit(unit, ['Terminators'])).toEqual({});
+  });
+
+  it('flags each invalid stat, without a models × wounds limit', () => {
+    const errors = validateUnit({ ...unit, toughness: 0, save: 1, invuln: 7, wounds: 41 });
+    expect(errors).toEqual({
+      toughness: 'Toughness must be between 1 and 20',
+      save: 'Save must be between 2 and 7',
+      invuln: 'Invulnerable save must be between 2 and 6',
+      wounds: 'Wounds must be between 1 and 40',
+    });
+  });
+
+  it('flags an invalid weapon and two weapons with the same name', () => {
+    expect(validateUnit({ ...unit, weapons: [{ ...stats, id: 'w1', attacks: 'D7' }] }).weapons).toBe('Bolt rifle: Attacks: use 3, D3, D6, 2D6, D6+1, …');
+    expect(validateUnit({ ...unit, weapons: [{ ...stats, id: 'w1' }, { ...stats, id: 'w2', name: 'BOLT RIFLE ', ap: -2 }] }).weapons).toBe('Two weapons are named "BOLT RIFLE"');
   });
 });
 

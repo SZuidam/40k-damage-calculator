@@ -166,6 +166,28 @@ export interface DefenderProfile {
   keywords: DefenderKeyword[];
 }
 
+/** An army the user defined (any 40k army, the name is free text). Units can belong to one. */
+export interface Army {
+  id: string;
+  name: string;
+}
+
+/** The defensive stat line of a unit: a DefenderProfile without the model count. */
+export type UnitStats = Omit<DefenderProfile, 'models'>;
+
+/**
+ * A unit the user defined: its stat line, keywords and its own weapon profiles. Weapons are
+ * never shared: two units with a "Bolt rifle" each hold their own profile. Weapon names are
+ * unique within a unit.
+ */
+export interface Unit extends UnitStats {
+  id: string;
+  name: string;
+  /** The army the unit belongs to, or null for "No army". */
+  armyId: string | null;
+  weapons: StoredWeapon[];
+}
+
 /** Average values per step of the attack sequence. */
 export interface StepStats {
   attacks: number;

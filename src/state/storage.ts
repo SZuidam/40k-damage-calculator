@@ -1,4 +1,4 @@
-import { DEFENDER_KEYWORDS, noAbilities, noConditions, type AttackConditions, type DefenderKeyword, type DefenderPreset, type DefenderProfile, type Profile, type ProfileRow, type RowSnapshot, type StoredWeapon, type WeaponAbilities, type WeaponStats } from '../types';
+import { DEFENDER_KEYWORDS, noAbilities, noConditions, type Army, type AttackConditions, type DefenderKeyword, type DefenderPreset, type DefenderProfile, type Profile, type ProfileRow, type RowSnapshot, type StoredWeapon, type Unit, type WeaponAbilities, type WeaponStats } from '../types';
 import { uid } from './ids';
 import { findWeapon, materialiseRows, snapshotRows, type LinkedAttack, type LinkedRow } from './legacy';
 import { copyRows, pickStats, sameCombatStats, sameRows, uniqueName } from './presets';
@@ -23,6 +23,10 @@ export interface StoredState {
   /** Situational attack conditions (half range, charged): page state only, never in profiles or exports. */
   conditions: AttackConditions;
   iterations: number;
+  /** Armies the user defined (free-text names). May be empty. */
+  armies: Army[];
+  /** Units the user defined, each with its own weapons. May be empty. */
+  units: Unit[];
 }
 
 /** The v3 state (sessions 11–12): attacks whose rows link to the library. Only read for migration. */
@@ -71,6 +75,8 @@ export function defaultState(): StoredState {
     activeDefenderPresetId: null,
     conditions: noConditions(),
     iterations: DEFAULT_ITERATIONS,
+    armies: [],
+    units: [],
   };
 }
 
@@ -138,6 +144,9 @@ function normalise(raw: unknown): StoredState {
   if (!isRecord(raw)) return defaultState();
   const profiles = list(raw.profiles, toProfile);
   const defenderPresets = list(raw.defenderPresets, toDefenderPreset);
+  const armies = list(raw.armies, toArmy);
+  // A unit whose army is gone moves to "No army".
+  const units = list(raw.units, toUnit).map((u) => (u.armyId === null || armies.some((a) => a.id === u.armyId) ? u : { ...u, armyId: null }));
   return {
     library: list(raw.library, toStoredWeapon),
     rows: list(raw.rows, toProfileRow),
@@ -148,6 +157,8 @@ function normalise(raw: unknown): StoredState {
     activeDefenderPresetId: activeId(raw.activeDefenderPresetId, defenderPresets),
     conditions: toConditions(raw.conditions),
     iterations: num(raw.iterations, DEFAULT_ITERATIONS),
+    armies,
+    units,
   };
 }
 
@@ -175,6 +186,8 @@ export function fromV3(v3: V3State): StoredState {
     activeDefenderPresetId: v3.activeDefenderPresetId,
     conditions: v3.conditions,
     iterations: v3.iterations,
+    armies: [],
+    units: [],
   };
 }
 
@@ -224,7 +237,7 @@ interface SnapshotPreset {
 
 /**
  * The v2 state: one live attack (`rows`) plus attack presets holding snapshot copies. v2 also
- * had unit presets; those are dropped on migration (units no longer exist).
+ * had unit presets (blocks of weapon rows, unrelated to today's `Unit`); those are dropped on migration.
  */
 interface V2State {
   library: StoredWeapon[];
@@ -507,4 +520,32 @@ function toDefenderPreset(value: unknown): DefenderPreset | null {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
   const defender = toDefender(value.defender);
   return defender ? { id: value.id, name: value.name, defender } : null;
+}
+
+function toArmy(value: unknown): Army | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id === '' || typeof value.name !== 'string') return null;
+  return { id: value.id, name: value.name };
+}
+
+/** A weapon of a unit: a usable weapon profile, with a new id when it has none. */
+function toUnitWeapon(value: unknown): StoredWeapon | null {
+  const stats = toWeaponStats(value);
+  if (!stats || !isRecord(value)) return null;
+  return { ...stats, id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('weapon') };
+}
+
+/**
+ * A unit: a name plus the defender stat checks (without models), its keywords and its weapons.
+ * Malformed weapons are dropped; out-of-range stats are kept for validation to flag.
+ */
+function toUnit(value: unknown): Unit | null {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  const { models: _, ...stats } = toDefender(value)!;
+  return {
+    id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('unit'),
+    name: value.name,
+    armyId: typeof value.armyId === 'string' ? value.armyId : null,
+    ...stats,
+    weapons: list(value.weapons, toUnitWeapon),
+  };
 }

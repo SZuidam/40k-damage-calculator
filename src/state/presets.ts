@@ -1,4 +1,4 @@
-import { KEYWORD_NAMES, copyAbilities, type AttackConditions, type DefenderProfile, type ProfileRow, type StoredWeapon, type WeaponProfile, type WeaponStats } from '../types';
+import { KEYWORD_NAMES, copyAbilities, type AttackConditions, type DefenderProfile, type ProfileRow, type StoredWeapon, type UnitStats, type WeaponProfile, type WeaponStats } from '../types';
 import { MAX_WEAPON_NAME } from '../ui/validation';
 import { abilitiesSummary, sameAbilities } from './abilities';
 import { uid } from './ids';
@@ -101,10 +101,15 @@ export function rowsSummary(rows: readonly RowLike[]): string {
   return rows.map((r) => `${r.models}× ${r.weapon.name}`).join(', ');
 }
 
-/** "10 models · T4 · Sv 3+ · Inv 4+ · W2", plus " · Vehicle, Monster" when it has keywords. */
-export function defenderSummary(d: DefenderProfile): string {
+/** "T4 · Sv 3+ · Inv 4+ · W2", plus " · Vehicle, Monster" when it has keywords. */
+export function statLine(d: UnitStats): string {
   const save = d.save >= 7 ? 'Sv –' : `Sv ${d.save}+`;
   const invuln = d.invuln === null ? '' : ` · Inv ${d.invuln}+`;
   const keywords = d.keywords.length === 0 ? '' : ` · ${d.keywords.map((k) => KEYWORD_NAMES[k]).join(', ')}`;
-  return `${d.models} model${d.models === 1 ? '' : 's'} · T${d.toughness} · ${save}${invuln} · W${d.wounds}${keywords}`;
+  return `T${d.toughness} · ${save}${invuln} · W${d.wounds}${keywords}`;
+}
+
+/** "10 models · T4 · Sv 3+ · Inv 4+ · W2", plus " · Vehicle, Monster" when it has keywords. */
+export function defenderSummary(d: DefenderProfile): string {
+  return `${d.models} model${d.models === 1 ? '' : 's'} · ${statLine(d)}`;
 }

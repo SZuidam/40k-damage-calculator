@@ -1412,6 +1412,81 @@ dialog.drawer[open]::backdrop {
   overflow-wrap: anywhere;
 }
 
+/* ---------- Units tab: army filter, units grouped by army, unit editor ---------- */
+
+/* .manage-panel sets display: flex, which would beat the hidden attribute. */
+.units-panel > [hidden] {
+  display: none;
+}
+
+.units-toolbar {
+  margin-bottom: 0;
+}
+
+.unit-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.unit-groups:empty {
+  display: none;
+}
+
+.unit-group-title {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.unit-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.unit-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.unit-editor-head h3 {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.unit-editor-names {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .unit-editor-names {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.unit-editor-form .toggle-group {
+  margin: 0;
+}
+
+.unit-weapons {
+  padding-top: 12px;
+  border-top: 1px solid var(--grid);
+}
+
+.unit-weapons .panel-hint {
+  margin: 0;
+}
+
 /* ---------- Import / export ---------- */
 
 .share-groups {
