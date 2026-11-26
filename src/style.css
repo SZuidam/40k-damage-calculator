@@ -352,6 +352,14 @@ select[aria-invalid='true'] {
   text-transform: uppercase;
 }
 
+/* A weapon ability or roll lever that unit, leader or army abilities give this weapon. */
+.row-abilities .ability-granted {
+  outline: 1px dashed var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
 /* An Anti ability that applies to the current defender's keywords. */
 .row-abilities .ability-active {
   outline: 1px solid var(--accent);
@@ -601,7 +609,8 @@ select[aria-invalid='true'] {
   font-size: 0.8rem;
 }
 
-.picker-hint[hidden] {
+.picker-hint[hidden],
+.picker-field[hidden] {
   display: none;
 }
 
@@ -746,6 +755,76 @@ select[aria-invalid='true'] {
 .attack-conditions legend {
   float: left;
   margin: 0;
+}
+
+/* A custom situation (named in the attacker's abilities): dashed until switched on. */
+.toggle-pill--custom span {
+  border-style: dashed;
+}
+
+/* The unit, leader and army abilities of the attack, under the conditions. */
+.attack-conditions:has(+ .attack-abilities:not([hidden])) {
+  margin-bottom: 8px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.attack-abilities {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.attack-abilities[hidden] {
+  display: none;
+}
+
+.attack-abilities-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.attack-abilities-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attack-ability {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: help;
+}
+
+.attack-ability.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--text-primary);
+}
+
+.attack-ability.is-waiting {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.attack-ability-reason {
+  font-size: 0.72rem;
+  font-weight: 500;
 }
 
 /* ---------- Buttons ---------- */
