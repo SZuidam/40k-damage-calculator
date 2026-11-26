@@ -2,6 +2,7 @@ import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
 import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
+import { loadBanners, pruneBanners, saveBanners } from './state/banners';
 import { loadState, saveState } from './state/storage';
 import { abilitiesFor, activeFor, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
 import type { StoredWeapon, Unit, WeaponProfile } from './types';
@@ -23,6 +24,8 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 /** All app state. Objects and arrays are mutated in place: the views hold references to them. */
 const state = loadState();
+/** Banner images by unit id: stored apart from `state` and never exported. */
+const banners = loadBanners();
 const form = $<HTMLFormElement>('calculator');
 const optimiseButton = $<HTMLButtonElement>('optimise');
 const optimiseBadge = $<HTMLSpanElement>('optimise-badge');
@@ -110,6 +113,7 @@ function onInputsChanged(): void {
   // the Anti markers on its keywords, Rapid Fire, Melta and Lance on the attack conditions,
   // unit abilities on the conditions, ability toggles, target and ticked weapons.
   loadoutRows.refreshStats();
+  renderAttackerBanner();
   abilitiesLine.update(
     attackAbilities(),
     carried().map(({ weapon }) => weapon.type),
@@ -127,8 +131,10 @@ function onInputsChanged(): void {
 function onUnitsChanged(): void {
   reconcileAttacker(state.attacker, state.armies, state.units);
   reconcileDefender(state.defender, state.armies, state.units);
-  // Forget the toggles of abilities that were deleted or are no longer switched on by hand.
+  // Forget the toggles of abilities that were deleted or are no longer switched on by hand,
+  // and the banners of deleted units.
   pruneToggles(state.toggles, [...state.armies, ...state.units].flatMap((x) => x.abilities));
+  if (pruneBanners(banners, state.units.map((u) => u.id))) saveBanners(banners);
   attackerPicker.render();
   defenderPicker.render();
   loadoutRows.render();
@@ -260,7 +266,18 @@ const attackerPicker = new UnitPicker({
     },
   },
 });
+// The attacking unit's banner image, faintly behind the Attacker heading and the Army / Unit
+// pickers (not the conditions or weapons).
+const attackerBanner = h('div', { class: 'unit-banner', 'aria-hidden': 'true', hidden: true });
+$('attacker-head').prepend(attackerBanner);
 $('attacker-picker').append(attackerPicker.element);
+
+function renderAttackerBanner(): void {
+  const data = state.attacker.unitId ? banners[state.attacker.unitId] : undefined;
+  const image = data ? `url("${data}")` : '';
+  if (attackerBanner.style.backgroundImage !== image) attackerBanner.style.backgroundImage = image;
+  attackerBanner.hidden = !data;
+}
 
 /** Pick the attacking unit: its weapons start unticked, DEFAULT_WEAPON_COUNT each, without a leader. */
 function pickAttacker(unitId: string | null): void {
@@ -315,7 +332,17 @@ const defenderPanel = renderDefenderPanel($('defender'), state.defender, defendi
 
 // ---------- Configuration drawer ----------
 
-const unitsPanel = new UnitsPanel({ armies: state.armies, units: state.units, onChange: onUnitsChanged });
+const unitsPanel = new UnitsPanel({
+  armies: state.armies,
+  units: state.units,
+  onChange: onUnitsChanged,
+  banners,
+  onBannersChange: () => {
+    const saved = saveBanners(banners);
+    renderAttackerBanner();
+    return saved;
+  },
+});
 
 function settingsPanel(): HTMLElement {
   const iterations = h('input', { id: 'iterations', type: 'number', inputmode: 'numeric', min: 100, max: 1_000_000, step: 1000, value: state.iterations });

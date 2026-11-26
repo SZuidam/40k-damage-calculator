@@ -602,6 +602,42 @@ select[aria-invalid='true'] {
   flex: 1 1 160px;
 }
 
+/* The attacking unit's banner image: faint, behind the Attacker heading and the pickers only,
+   filling the top of the panel edge to edge and fading out towards the conditions. */
+.attacker-head {
+  position: relative;
+  isolation: isolate;
+}
+
+.unit-banner {
+  position: absolute;
+  z-index: -1;
+  /* Out to the panel's border: its padding is 16px. */
+  inset: -16px -16px 0;
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  background: center / cover no-repeat;
+  opacity: 0.22;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent);
+  mask-image: linear-gradient(to bottom, #000 75%, transparent);
+}
+
+.unit-banner[hidden] {
+  display: none;
+}
+
+/* The banner preview in the unit editor. */
+.unit-banner-preview {
+  height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: center / cover no-repeat var(--surface-2);
+}
+
+.unit-banner-preview[hidden] {
+  display: none;
+}
+
 .picker-hint {
   flex-basis: 100%;
   margin: 0;

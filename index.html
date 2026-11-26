@@ -20,11 +20,13 @@
     <main>
       <form id="calculator" class="calculator" novalidate>
         <section class="panel attacker" aria-labelledby="attacker-title">
-          <div class="panel-head">
-            <h2 id="attacker-title">Attacker</h2>
-            <p class="panel-hint">Tick the weapons the unit carries and how many. Weapons resolve top to bottom; a wounded model carries over to the next weapon.</p>
+          <div id="attacker-head" class="attacker-head">
+            <div class="panel-head">
+              <h2 id="attacker-title">Attacker</h2>
+              <p class="panel-hint">Tick the weapons the unit carries and how many. Weapons resolve top to bottom; a wounded model carries over to the next weapon.</p>
+            </div>
+            <div id="attacker-picker"></div>
           </div>
-          <div id="attacker-picker"></div>
           <div id="attack-conditions"></div>
           <div id="loadout"></div>
           <div class="attacker-actions">

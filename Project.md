@@ -41,6 +41,7 @@ src/
     units.ts            armies and units: newUnit, copyUnit, sameUnit, isNameTaken, unitSummary, groupUnits, unitsInArmy, deleteArmy
     share.ts            unit export file (buildShareFile / serializeShareFile, version 3, with unit abilities and army rules), parseShareText, planImport, applyImport, mergeArmyRules, sameUnitContent, uniqueName
     unitAbilities.ts    user-defined unit / leader / army abilities: abilitiesFor, isActive / activeFor / abilityNeeds, pruneToggles, BUILTIN_CONDITIONS, applyAbilities (+ addToDice, grantAbilities), copies, comparison and summaries
+    banners.ts          unit banner images (unit id → data URL) under their own localStorage key: loadBanners / saveBanners / pruneBanners, isBannerData; never exported
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateLoadoutRow / validateDefender / validateUnit / validateIterations, abilityValueError, antiValueError, LIMITS
@@ -51,6 +52,7 @@ src/
     weaponAbilityEditor.ts  weaponAbilityEditor(): the "Add ability…" dropdown + chips, shared by the weapon modal and "Gain weapon abilities" effects
     abilityModal.ts     openAbilityModal(initial?, { scope, takenNames }): create or edit a unit ability or army rule
     markup.ts           parseMarkup / renderMarkup / markupToText: light markup (bold, italic, lists, paragraphs) for ability descriptions, built as DOM nodes
+    bannerImage.ts      prepareBanner(file): scale a picked image to fit 1200 × 800 and encode it as a WebP data URL of at most 600k characters
     abilityList.ts      abilityList(): a list of abilities with ✎ / ✕ / + New, for the unit editor and the army rules dialog
     abilitiesLine.ts    renderAbilitiesLine() and abilityStatus(): the main page's "Abilities" line (active / "Needs: …")
     abilityValuePopover.ts  openAbilityValuePopover(): small pop-up asking for the X of Sustained Hits / Blast / Cleave / Rapid Fire / Melta or the Y of Anti-X Y+
@@ -400,6 +402,14 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 **UI:** the Conditions row only has the two built-ins (`renderAttackConditions` no longer re-renders). In the Abilities line an ability with `toggle` is a toggle pill with its name: filled while it applies, dashed with the reason ("Needs: Half range") when it is on but something else is missing; other abilities stay status chips. Ability modal: the situation text input and datalist are replaced by a "Needs (all must be on)" row of pills: *Switched on by hand*, *Within half range*, *Charged this turn*. Description is a textarea of up to 2000 characters (`MAX_DESCRIPTION` in validation.ts, also validated) with a counter, a markup hint and a live preview; the Units tab shows it folded under "Rule text", and the main-page tooltip shows it as plain text (`markupToText`).
 
 **Verification:** `npm test` 323/323 (new `ui/markup.test.ts`; toggles in `isActive` / `abilityNeeds` / `abilityStatus` / `resolveLoadout`, `pruneToggles`, legacy `situations` migration and `toggles` on load, description length). `npm run build` is clean. Checked in Chrome with a save in the old format: the Conditions row shows only the built-ins, Oath of Moment and Ingress move became toggle pills, Ingress move switched on read "Needs: Half range" until half range was on, both applied (BS 3+ (+1), Re-roll failed hits), the save held `toggles` and no `situations`; the army rule's rule text rendered bold, italic and a list in the Units tab and in the modal preview; unticking *Switched on by hand* turned Oath into a plain chip and dropped its toggle; no console errors. Light mode and phone width were not checked.
+
+## Unit banner images (session 18, 2026-11-26, branch `unit-abilities`)
+
+**What:** each unit can have a banner image picked from the local PC. When the unit attacks, it is shown faintly (22% opacity, `cover`, fading out at the bottom) as a header banner: from the top of the Attacker panel, behind the heading and explanation, down to the Army / Unit / Led by pickers, edge to edge with the panel's rounded top corners (`index.html` wraps the panel head and `#attacker-picker` in `#attacker-head`). It does not reach the conditions or weapons. Decided with the user: per unit, excluded from export.
+
+**How:** the unit editor has a **Banner** section (preview, *Choose image… / Replace image…*, *Remove*), part of the draft: written on Save, dropped on Back (and it counts as an unsaved change). `prepareBanner` scales the image down and encodes WebP, lowering the quality until it fits; the result goes into `banners` (unit id → data URL), stored under `damage-calculator:banners`, separate from `StoredState` so the big strings aren't rewritten on every input change and can't leak into exports. If storage is full, Save keeps the editor open with "There is no room left to store this image…" and the old banner stays. Banners of deleted units are pruned in `onUnitsChanged`. Only `data:image/(png|jpeg|webp|gif);base64,…` values are ever put in a style (`isBannerData`).
+
+**Verification:** `npm test` 328/328 (new `state/banners.test.ts`). `npm run build` is clean. Checked in Chrome: a 3000 × 1500 PNG (4.3 MB) became a 20 kB WebP, the editor preview showed it, Save stored it under its own key (the main state holds no image data), the banner appeared behind the heading and pickers only, hid when Captain was picked as attacker and came back for the Intercessor Squad; no console errors. The storage-full path and light mode were not checked in the browser.
 
 ## Housekeeping
 
