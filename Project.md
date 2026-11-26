@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (255 tests, about 4 s)
+- `npm test`: Vitest, run once (268 tests, about 4 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -39,6 +39,7 @@ src/
     abilities.ts        ability labels, "Add ability…" choices, withAbilityValue, withAntiValue / withoutAnti, parseAntiValue, sameAbilities
     presets.ts          pickStats, sameCombatStats, sameDefender, byName, statsSummary, statLine
     units.ts            armies and units: newUnit, copyUnit, sameUnit, isNameTaken, unitSummary, groupUnits, unitsInArmy, deleteArmy
+    share.ts            unit export file (buildShareFile / serializeShareFile, version 3), parseShareText, planImport, applyImport, sameUnitContent, uniqueName
   ui/
     dom.ts              h() element builder, field/select helpers, option lists
     validation.ts       validateWeaponStats / validateLoadoutRow / validateDefender / validateUnit / validateIterations, abilityValueError, antiValueError, LIMITS
@@ -53,6 +54,7 @@ src/
     defenderPanel.ts    renderDefenderPanel() → { render() }: Models plus the defending unit's read-only stat chips and keywords
     unitsPanel.ts       UnitsPanel class (Units tab): army filter + ⋯ (New army… / Rename… / Delete), units grouped by army, unit editor on a draft with its own weapons
     statFields.ts       SAVE_OPTIONS / INVULN_OPTIONS and keywordToggles(), for the unit editor
+    shareModal.ts       "Export…" (pick units grouped by army, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
     conditionsForm.ts   renderAttackConditions() → { setValues() }: the "Within half range" / "Charged this turn" toggles
     results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
 ```
@@ -311,7 +313,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - Editor view (replaces the list in the same panel): works on a `copyUnit` draft. `‹ Back` asks "Discard …?" when `sameUnit` says the draft changed; Create / Save is disabled while `validateUnit` fails, with the errors under the keywords. Fields: Name, Army, T, Sv, Inv, W, keyword toggles. Weapons section: the unit's weapons (`statsSummary`), ✎ / ✕ (confirm) and `+ New weapon`, all through `openWeaponModal(…, { takenNames })`, which shows "This unit already has a weapon with this name" and blocks saving. A saved unit that moved out of the filtered army switches the filter to All armies so it stays visible. Like the other tabs, a half-edited unit stays open while the drawer is closed.
 - Shared with the defender form: `ui/statFields.ts` (save / invuln options and `keywordToggles`). `statLine` in `state/presets.ts` is shared by `defenderSummary` and `unitSummary`.
 
-**Deferred:** using units on the main page (done in session 15, see below), and armies / units in export / import (still open).
+**Deferred:** using units on the main page (done in session 15, see below), and armies / units in export / import (done in session 16).
 
 **Verification:** `npm test` 302/302 (new `state/units.test.ts`: `newUnit`, `copyUnit` deep copy, `sameUnit`, `isNameTaken`, `unitSummary` and an unchanged `defenderSummary`, `groupUnits` ordering / filters / empty groups, `deleteArmy`; storage: defaults and an older v4 save without armies / units, round trip with weapons and abilities, repair of stale army ids, missing ids, unknown keywords and broken weapons; validation: `validateUnit` names, limits and weapon errors; two old "no `units` property" assertions now check that `units` is `[]`). `npm run build` is clean. Checked in Chrome: the drawer opens on Units; New army… creates "Space Marines" and blocks a second "space marines " with an error; "Chaos Daemons" created; + New unit while Space Marines is filtered preselects that army; Intercessors (T4 Sv3+ W2, Infantry) with a Bolt rifle and a Bolt pistol, a second "BOLT RIFLE" blocked; the list shows `T4 · Sv 3+ · W2 · Infantry · 2 weapons`; localStorage holds the armies and the unit with its own weapons while the library still only has its Bolt rifle; deleting Space Marines (confirm "Its unit stays, without an army.") moves Intercessors to No army, which survives a reload; editing the name and pressing Back asks "Discard the changes to "Intercessors"?", and discarding keeps the old name and focuses its ✎; no console errors. Not checked in the browser: light mode and the 390px layout.
 
@@ -338,9 +340,25 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - Edits in the Units tab call `onUnitsChanged()`: reconcile both sides, re-render pickers, rows and defender, then `onInputsChanged()`.
 - Simulate blocked reasons, in order: "Create units under ☰ → Units to simulate." / "Pick an attacking unit to simulate." / "Give the attacking unit weapons under ☰ → Units to simulate." / "Tick the weapons the attacking unit carries to simulate." / "Fix the highlighted weapons to simulate." / "Pick a defending unit to simulate." / "Fix the defender to simulate." / iterations.
 
-**UI:** `UnitPicker` (Army: armies by name plus "No army" when a unit has none or there are no armies; Unit: "Pick a unit…" plus that army's units by name, "No units in this army" / "No units yet" when empty; both disabled with the hint "Create armies and units under ☰ → Units." without units). The picker containers are `#attacker-picker` / `#defender-picker` (the selects own `attacker-unit` etc.). `LoadoutRows` reuses the `.weapon-row` grid: firing number, Count, a label with the checkbox and name (`.row-carry`), chips, ↑ ↓; unticked rows get `.is-off`. `renderDefenderPanel`: Models plus chips `T` `Sv` `Inv` `W` and the keywords. The drawer has Units · Settings; Settings holds only Iterations.
+**UI:** `UnitPicker` (Army: armies by name plus "No army" when a unit has none or there are no armies; Unit: "Pick a unit…" plus that army's units by name, "No units in this army" / "No units yet" when empty; both disabled with the hint "Create armies and units under ☰ → Units." without units). The picker containers are `#attacker-picker` / `#defender-picker` (the selects own `attacker-unit` etc.). `LoadoutRows` reuses the `.weapon-row` grid: firing number, Count, a label with the checkbox and name (`.row-carry`), chips, ↑ ↓; unticked rows get `.is-off`. `renderDefenderPanel`: Models plus chips `T` `Sv` `Inv` `W` and the keywords. The drawer has Units · Settings; Settings holds Iterations (and Import / Export again since session 16).
 
 **Verification:** `npm test` 255/255 (new `state/loadout.test.ts`; `storage.test.ts` rewritten for v5: example defaults, round trip under the v5 key, an empty v5 save stays empty, unit repair, loadout sync / stale unit / army follow on load, v4 → v5 incl. the default army with army-less units and the example for an empty v4 save, ability repair through unit weapons; `validateLoadoutRow`; `presets.test.ts` trimmed to the kept helpers). `npm run build` is clean. Checked in Chrome: the example page (5 bolt rifles); ticking the pistol with counts 8 / 2 gives 16 / 10.70 / 5.34 / 2.68 and 2 / 1.33 / 0.67 / 0.22 into 5 Intercessors as expected; firing numbers skip unticked rows; editing the unit (T5, removing the pistol) updates the defender chips and drops the row; deleting the only unit disables the pickers with the hint and blocks Simulate; a v4 save with two armies and an army-less unit migrates (conditions kept, Chaos Daemons first), army switching filters the units, 40 models of W12 flags Models, and 8 plasma incinerators + 2 bolt pistols into 10 Bloodletters give 8.86 wounds / 5.89 unsaved as expected; the v4 key stays; no console errors. A real phone-width viewport was not checked (the window could not be resized).
+
+## Unit export and import (session 16, 2026-11-26, branch `armyconfig`)
+
+**Why:** Import / Export was removed with profiles in session 15; it now shares units instead.
+
+**File format** (`state/share.ts`, `SHARE_VERSION` 3): `{ format: "damage-calculator-share", version: 3, exportedAt, units: SharedUnit[] }`, where `SharedUnit` = the unit's stat line and keywords, `name`, `army` (the army's **name**, or null for "No army") and `weapons` (`WeaponStats`, no ids). No ids travel: the importer matches armies by name and gives units and weapons new ids. Version 1–2 files (profiles, defender presets, weapon profiles) are refused with "This export holds profiles and weapon profiles from an older version of the app, which now uses armies and units instead."
+
+**Parsing** reuses the storage checks (`toUnit` is now exported): malformed units and weapons are dropped, abilities repaired, names and army names trimmed and cut to 40 characters, an empty army name means "No army". Same errors as before for empty input, invalid JSON, a non-export, a newer version, nothing to import, and over 1,000,000 characters.
+
+**Review** (`planImport`): per unit, compared with the units **in the army with the same name** (case-insensitive): new; **Already saved** (same name and `sameUnitContent`: stat line, keywords, weapons by name and combat stats in order; not selectable); **Name in use in this army** (same name, different content); invalid (`validateUnit` without the name check; first error shown; not selectable). The same unit name in another army is no clash. Groups follow the file's army names; an army that doesn't exist yet is titled `Name (new army)`.
+
+**Apply** (`applyImport`): a missing army is created (counted in the summary: "Created 1 new army."). Keep both adds `Name (2)`, `Name (3)`, … within the army (`uniqueName`, which moved here from presets). **Replace** keeps the saved unit's id, name and army and takes the stats, keywords and weapons from the file; weapons that keep their name keep their id, so a loadout on the main page that uses the unit stays linked (ticks and counts kept), new weapons are appended unticked by the reconcile. After an import `main.ts` re-renders the Units tab and calls `onUnitsChanged()`.
+
+**UI:** Settings → "Import and export" with Import… / Export… (the session-4 modal, `ui/shareModal.ts`, adapted): Export lists the units grouped by army (`groupUnits`), all checked with a select-all box per army; Copy / Download (`damage-calculator-YYYY-MM-DD.json`). The share CSS and `.modal-actions--split` are back.
+
+**Verification:** `npm test` 268/268 (new `state/share.test.ts`: export picks units and army names without ids, a stale army exports as "No army", round trip incl. abilities, error texts incl. old versions, repair and trimming, review statuses per army and case-insensitive army match, `sameUnitContent`, adding with army creation, keep both, replace keeping unit and weapon ids, chosen items only, `uniqueName`). `npm run build` is clean. Checked in Chrome: Export lists Chaos Daemons / Space Marines / No army with unit summaries; importing a file with a changed Hellblasters, a Custodian Guard in a new army and an invalid unit shows "Name in use in this army", "(new army)" and the Toughness error; Replace gives "Imported 2 units: 1 added, 1 replaced. Created 1 new army."; the attacker's Hellblasters loadout kept its ticked plasma incinerator and gained the new heavy bolt pistol unticked; no console errors.
 
 ## Housekeeping
 
@@ -354,4 +372,5 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - A share link (export encoded in the URL hash) next to Copy / Download.
+- Cloud save / load, e.g. Google Drive (discussed in session 16, not built): Google Identity Services token client + Drive API v3 from the browser with the narrow `drive.file` scope, one JSON file (the export format) the app creates and reads back; needs a Google Cloud project with an OAuth client ID whose authorised JavaScript origins are `https://szuidam.github.io` and the dev server.
 - Undo for row edits on the main page.

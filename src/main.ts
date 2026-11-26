@@ -10,6 +10,7 @@ import { field, h, numberValue, setFieldError } from './ui/dom';
 import { Drawer } from './ui/drawer';
 import { LoadoutRows } from './ui/loadoutRows';
 import { createResultsView } from './ui/results';
+import { openExportModal, openImportModal } from './ui/shareModal';
 import { UnitPicker } from './ui/unitPicker';
 import { UnitsPanel } from './ui/unitsPanel';
 import { hasErrors, validateDefender, validateIterations, validateLoadoutRow } from './ui/validation';
@@ -271,6 +272,20 @@ function settingsPanel(): HTMLElement {
   });
   sync();
 
+  const importButton = h('button', { type: 'button', class: 'button secondary' }, 'Import…');
+  const exportButton = h('button', { type: 'button', class: 'button secondary' }, 'Export…');
+  exportButton.addEventListener('click', () => openExportModal(state));
+  importButton.addEventListener('click', () =>
+    openImportModal({
+      state,
+      // Units and armies may have been added or replaced: the Units tab and the main page follow.
+      onImported: () => {
+        unitsPanel.render();
+        onUnitsChanged();
+      },
+    }),
+  );
+
   return h(
     'div',
     { class: 'settings-panel' },
@@ -280,6 +295,13 @@ function settingsPanel(): HTMLElement {
       h('h3', {}, 'Simulation'),
       field('Iterations', iterations, 'field--iterations'),
       h('p', { class: 'panel-hint' }, 'Simulated runs per press of Simulate, from 100 to 1,000,000. More runs give smoother results but take longer.'),
+    ),
+    h(
+      'section',
+      { class: 'settings-section' },
+      h('h3', {}, 'Import and export'),
+      h('p', { class: 'panel-hint' }, 'Share units, with their weapons and army, with another browser or device as a JSON file.'),
+      h('div', { class: 'panel-actions-group' }, importButton, exportButton),
     ),
   );
 }

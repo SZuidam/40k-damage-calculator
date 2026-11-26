@@ -270,7 +270,7 @@ function toUnitWeapon(value: unknown): StoredWeapon | null {
  * A unit: a name, its stat line and keywords, and its weapons.
  * Malformed weapons are dropped; out-of-range stats are kept for validation to flag.
  */
-function toUnit(value: unknown): Unit | null {
+export function toUnit(value: unknown): Unit | null {
   if (!isRecord(value) || typeof value.name !== 'string') return null;
   return {
     id: typeof value.id === 'string' && value.id !== '' ? value.id : uid('unit'),
