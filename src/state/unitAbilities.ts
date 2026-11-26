@@ -53,6 +53,16 @@ export function situationKey(name: string): string {
   return name.trim().toLowerCase();
 }
 
+/**
+ * What the user typed as a condition: a built-in one when `text` names it ("Charged", "Charged
+ * this turn", ignoring case), else a custom situation with the trimmed text as its name.
+ */
+export function situationFromText(text: string): SituationRef {
+  const key = situationKey(text);
+  const builtin = BUILTIN_SITUATIONS.find((b) => situationKey(b.name) === key || situationKey(b.toggle) === key);
+  return builtin ? { builtin: builtin.key } : { name: text.trim() };
+}
+
 /** "Charged" / "Ingress move": how a condition reads in summaries and on the main page. */
 export function situationName(ref: SituationRef): string {
   return 'builtin' in ref ? (BUILTIN_SITUATIONS.find((b) => b.key === ref.builtin)?.name ?? ref.builtin) : ref.name.trim();

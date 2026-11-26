@@ -1796,3 +1796,104 @@ input.share-check:disabled {
 .share-textarea[aria-invalid='true'] {
   border-color: var(--danger);
 }
+
+/* ---------- Ability editor (unit abilities and army rules) ---------- */
+
+.ability-form .toggle-group {
+  margin: 0;
+}
+
+.ability-names {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 8px;
+}
+
+.ability-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--grid);
+}
+
+.ability-section h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.situation-add {
+  display: flex;
+  gap: 6px;
+}
+
+/* A situation of the user's own: it gets a toggle on the main page. */
+.situation-custom {
+  border-style: dashed;
+}
+
+.ability-when-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.ability-when-grid .field {
+  flex: 1 1 160px;
+}
+
+.effect-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.effect-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.effect-line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.effect-line .effect-kind {
+  flex: 1 1 auto;
+}
+
+.effect-line .effect-value {
+  flex: 0 0 120px;
+}
+
+.effect-line .icon-button {
+  flex: 0 0 auto;
+}
+
+.effect-row .ability-editor {
+  padding-left: 12px;
+  border-left: 2px solid var(--grid);
+}
+
+.ability-description {
+  font-style: italic;
+}
+
+.unit-abilities {
+  margin-top: 4px;
+}
+
+@media (max-width: 480px) {
+  .ability-names {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .effect-line .effect-value {
+    flex-basis: 96px;
+  }
+}

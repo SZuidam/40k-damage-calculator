@@ -13,6 +13,7 @@ import {
   grantAbilities,
   isActive,
   sameAbilityContent,
+  situationFromText,
   situationsInUse,
   type AbilityContext,
 } from './unitAbilities';
@@ -100,6 +101,14 @@ describe('abilitiesFor', () => {
     expect(abilitiesFor(squad, null, null).map((a) => a.ability.name)).toEqual(['Own']);
     expect(canLead(captain)).toBe(true);
     expect(canLead(unit({ abilities: [own] }))).toBe(false);
+  });
+});
+
+describe('situationFromText', () => {
+  it('maps the names of built-in conditions to them and keeps anything else as a custom situation', () => {
+    expect(situationFromText(' charged ')).toEqual({ builtin: 'charged' });
+    expect(situationFromText('Within half range')).toEqual({ builtin: 'halfRange' });
+    expect(situationFromText('  Ingress move ')).toEqual({ name: 'Ingress move' });
   });
 });
 

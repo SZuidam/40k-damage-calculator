@@ -1,10 +1,12 @@
 import { uid } from '../state/ids';
 import { byName, statsSummary } from '../state/presets';
+import { situationsInUse } from '../state/unitAbilities';
 import { copyUnit, deleteArmy, groupUnits, isNameTaken, newUnit, sameUnit, unitSummary, unitsInArmy, type ArmyFilter } from '../state/units';
-import type { Army, StoredWeapon, Unit } from '../types';
+import type { Army, StoredWeapon, Unit, UnitAbility } from '../types';
+import { abilityList } from './abilityList';
 import { field, h, numberValue, select, setFieldError } from './dom';
 import { Menu } from './menu';
-import { MAX_PRESET_NAME, confirmDialog, promptName } from './modal';
+import { MAX_PRESET_NAME, confirmDialog, openModal, promptName } from './modal';
 import { INVULN_OPTIONS, SAVE_OPTIONS, keywordToggles } from './statFields';
 import { hasErrors, validateUnit } from './validation';
 import { openWeaponModal } from './weaponModal';
@@ -48,6 +50,7 @@ export class UnitsPanel {
       label: 'Army actions',
       items: [
         { label: 'New army…', onSelect: () => void this.createArmy() },
+        { label: 'Army rules…', disabledReason: noArmy, onSelect: () => void this.editArmyRules() },
         { label: 'Rename…', disabledReason: noArmy, onSelect: () => void this.renameArmy() },
         { label: 'Delete', danger: true, disabledReason: noArmy, onSelect: () => void this.removeArmy() },
       ],
@@ -128,7 +131,47 @@ export class UnitsPanel {
     );
   }
 
+  /** Custom situation names used by any unit or army (plus `extra`, e.g. a draft's abilities), for the ability modal. */
+  private knownSituations(extra: readonly UnitAbility[] = []): string[] {
+    const { armies, units } = this.options;
+    return situationsInUse([...extra, ...units.flatMap((u) => u.abilities), ...armies.flatMap((a) => a.abilities)]);
+  }
+
   // ---------- armies ----------
+
+  /** "Army rules…": the abilities every unit of the selected army has, edited in place. */
+  private async editArmyRules(): Promise<void> {
+    const army = this.selectedArmy();
+    if (!army) return;
+    await openModal<void>({
+      title: `Army rules: ${army.name}`,
+      cancelValue: undefined,
+      className: 'modal--wide',
+      content: (close) => {
+        const done = h('button', { type: 'button', class: 'button primary' }, 'Done');
+        done.addEventListener('click', () => close());
+        return [
+          h(
+            'div',
+            { class: 'modal-body' },
+            h('p', { class: 'modal-hint' }, `Rules every unit of ${army.name} has when it attacks, such as a detachment rule. Changes are saved straight away.`),
+            abilityList({
+              abilities: army.abilities,
+              scope: 'army',
+              label: `Army rules of ${army.name}`,
+              addLabel: '+ New army rule',
+              knownSituations: () => this.knownSituations(),
+              onChange: () => {
+                this.options.onChange();
+                this.render();
+              },
+            }),
+          ),
+          h('div', { class: 'modal-actions' }, done),
+        ];
+      },
+    });
+  }
 
   private armyNames(except?: Army): string[] {
     return this.options.armies.filter((a) => a !== except).map((a) => a.name);
@@ -307,6 +350,20 @@ export class UnitsPanel {
         weaponList,
         noWeapons,
         h('div', { class: 'panel-actions-group' }, addWeapon),
+      ),
+      h(
+        'section',
+        { class: 'settings-section unit-weapons unit-abilities' },
+        h('h3', {}, 'Abilities'),
+        h('p', { class: 'panel-hint' }, 'What the unit does to its attacks, and (for a character) to the unit it leads. Army rules are under the ⋯ menu of the army.'),
+        abilityList({
+          abilities: draft.abilities,
+          scope: 'unit',
+          label: 'Abilities of this unit',
+          addLabel: '+ New ability',
+          knownSituations: () => this.knownSituations(draft.abilities),
+          onChange: () => validate(),
+        }),
       ),
     );
     form.addEventListener('submit', (event) => {
