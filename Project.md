@@ -29,6 +29,7 @@ src/
     rules.ts            woundTarget, saveTarget, rollSucceeds, bonusAttacks, hitModifier / woundModifier, strongerReroll / isRerolled, antiCriticalWound, AttackContext + step functions, hitRollFaces / woundRollFaces
     simulate.ts         Monte Carlo simulate(weapons, defender, iterations, rng), atLeast()
     exact.ts            exact Markov-chain expectation (weaponKernel, applyWeapon, exactResult)
+    breakdown.ts        breakdown(): every step's exact expectation per weapon as you'd work it out by hand (re-rolls as first + rerolled × first, Sustained / Lethal / Devastating split out), plus the exact damage applied and models destroyed per weapon
     optimise.ts         optimiseOrder(): exhaustive for 7 or fewer weapons, greedy above that
     testFixtures.ts     shared weapon and defender fixtures for tests
     *.test.ts           tests next to each module
@@ -64,7 +65,8 @@ src/
     statFields.ts       SAVE_OPTIONS / INVULN_OPTIONS and keywordToggles(), for the unit editor
     shareModal.ts       "Export…" (pick units grouped by army, Copy / Download) and "Import…" (paste or file, review, import), opened from the Settings tab
     conditionsForm.ts   renderAttackConditions(): the "Within half range" / "Charged this turn" toggles
-    results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`), kill chart (SVG) + table view
+    results.ts          createResultsView(): summary tiles, step table (`10× Bolt rifle`) + "Show the calculation", kill chart (SVG) + table view
+    calculation.ts      weaponCalc() / calculationText() / renderCalculation(): the breakdown as plain-text formulas with notes, and "Copy as text"
 ```
 
 ## Rules implemented (confirmed with the user)

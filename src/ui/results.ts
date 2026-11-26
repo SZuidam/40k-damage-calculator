@@ -1,4 +1,6 @@
-import type { SimulationResult, StepStats, WeaponProfile } from '../types';
+import { breakdown } from '../engine/breakdown';
+import type { DefenderProfile, SimulationResult, StepStats, WeaponProfile } from '../types';
+import { renderCalculation } from './calculation';
 import { h } from './dom';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -22,7 +24,7 @@ const pct = (p: number) => {
 
 export interface ResultsView {
   /** `weapons` are the profiles that were simulated, used to label rows `10× Bolt rifle`. */
-  show(result: SimulationResult, weapons: WeaponProfile[], defenderModels: number, defenderWounds: number): void;
+  show(result: SimulationResult, weapons: WeaponProfile[], defender: DefenderProfile): void;
   markStale(stale: boolean): void;
 }
 
@@ -30,13 +32,13 @@ export function createResultsView(container: HTMLElement): ResultsView {
   let resizeObserver: ResizeObserver | null = null;
 
   return {
-    show(result, weapons, defenderModels, defenderWounds) {
+    show(result, weapons, defender) {
       resizeObserver?.disconnect();
       container.replaceChildren();
       container.classList.remove('is-stale');
 
       const stale = h('p', { class: 'stale-notice', role: 'status' }, 'Inputs changed since this run. Simulate again to update.');
-      container.append(stale, summary(result, defenderModels, defenderWounds), stepTable(result, weapons));
+      container.append(stale, summary(result, defender.models, defender.wounds), stepTable(result, weapons, defender));
 
       const chartHost = h('div', { class: 'chart-host' });
       container.append(chartSection(result, chartHost));
@@ -84,7 +86,7 @@ function tile(label: string, value: string, context: string): HTMLElement {
   return h('div', { class: 'tile' }, h('dt', {}, label), h('dd', {}, h('span', { class: 'tile-value' }, value), h('span', { class: 'tile-context' }, context)));
 }
 
-function stepTable(result: SimulationResult, weapons: WeaponProfile[]): HTMLElement {
+function stepTable(result: SimulationResult, weapons: WeaponProfile[], defender: DefenderProfile): HTMLElement {
   const headRow = h('tr', {}, h('th', { scope: 'col' }, 'Weapon'), ...STEPS.map((s) => h('th', { scope: 'col', class: 'num' }, s.label)));
   const bodyRows = result.perWeapon.map((p, i) => {
     const models = weapons.find((w) => w.id === p.id)?.models;
@@ -107,7 +109,21 @@ function stepTable(result: SimulationResult, weapons: WeaponProfile[]): HTMLElem
       { class: 'table-scroll' },
       h('table', { class: 'step-table' }, h('thead', {}, headRow), h('tbody', {}, ...bodyRows), h('tfoot', {}, totalRow)),
     ),
+    calculationView(weapons, defender),
   );
+}
+
+/**
+ * "Show the calculation": the averages worked out step by step as formulas. The exact damage
+ * per weapon takes a moment for large units, so it is only worked out when first opened.
+ */
+function calculationView(weapons: WeaponProfile[], defender: DefenderProfile): HTMLElement {
+  const details = h('details', { class: 'table-view' }, h('summary', {}, 'Show the calculation'));
+  details.addEventListener('toggle', () => {
+    if (!details.open || details.childElementCount > 1) return;
+    details.append(renderCalculation(breakdown(weapons, defender), defender));
+  });
+  return details;
 }
 
 function chartSection(result: SimulationResult, chartHost: HTMLElement): HTMLElement {

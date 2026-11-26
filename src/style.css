@@ -1364,6 +1364,88 @@ tfoot td {
   margin-bottom: 8px;
 }
 
+/* ---------- Calculation ---------- */
+
+.calc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.calc p {
+  margin: 0 0 12px;
+}
+
+.calc-weapon {
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--grid);
+}
+
+.calc-title {
+  color: var(--text-primary);
+}
+
+.calc-stats {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: baseline;
+}
+
+.calc-step {
+  color: var(--text-primary);
+  font-weight: 500;
+  padding-top: 6px;
+}
+
+.calc-formula,
+.calc-value {
+  font: 0.85rem/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  color: var(--text-primary);
+  padding-top: 6px;
+}
+
+.calc-formula {
+  overflow-wrap: anywhere;
+}
+
+.calc-value {
+  white-space: nowrap;
+}
+
+.calc-note {
+  grid-column: 2 / -1;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.calc-total {
+  padding-top: 10px;
+  border-top: 1px solid var(--axis);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .calc-grid {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .calc-step {
+    grid-column: 1 / -1;
+  }
+
+  .calc-note {
+    grid-column: 1 / -1;
+  }
+}
+
 /* ---------- Dialogs ---------- */
 
 dialog.modal {

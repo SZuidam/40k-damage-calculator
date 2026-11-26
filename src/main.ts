@@ -227,7 +227,7 @@ function runSimulation(): void {
     const started = performance.now();
     const result = simulate(weapons, defender, state.iterations);
     const ms = Math.round(performance.now() - started);
-    results.show(result, weapons, defender.models, defender.wounds);
+    results.show(result, weapons, defender);
     hasResults = true;
     simulateButton.disabled = false;
     runStatus.textContent = `${state.iterations.toLocaleString()} runs in ${ms.toLocaleString()} ms.`;
