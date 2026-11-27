@@ -77,6 +77,7 @@ const DESCRIPTIONS = {
   melta: (x: string) => `Adds ${x} to the Damage characteristic when the target is within half range.`,
   lance: 'Adds 1 to the wound roll if the bearer charged this turn.',
   twinLinked: 'A failed wound roll is re-rolled once.',
+  torrent: 'Every attack hits automatically: no hit roll is made, so the weapon has no BS / WS and scores no critical hits.',
 };
 
 /** The attack condition each conditional ability needs. */
@@ -145,6 +146,13 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
     isActive: (a) => a.twinLinked,
     apply: (a) => ({ ...a, twinLinked: true }),
   },
+  {
+    value: 'torrent',
+    label: 'Torrent',
+    description: DESCRIPTIONS.torrent,
+    isActive: (a) => a.torrent,
+    apply: (a) => ({ ...a, torrent: true }),
+  },
 ];
 
 /** The abilities with X of `key` set (or replaced), stored normalised: " d6 + 2 " → "D6+2". */
@@ -172,6 +180,7 @@ export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   if (a.melta !== null) withValue('melta', a.melta);
   if (a.lance) out.push({ key: 'lance', label: 'Lance', description: DESCRIPTIONS.lance, condition: 'charged' });
   if (a.twinLinked) out.push({ key: 'twinLinked', label: 'Twin-linked', description: DESCRIPTIONS.twinLinked });
+  if (a.torrent) out.push({ key: 'torrent', label: 'Torrent', description: DESCRIPTIONS.torrent });
   return out;
 }
 
@@ -230,6 +239,7 @@ export function sameAbilities(a: WeaponAbilities, b: WeaponAbilities): boolean {
     a.devastatingWounds === b.devastatingWounds &&
     a.lance === b.lance &&
     a.twinLinked === b.twinLinked &&
+    a.torrent === b.torrent &&
     sameValue('sustainedHits') &&
     sameValue('blast') &&
     sameValue('cleave') &&

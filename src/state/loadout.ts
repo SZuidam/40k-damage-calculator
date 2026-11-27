@@ -1,4 +1,4 @@
-import { noModifiers, type Army, type AttackConditions, type AttackerSelection, type DefenderKeyword, type DefenderProfile, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitAbility, type WeaponProfile } from '../types';
+import { noModifiers, type Army, type AttackConditions, type AttackerSelection, type DamageRerollThresholds, type DefenderKeyword, type DefenderProfile, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitAbility, type WeaponProfile } from '../types';
 import { byName, pickStats } from './presets';
 import { applyAbilities, canLead, isActive, type AbilityContext } from './unitAbilities';
 
@@ -116,6 +116,8 @@ export interface LoadoutAbilities {
   toggles: readonly string[];
   /** The defender's keywords, or null without a defender. */
   keywords: readonly DefenderKeyword[] | null;
+  /** The Settings thresholds for "Re-roll damage" (the defaults when left out). */
+  damageRerolls?: DamageRerollThresholds;
 }
 
 /**
@@ -129,7 +131,7 @@ export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditio
   return carriedWeapons(unit, rows).map(({ row, weapon }) => {
     const profile: WeaponProfile = { ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions }, modifiers: noModifiers() };
     const active = (extra?.abilities ?? []).filter((a) => isActive(a, weapon.type, ctx));
-    return active.length === 0 ? profile : applyAbilities(profile, active);
+    return active.length === 0 ? profile : applyAbilities(profile, active, extra?.damageRerolls);
   });
 }
 

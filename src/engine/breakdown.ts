@@ -1,10 +1,12 @@
-import type { DefenderProfile, RerollKind, WeaponProfile } from '../types';
-import { formatDiceSum, meanValue, type DiceExpr } from './dice';
-import { applyWeapon, evaluateState, initialState, weaponKernel } from './exact';
+import type { DefenderProfile, MortalWoundSource, RerollKind, WeaponProfile } from '../types';
+import { formatDiceSum, meanValue, parseDice, type DiceExpr } from './dice';
+import { applyWeapon, evaluateState, initialState, mortalKernel, weaponKernel } from './exact';
 import {
   attacksPerModel,
   createAttackContext,
   damagePerWound,
+  damageRerollChance,
+  damageRollDistribution,
   hitRollFaces,
   hitSucceeds,
   isCriticalHit,
@@ -39,6 +41,17 @@ export interface RollBreakdown {
   critical: number;
 }
 
+/** Re-roll damage: a roll of the Damage characteristic whose dice show less than `below` is re-rolled once. */
+export interface DamageReroll {
+  below: number;
+  /** P(the first roll is re-rolled): P(the dice of D < below). */
+  rerolled: number;
+  /** The average of D without the re-roll. */
+  plainMean: number;
+  /** The average of D with it. */
+  mean: number;
+}
+
 /** A term of the attacks or damage per model / per wound, labelled with where it comes from. */
 export interface DiceTerm {
   label: string;
@@ -59,6 +72,8 @@ export interface WeaponBreakdown {
   attacksPerModelExpr: string;
   attacksPerModel: number;
   attacks: number;
+  /** Torrent: every attack hits automatically (no hit roll, so no critical hits). */
+  torrent: boolean;
   hit: RollBreakdown;
   /** Sustained Hits X: extra hits per critical hit, or null. */
   sustained: DiceTerm | null;
@@ -84,7 +99,10 @@ export interface WeaponBreakdown {
   armourOn: number;
   failSave: number;
   unsaved: number;
+  /** D first (its mean after a damage re-roll), then Melta. */
   damageTerms: DiceTerm[];
+  /** Re-roll damage, or null when no ability re-rolls it (or D is fixed). */
+  damageReroll: DamageReroll | null;
   damagePerWoundExpr: string;
   damagePerWound: number;
   /** unsaved × damage per wound, before excess damage is lost. */
@@ -95,7 +113,28 @@ export interface WeaponBreakdown {
   destroyed: number;
 }
 
+/** A mortal wound source worked out: dice × P(success) × mortal wounds per success. */
+export interface MortalBreakdown {
+  source: MortalWoundSource;
+  dice: number;
+  on: number;
+  /** P(a die rolls `on`+). */
+  chance: number;
+  successes: number;
+  /** The perSuccess expression as written ("1", "D3"), and its average. */
+  perSuccessExpr: string;
+  perSuccessMean: number;
+  /** successes × perSuccessMean, before damage beyond the unit is lost. */
+  mortalWounds: number;
+  /** Exact expected damage applied, given the sources before it. */
+  applied: number;
+  /** Exact expected models destroyed, given the sources before it. */
+  destroyed: number;
+}
+
 export interface Breakdown {
+  /** Mortal wound sources, resolved before the weapons. */
+  mortals: MortalBreakdown[];
   weapons: WeaponBreakdown[];
   appliedTotal: number;
   destroyedTotal: number;
@@ -171,6 +210,14 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
 
   const damageLabels = ['D', ...(ctx.bonusDamage.length > 0 ? [`Melta ${weapon.abilities.melta}`] : [])];
   const damageTerms = damagePerWound(ctx).map((expr, i) => term(damageLabels[i] ?? 'Bonus', expr));
+  let damageReroll: DamageReroll | null = null;
+  if (ctx.rerollDamageBelow > 0) {
+    const below = ctx.rerollDamageBelow;
+    const rerolled = damageRerollChance(ctx);
+    const mean = damageRollDistribution(ctx).reduce((total, p, v) => total + p * v, 0);
+    damageReroll = { below, rerolled, plainMean: damageTerms[0].mean, mean };
+    damageTerms[0] = { ...damageTerms[0], mean };
+  }
   const damagePerWoundMean = sum(damageTerms);
 
   return {
@@ -179,6 +226,7 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
     attacksPerModelExpr: formatDiceSum(attacksPerModel(ctx)),
     attacksPerModel: attacksPerModelMean,
     attacks,
+    torrent: ctx.torrent,
     hit,
     sustained,
     criticalHits,
@@ -197,16 +245,42 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
     failSave,
     unsaved,
     damageTerms,
+    damageReroll,
     damagePerWoundExpr: formatDiceSum(damagePerWound(ctx)),
     damagePerWound: damagePerWoundMean,
     damage: unsaved * damagePerWoundMean,
   };
 }
 
-/** The worked-out expectation of every weapon in firing order, with the exact damage each one applies. */
-export function breakdown(weapons: WeaponProfile[], defender: DefenderProfile): Breakdown {
+/**
+ * The worked-out expectation of every mortal wound source and then every weapon in firing order,
+ * with the exact damage each one applies (the weapons' given what the mortal wounds left behind).
+ */
+export function breakdown(weapons: WeaponProfile[], defender: DefenderProfile, mortals: MortalWoundSource[] = []): Breakdown {
   let state = initialState(defender);
   let before = evaluateState(state, defender);
+  const mortalOut: MortalBreakdown[] = [];
+  for (const source of mortals) {
+    state = applyWeapon(state, mortalKernel(source, defender), defender);
+    const after = evaluateState(state, defender);
+    const chance = Math.max(0, Math.min(1, (7 - source.on) / 6));
+    const successes = source.dice * chance;
+    const perSuccess = parseDice(source.perSuccess);
+    const perSuccessMean = meanValue(perSuccess);
+    mortalOut.push({
+      source,
+      dice: source.dice,
+      on: source.on,
+      chance,
+      successes,
+      perSuccessExpr: formatDiceSum([perSuccess]),
+      perSuccessMean,
+      mortalWounds: successes * perSuccessMean,
+      applied: after.expectedDamage - before.expectedDamage,
+      destroyed: after.expectedModelsDestroyed - before.expectedModelsDestroyed,
+    });
+    before = after;
+  }
   const out: WeaponBreakdown[] = [];
   for (const weapon of weapons) {
     state = applyWeapon(state, weaponKernel(weapon, defender), defender);
@@ -218,5 +292,5 @@ export function breakdown(weapons: WeaponProfile[], defender: DefenderProfile): 
     });
     before = after;
   }
-  return { weapons: out, appliedTotal: before.expectedDamage, destroyedTotal: before.expectedModelsDestroyed };
+  return { mortals: mortalOut, weapons: out, appliedTotal: before.expectedDamage, destroyedTotal: before.expectedModelsDestroyed };
 }

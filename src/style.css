@@ -602,6 +602,15 @@ select[aria-invalid='true'] {
   flex: 1 1 160px;
 }
 
+/* The attacker's Models: a small number beside Army / Unit / Led by. */
+.picker-field.picker-field--models {
+  flex: 0 0 80px;
+}
+
+.attacker-models-hint.is-error {
+  color: var(--danger);
+}
+
 /* The picked unit's banner image on either side: faint, behind the panel heading and the
    pickers only, filling the top of the panel edge to edge and fading out towards the rest. */
 .unit-head {
@@ -1058,6 +1067,17 @@ select[aria-invalid='true'] {
 
 .field--iterations {
   max-width: 180px;
+}
+
+/* Fields side by side (the D3 / D6 damage re-roll thresholds), wrapping on narrow drawers. */
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.settings-row .field {
+  flex: 0 1 160px;
 }
 
 .optimise {
@@ -2150,6 +2170,36 @@ input.share-check:disabled {
 
 .effect-line .icon-button {
   flex: 0 0 auto;
+}
+
+/* Inflict mortal wounds: a longer line, which wraps on narrow screens. */
+.effect-line--wrap {
+  flex-wrap: wrap;
+}
+
+.effect-line .effect-note--nowrap {
+  white-space: nowrap;
+}
+
+.effect-line .effect-value.effect-value--short {
+  flex: 0 0 64px;
+}
+
+/* Inflict mortal wounds: the mortal wounds per success as dice ("1", "D3"). */
+.effect-line .effect-dice {
+  flex: 0 0 56px;
+  min-width: 0;
+}
+
+.effect-mortal-note[hidden] {
+  display: none;
+}
+
+/* In place of a value: where the effect takes it from (Re-roll damage: the Settings threshold). */
+.effect-line .effect-note {
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
 }
 
 .effect-row .ability-editor {

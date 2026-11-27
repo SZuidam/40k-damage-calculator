@@ -1,5 +1,5 @@
 import { breakdown } from '../engine/breakdown';
-import type { DefenderProfile, SimulationResult, StepStats, WeaponProfile } from '../types';
+import type { DefenderProfile, MortalWoundSource, SimulationResult, StepStats, WeaponProfile } from '../types';
 import { renderCalculation } from './calculation';
 import { h } from './dom';
 
@@ -23,8 +23,11 @@ const pct = (p: number) => {
 };
 
 export interface ResultsView {
-  /** `weapons` are the profiles that were simulated, used to label rows `10× Bolt rifle`. */
-  show(result: SimulationResult, weapons: WeaponProfile[], defender: DefenderProfile): void;
+  /**
+   * `weapons` are the profiles that were simulated, used to label rows `10× Bolt rifle`; `mortals`
+   * the mortal wound sources resolved before them.
+   */
+  show(result: SimulationResult, weapons: WeaponProfile[], defender: DefenderProfile, mortals?: MortalWoundSource[]): void;
   markStale(stale: boolean): void;
 }
 
@@ -32,13 +35,13 @@ export function createResultsView(container: HTMLElement): ResultsView {
   let resizeObserver: ResizeObserver | null = null;
 
   return {
-    show(result, weapons, defender) {
+    show(result, weapons, defender, mortals = []) {
       resizeObserver?.disconnect();
       container.replaceChildren();
       container.classList.remove('is-stale');
 
       const stale = h('p', { class: 'stale-notice', role: 'status' }, 'Inputs changed since this run. Simulate again to update.');
-      container.append(stale, summary(result, defender.models, defender.wounds), stepTable(result, weapons, defender));
+      container.append(stale, summary(result, defender.models, defender.wounds), stepTable(result, weapons, defender, mortals));
 
       const chartHost = h('div', { class: 'chart-host' });
       container.append(chartSection(result, chartHost));
@@ -86,9 +89,22 @@ function tile(label: string, value: string, context: string): HTMLElement {
   return h('div', { class: 'tile' }, h('dt', {}, label), h('dd', {}, h('span', { class: 'tile-value' }, value), h('span', { class: 'tile-context' }, context)));
 }
 
-function stepTable(result: SimulationResult, weapons: WeaponProfile[], defender: DefenderProfile): HTMLElement {
+/** Steps a mortal wound row has no value for: mortal wounds make no attacks or hit rolls. */
+const MORTAL_SKIPS: (keyof StepStats)[] = ['attacks', 'hits'];
+
+function stepTable(result: SimulationResult, weapons: WeaponProfile[], defender: DefenderProfile, mortals: MortalWoundSource[]): HTMLElement {
   const headRow = h('tr', {}, h('th', { scope: 'col' }, 'Weapon'), ...STEPS.map((s) => h('th', { scope: 'col', class: 'num' }, s.label)));
-  const bodyRows = result.perWeapon.map((p, i) => {
+  let weaponIndex = 0;
+  const bodyRows = result.perWeapon.map((p) => {
+    if (p.kind === 'mortal') {
+      return h(
+        'tr',
+        { class: 'mortal-row' },
+        h('th', { scope: 'row' }, `${p.name} (mortal wounds)`),
+        ...STEPS.map((s) => h('td', { class: 'num' }, MORTAL_SKIPS.includes(s.key) ? h('span', { 'aria-label': 'none' }, '—') : fmt(p.stats[s.key]))),
+      );
+    }
+    const i = weaponIndex++;
     const models = weapons.find((w) => w.id === p.id)?.models;
     const name = p.name || `Weapon ${i + 1}`;
     return h(
@@ -109,7 +125,7 @@ function stepTable(result: SimulationResult, weapons: WeaponProfile[], defender:
       { class: 'table-scroll' },
       h('table', { class: 'step-table' }, h('thead', {}, headRow), h('tbody', {}, ...bodyRows), h('tfoot', {}, totalRow)),
     ),
-    calculationView(weapons, defender),
+    calculationView(weapons, defender, mortals),
   );
 }
 
@@ -117,11 +133,11 @@ function stepTable(result: SimulationResult, weapons: WeaponProfile[], defender:
  * "Show the calculation": the averages worked out step by step as formulas. The exact damage
  * per weapon takes a moment for large units, so it is only worked out when first opened.
  */
-function calculationView(weapons: WeaponProfile[], defender: DefenderProfile): HTMLElement {
+function calculationView(weapons: WeaponProfile[], defender: DefenderProfile, mortals: MortalWoundSource[]): HTMLElement {
   const details = h('details', { class: 'table-view' }, h('summary', {}, 'Show the calculation'));
   details.addEventListener('toggle', () => {
     if (!details.open || details.childElementCount > 1) return;
-    details.append(renderCalculation(breakdown(weapons, defender), defender));
+    details.append(renderCalculation(breakdown(weapons, defender, mortals), defender));
   });
   return details;
 }

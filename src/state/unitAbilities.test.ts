@@ -11,7 +11,10 @@ import {
   canLead,
   copyAbility,
   grantAbilities,
+  effectSummary,
   isActive,
+  isUnitLevelOnly,
+  mortalWoundSources,
   pruneToggles,
   sameAbilityContent,
   type AbilityContext,
@@ -151,7 +154,28 @@ describe('applyAbilities', () => {
         { kind: 'reroll', roll: 'wound', which: 'ones' },
       ]),
     ]);
-    expect(modifiers).toEqual({ hit: 2, wound: -1, criticalHit: 5, criticalWound: 4, rerollHits: 'failed', rerollWounds: 'ones' });
+    expect(modifiers).toEqual({ hit: 2, wound: -1, criticalHit: 5, criticalWound: 4, rerollHits: 'failed', rerollWounds: 'ones', rerollDamageBelow: 0 });
+  });
+
+  it('re-rolls damage below the Settings threshold for the dice of D', () => {
+    const reroll = [ability('Re-roll', [{ kind: 'rerollDamage' }])];
+    const thresholds = { d3: 3, d6: 5 };
+    const withDamage = (damage: string) => ({ ...base(), damage });
+    expect(applyAbilities(withDamage('D3'), reroll, thresholds).modifiers.rerollDamageBelow).toBe(3);
+    expect(applyAbilities(withDamage('2D6'), reroll, thresholds).modifiers.rerollDamageBelow).toBe(5);
+    // Fixed damage has nothing to re-roll.
+    expect(applyAbilities(withDamage('2'), reroll, thresholds).modifiers.rerollDamageBelow).toBe(0);
+    // Without thresholds the defaults apply: below 2 for D3, below 4 for D6.
+    expect(applyAbilities(withDamage('D6'), reroll).modifiers.rerollDamageBelow).toBe(4);
+    // D +1 from another effect keeps the D6 threshold, compared with the dice of D6+1 only.
+    const plusOne = applyAbilities(withDamage('D6'), [ability('Both', [{ kind: 'stat', stat: 'damage', amount: 1 }, { kind: 'rerollDamage' }])], thresholds);
+    expect(plusOne.damage).toBe('D6+1');
+    expect(plusOne.modifiers.rerollDamageBelow).toBe(5);
+    expect(abilitySummary(reroll[0])).toBe('Re-roll damage');
+  });
+
+  it('grants Torrent', () => {
+    expect(grantAbilities(noAbilities(), { ...noAbilities(), torrent: true }).torrent).toBe(true);
   });
 
   it('ignores out-of-range values (validation flags them)', () => {
@@ -209,5 +233,53 @@ describe('copies, comparison and summaries', () => {
         ),
       ),
     ).toBe('Toggled · Half range · Ranged · vs Monster: Improve AP by 1, -1 to wound, Critical wounds on 5+, Re-roll failed wounds, Gain Lethal Hits, Sustained Hits 1');
+  });
+});
+
+describe('mortal wounds', () => {
+  const hammer = ability('Hammer of Wrath', [{ kind: 'mortalWounds', on: 4, perSuccess: '1' }], { when: { toggle: false, conditions: ['charged'], weaponType: 'melee', targetKeyword: null } });
+  const charged = ctx({ conditions: { halfRange: false, charged: true } });
+
+  it('gives one source per effect of an active ability, with the dice to roll', () => {
+    expect(mortalWoundSources([hammer], charged, 11)).toEqual([{ id: 'a-Hammer of Wrath:0', name: 'Hammer of Wrath', dice: 11, on: 4, perSuccess: '1' }]);
+    const two = ability('Two', [{ kind: 'mortalWounds', on: 5, perSuccess: 'd3' }, { kind: 'stat', stat: 'attacks', amount: 1 }, { kind: 'mortalWounds', on: 6, perSuccess: '2' }]);
+    expect(mortalWoundSources([two], ctx(), 5).map((s) => [s.id, s.on, s.perSuccess])).toEqual([
+      ['a-Two:0', 5, 'D3'],
+      ['a-Two:2', 6, '2'],
+    ]);
+  });
+
+  it('respects the toggle, the conditions and the target keyword, but not the weapon type', () => {
+    expect(mortalWoundSources([hammer], ctx(), 10)).toEqual([]);
+    expect(mortalWoundSources([hammer], charged, 10)).toHaveLength(1);
+    const toggled = ability('Toggled', [{ kind: 'mortalWounds', on: 4, perSuccess: '1' }], { when: { toggle: true, conditions: [], weaponType: 'any', targetKeyword: 'monster' } });
+    expect(mortalWoundSources([toggled], ctx({ keywords: ['monster'] }), 10)).toEqual([]);
+    expect(mortalWoundSources([toggled], ctx({ toggles: ['a-Toggled'] }), 10)).toEqual([]);
+    expect(mortalWoundSources([toggled], ctx({ toggles: ['a-Toggled'], keywords: ['monster'] }), 10)).toHaveLength(1);
+  });
+
+  it('skips invalid effects and a unit without models', () => {
+    const bad = ability('Bad', [{ kind: 'mortalWounds', on: 7, perSuccess: '1' }, { kind: 'mortalWounds', on: 4, perSuccess: 'D7' }]);
+    expect(mortalWoundSources([bad], ctx(), 10)).toEqual([]);
+    expect(mortalWoundSources([hammer], charged, 0)).toEqual([]);
+    expect(mortalWoundSources([hammer], charged, Number.NaN)).toEqual([]);
+  });
+
+  it('is ignored by applyAbilities', () => {
+    const profile = weapon('Bolt rifle', 5, '2', 3, 4, -1, '1');
+    expect(applyAbilities(profile, [hammer])).toEqual(profile);
+  });
+
+  it('is unit-level only when every effect inflicts mortal wounds', () => {
+    expect(isUnitLevelOnly(hammer)).toBe(true);
+    expect(isUnitLevelOnly(shockAssault)).toBe(false);
+    expect(isUnitLevelOnly(ability('Mixed', [...hammer.effects, ...shockAssault.effects]))).toBe(false);
+    expect(isUnitLevelOnly(ability('Empty', []))).toBe(false);
+  });
+
+  it('summarises the effect', () => {
+    expect(effectSummary({ kind: 'mortalWounds', on: 4, perSuccess: '1' })).toBe('D6 per model, 4+: 1 MW');
+    expect(effectSummary({ kind: 'mortalWounds', on: 5, perSuccess: 'd3' })).toBe('D6 per model, 5+: D3 MW');
+    expect(abilitySummary(hammer)).toBe('Charged · Melee: D6 per model, 4+: 1 MW');
   });
 });

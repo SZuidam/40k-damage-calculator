@@ -23,6 +23,8 @@ export interface UnitPickerOptions {
     selected: () => string | null;
     onChange: (leaderId: string | null) => void;
   };
+  /** More fields at the end of the row, after "Led by" (the attacker's Models). */
+  extra?: HTMLElement[];
 }
 
 /** Value of the "No army" option and of the unit placeholder (ids are never empty). */
@@ -56,6 +58,7 @@ export class UnitPicker {
       h('div', { class: 'field picker-field' }, h('label', { for: this.army.id }, 'Army'), this.army),
       h('div', { class: 'field picker-field' }, h('label', { for: this.unit.id }, 'Unit'), this.unit),
       this.leaderField,
+      ...(options.extra ?? []),
       this.hint,
     );
     this.render();

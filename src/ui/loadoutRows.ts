@@ -1,5 +1,5 @@
 import type { SourcedAbility } from '../state/unitAbilities';
-import type { AttackConditions, AttackerSelection, LoadoutRow, StoredWeapon, Unit } from '../types';
+import type { AttackConditions, AttackerSelection, DamageRerollThresholds, LoadoutRow, StoredWeapon, Unit } from '../types';
 import { h, numberValue, setFieldError } from './dom';
 import { statChips, type ChipDefender } from './statChips';
 import { validateLoadoutRow } from './validation';
@@ -21,6 +21,8 @@ export interface LoadoutRowsOptions {
   conditions: () => AttackConditions;
   /** The unit, leader and army abilities active for `weapon` (their effects show on its chips). */
   abilities: (weapon: StoredWeapon) => SourcedAbility[];
+  /** The Settings thresholds for "Re-roll damage", shown with that lever. */
+  damageRerolls: () => DamageRerollThresholds;
 }
 
 /**
@@ -112,7 +114,7 @@ export class LoadoutRows {
       number.textContent = String(this.firingNumber(row) ?? '');
       // The stat chips go on the second line, the abilities beside the name, so every row has
       // the same two lines and the chips line up from row to row.
-      const parts = statChips(weapon, this.options.defender(), this.options.conditions(), this.options.abilities(weapon));
+      const parts = statChips(weapon, this.options.defender(), this.options.conditions(), this.options.abilities(weapon), this.options.damageRerolls());
       const isAbilities = (el: HTMLElement) => el.classList.contains('row-abilities');
       chips.replaceChildren(...parts.filter((el) => !isAbilities(el)));
       abilities.replaceChildren(...parts.filter(isAbilities));

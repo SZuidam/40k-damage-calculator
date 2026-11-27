@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { exactResult, weaponKernel } from './exact';
-import { boltRifles, defender, gravis, heavyBolter, lascannon, multiMelta, weapon } from './testFixtures';
+import { exactResult, mortalKernel, weaponKernel } from './exact';
+import { boltRifles, defender, gravis, heavyBolter, lascannon, mortal, multiMelta, weapon } from './testFixtures';
 
 describe('weaponKernel', () => {
   it('gives a binomial unsaved-wound count for fixed attacks', () => {
@@ -74,5 +74,44 @@ describe('exactResult', () => {
   it('handles a large unit', () => {
     const result = exactResult([multiMelta, boltRifles, heavyBolter], defender(20, 4, 3, 6));
     expect(result.killDistribution.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 10);
+  });
+});
+
+describe('mortal wounds', () => {
+  const mean = (pmf: number[]) => pmf.reduce((sum, p, k) => sum + p * k, 0);
+
+  it('gives dice × P(on+) × mean(per success) mortal wounds, each of damage 1', () => {
+    const kernel = mortalKernel(mortal('Hammer of Wrath', 10, 4, '1'), defender(20, 4, 3, 1));
+    expect(kernel.unsaved.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(mean(kernel.unsaved)).toBeCloseTo(10 * (3 / 6), 10);
+    expect(kernel.damage).toEqual([0, 1]);
+  });
+
+  it('compounds a dice expression per success', () => {
+    // 6 D6 at 5+: 2 successes on average, D3 (avg 2) each.
+    const kernel = mortalKernel(mortal('Shock', 6, 5, 'D3'), defender(20, 4, 3, 2));
+    expect(mean(kernel.unsaved)).toBeCloseTo(6 * (2 / 6) * 2, 10);
+  });
+
+  it('destroys 5 of 10 one-wound models on average with 10 D6 at 4+', () => {
+    const result = exactResult([], defender(10, 4, 2, 1, 4), [mortal('Hammer of Wrath', 10, 4, '1')]);
+    expect(result.expectedModelsDestroyed).toBeCloseTo(5, 10);
+    expect(result.expectedDamage).toBeCloseTo(5, 10);
+  });
+
+  it('ignores saves and resolves before the weapons, which then hit the weakened unit', () => {
+    // Every mortal wound kills a 1W model; the bolt rifles then face fewer models.
+    const target = defender(5, 4, 3, 1);
+    const withMortals = exactResult([boltRifles], target, [mortal('MW', 6, 2, '1')]);
+    const alone = exactResult([boltRifles], target);
+    expect(withMortals.expectedModelsDestroyed).toBeGreaterThan(alone.expectedModelsDestroyed);
+    expect(withMortals.expectedModelsDestroyed).toBeLessThanOrEqual(5);
+    expect(withMortals.killDistribution.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+  });
+
+  it('caps the mortal wounds at the unit’s wounds', () => {
+    const result = exactResult([], defender(2, 4, 3, 2), [mortal('Overkill', 20, 2, 'D3')]);
+    expect(result.expectedDamage).toBeLessThanOrEqual(4 + 1e-9);
+    expect(result.killDistribution[2]).toBeGreaterThan(0.99);
   });
 });

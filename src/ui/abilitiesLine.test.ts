@@ -25,4 +25,11 @@ describe('abilityStatus', () => {
     expect(abilityStatus(sourced({ weaponType: 'melee' }), ['ranged'], ctx).reason).toBe('No melee weapon ticked');
     expect(abilityStatus(sourced({}), [], ctx).reason).toBe('No weapon ticked');
   });
+
+  it('needs no weapon for an ability that only inflicts mortal wounds', () => {
+    const hammer = sourced({ conditions: ['charged'], weaponType: 'melee' });
+    hammer.ability.effects = [{ kind: 'mortalWounds', on: 4, perSuccess: '1' }];
+    expect(abilityStatus(hammer, [], ctx).reason).toBe('Needs: Charged');
+    expect(abilityStatus(hammer, ['ranged'], { ...ctx, conditions: { halfRange: false, charged: true } })).toEqual({ active: true, reason: '' });
+  });
 });

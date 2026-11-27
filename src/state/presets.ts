@@ -39,14 +39,19 @@ export function byName<T extends { name: string }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
 }
 
+/** The value of the BS / WS characteristic: "3+", or "N/A" for a Torrent weapon (it never rolls to hit). */
+export function skillValue(w: Pick<WeaponStats, 'skill' | 'abilities'>): string {
+  return w.abilities.torrent ? 'N/A' : `${w.skill}+`;
+}
+
 /**
  * Short stats line: "A 2 · BS 3+ · S 4 · AP -1 · D 1", plus " · Lethal Hits, …" when it has
- * abilities. A melee weapon reads "Melee · A 3 · WS 3+ · …".
+ * abilities. A melee weapon reads "Melee · A 3 · WS 3+ · …", a Torrent weapon "BS N/A".
  */
 export function statsSummary(w: WeaponStats): string {
   const abilities = abilitiesSummary(w.abilities);
   const melee = w.type === 'melee';
-  return `${melee ? 'Melee · ' : ''}A ${w.attacks} · ${melee ? 'WS' : 'BS'} ${w.skill}+ · S ${w.strength} · AP ${w.ap} · D ${w.damage}${abilities ? ` · ${abilities}` : ''}`;
+  return `${melee ? 'Melee · ' : ''}A ${w.attacks} · ${melee ? 'WS' : 'BS'} ${skillValue(w)} · S ${w.strength} · AP ${w.ap} · D ${w.damage}${abilities ? ` · ${abilities}` : ''}`;
 }
 
 /** "T4 · Sv 3+ · Inv 4+ · W2", plus " · Vehicle, Monster" when it has keywords. */

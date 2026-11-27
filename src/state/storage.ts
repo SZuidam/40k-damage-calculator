@@ -1,5 +1,7 @@
 import {
   DEFENDER_KEYWORDS,
+  MAX_DAMAGE_REROLL_BELOW,
+  defaultDamageRerolls,
   noAbilities,
   noConditions,
   type AbilityCondition,
@@ -7,6 +9,7 @@ import {
   type Army,
   type AttackConditions,
   type AttackerSelection,
+  type DamageRerollThresholds,
   type DefenderKeyword,
   type DefenderSelection,
   type LoadoutRow,
@@ -45,6 +48,8 @@ export interface StoredState {
    */
   toggles: string[];
   iterations: number;
+  /** Settings: "Re-roll damage" re-rolls a D3 / D6 damage roll below these. */
+  damageRerolls: DamageRerollThresholds;
 }
 
 /** The subset of the Web Storage API the app uses, so tests can pass an in-memory stub. */
@@ -69,7 +74,7 @@ const exampleWeapon = (name: string, attacks: string, ap: number, type: WeaponTy
  * bolt pistol, close combat weapon), picked on both sides: 5 bolt rifles into 5 Intercessors.
  */
 export function defaultState(): StoredState {
-  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), toggles: [], iterations: DEFAULT_ITERATIONS });
+  return withExample({ armies: [], units: [], attacker: noAttacker(), defender: noDefender(), conditions: noConditions(), toggles: [], iterations: DEFAULT_ITERATIONS, damageRerolls: defaultDamageRerolls() });
 }
 
 /** `state` plus the example army and unit, picked on both sides with the bolt rifle carried. Only for a state without armies or units. */
@@ -93,12 +98,12 @@ function withExample(state: StoredState): StoredState {
     ...state,
     armies: [army],
     units: [unit],
-    attacker: { armyId: army.id, unitId: unit.id, leaderId: null, rows },
+    attacker: { armyId: army.id, unitId: unit.id, leaderId: null, models: DEFAULT_UNIT_MODELS, rows },
     defender: { armyId: army.id, unitId: unit.id, models: DEFAULT_UNIT_MODELS },
   };
 }
 
-const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, leaderId: null, rows: [] });
+const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, leaderId: null, models: DEFAULT_UNIT_MODELS, rows: [] });
 const noDefender = (): DefenderSelection => ({ armyId: null, unitId: null, models: DEFAULT_UNIT_MODELS });
 
 function browserStorage(): KeyValueStorage | undefined {
@@ -154,7 +159,16 @@ function normalise(raw: unknown): StoredState {
   reconcileDefender(defender, armies, units);
   const toggles = toToggles(raw.toggles);
   pruneToggles(toggles, [...armies, ...units].flatMap((x) => x.abilities));
-  return { armies, units, attacker, defender, conditions: toConditions(raw.conditions), toggles, iterations: num(raw.iterations, DEFAULT_ITERATIONS) };
+  return {
+    armies,
+    units,
+    attacker,
+    defender,
+    conditions: toConditions(raw.conditions),
+    toggles,
+    iterations: num(raw.iterations, DEFAULT_ITERATIONS),
+    damageRerolls: toDamageRerolls(raw.damageRerolls),
+  };
 }
 
 /**
@@ -169,10 +183,16 @@ function fromV4(raw: unknown): StoredState {
   return state.armies.length === 0 && state.units.length === 0 ? withExample(state) : state;
 }
 
-/** The attacker: ids as saved (reconciled afterwards) and its loadout rows. */
+/** The attacker: ids as saved (reconciled afterwards), its size (saves from before it existed get the default) and its loadout rows. */
 function toAttacker(value: unknown): AttackerSelection {
   if (!isRecord(value)) return noAttacker();
-  return { armyId: optionalId(value.armyId), unitId: optionalId(value.unitId), leaderId: optionalId(value.leaderId), rows: list(value.rows, toLoadoutRow) };
+  return {
+    armyId: optionalId(value.armyId),
+    unitId: optionalId(value.unitId),
+    leaderId: optionalId(value.leaderId),
+    models: num(value.models, DEFAULT_UNIT_MODELS),
+    rows: list(value.rows, toLoadoutRow),
+  };
 }
 
 function toLoadoutRow(value: unknown): LoadoutRow | null {
@@ -191,6 +211,20 @@ const optionalId = (value: unknown): string | null => (typeof value === 'string'
 function toConditions(value: unknown): AttackConditions {
   if (!isRecord(value)) return noConditions();
   return { halfRange: value.halfRange === true, charged: value.charged === true };
+}
+
+/**
+ * The damage re-roll thresholds: each a whole number from 2 to its maximum, else the default
+ * (states saved before the setting existed get the defaults).
+ */
+export function toDamageRerolls(value: unknown): DamageRerollThresholds {
+  const out = defaultDamageRerolls();
+  if (!isRecord(value)) return out;
+  for (const key of ['d3', 'd6'] as const) {
+    const v = value[key];
+    if (typeof v === 'number' && Number.isInteger(v) && v >= 2 && v <= MAX_DAMAGE_REROLL_BELOW[key]) out[key] = v;
+  }
+  return out;
 }
 
 /** The switched-on ability ids: non-empty strings without duplicates. (The older `situations` are not carried over.) */
@@ -246,6 +280,7 @@ function toAbilities(value: unknown): WeaponAbilities {
     melta: toAbilityDice(value.melta),
     lance: value.lance === true,
     twinLinked: value.twinLinked === true,
+    torrent: value.torrent === true,
   };
 }
 
@@ -338,8 +373,12 @@ export function toAbilityEffect(value: unknown): AbilityEffect | null {
       return isRoll(value.roll) && finite(value.on) ? { kind: 'critical', roll: value.roll, on: value.on } : null;
     case 'reroll':
       return isRoll(value.roll) && (value.which === 'ones' || value.which === 'failed') ? { kind: 'reroll', roll: value.roll, which: value.which } : null;
+    case 'rerollDamage':
+      return { kind: 'rerollDamage' };
     case 'grant':
       return isRecord(value.abilities) ? { kind: 'grant', abilities: toAbilities(value.abilities) } : null;
+    case 'mortalWounds':
+      return finite(value.on) && typeof value.perSuccess === 'string' ? { kind: 'mortalWounds', on: value.on, perSuccess: value.perSuccess } : null;
     default:
       return null;
   }

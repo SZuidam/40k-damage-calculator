@@ -1,17 +1,20 @@
 import { MAX_CONSTANT, formatDiceSum, tryParseDice } from '../engine/dice';
-import { strongerReroll } from '../engine/rules';
+import { damageRerollBelow, strongerReroll } from '../engine/rules';
 import {
   DEFENDER_KEYWORDS,
   KEYWORD_NAMES,
   WEAPON_TYPE_NAMES,
   copyAbilities,
+  defaultDamageRerolls,
   noAbilities,
   type AbilityCondition,
   type AbilityEffect,
   type AbilityEffectKind,
   type Army,
   type AttackConditions,
+  type DamageRerollThresholds,
   type DefenderKeyword,
+  type MortalWoundSource,
   type Unit,
   type UnitAbility,
   type WeaponAbilities,
@@ -164,6 +167,32 @@ export function activeFor<T extends { ability: UnitAbility }>(abilities: readonl
   return abilities.filter((a) => isActive(a.ability, type, ctx));
 }
 
+/** Whether every effect of `ability` is unit-level (mortal wounds), so weapons and their types don't matter to it. */
+export function isUnitLevelOnly(ability: UnitAbility): boolean {
+  return ability.effects.length > 0 && ability.effects.every((e) => e.kind === 'mortalWounds');
+}
+
+/**
+ * The mortal wounds `abilities` inflict before the attacks: one source per "Inflict mortal
+ * wounds" effect of an ability that is active, whatever the weapons (the weapon type filter is
+ * ignored; the toggle, built-in conditions and target keyword still count). `dice` is the number
+ * of D6 rolled (one per model of the attacking unit, an attached leader included). Effects with
+ * an invalid threshold or dice expression are skipped (validation flags them).
+ */
+export function mortalWoundSources(abilities: readonly UnitAbility[], ctx: AbilityContext, dice: number): MortalWoundSource[] {
+  if (!Number.isInteger(dice) || dice < 1) return [];
+  const out: MortalWoundSource[] = [];
+  for (const ability of abilities) {
+    const needs = abilityNeeds(ability, null, ctx);
+    if (needs.toggle || needs.conditions.length > 0 || needs.targetKeyword) continue;
+    ability.effects.forEach((e, i) => {
+      if (e.kind !== 'mortalWounds' || !Number.isInteger(e.on) || e.on < 2 || e.on > 6 || !tryParseDice(e.perSuccess)) return;
+      out.push({ id: `${ability.id}:${i}`, name: ability.name, dice, on: e.on, perSuccess: normaliseDice(e.perSuccess) });
+    });
+  }
+  return out;
+}
+
 /** `toggles` without the ids of abilities that are gone or no longer switched on by hand (in place). */
 export function pruneToggles(toggles: string[], abilities: readonly UnitAbility[]): void {
   const ids = new Set(abilities.filter((a) => a.when.toggle).map((a) => a.id));
@@ -203,6 +232,7 @@ export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities):
   out.devastatingWounds ||= granted.devastatingWounds;
   out.lance ||= granted.lance;
   out.twinLinked ||= granted.twinLinked;
+  out.torrent ||= granted.torrent;
   for (const key of ['sustainedHits', 'blast', 'cleave', 'rapidFire', 'melta'] as const) {
     if (out[key] === null && granted[key] !== null && tryParseDice(granted[key])) out[key] = normaliseDice(granted[key]);
   }
@@ -219,9 +249,11 @@ export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities):
  * `profile` with the effects of `abilities` folded in (they are assumed active; see activeFor).
  * A / D get +X added to their dice, S +X, AP is improved by X (to -6 at most). Roll modifiers are
  * summed (the engine caps them), the lowest critical threshold and the strongest re-roll win,
- * and granted weapon abilities are merged (grantAbilities). Returns a new profile.
+ * and granted weapon abilities are merged (grantAbilities). "Re-roll damage" takes the threshold
+ * of `damageRerolls` for the dice of the resulting D (none for fixed damage). "Inflict mortal
+ * wounds" is unit-level and ignored here (see mortalWoundSources). Returns a new profile.
  */
-export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitAbility[]): WeaponProfile {
+export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitAbility[], damageRerolls: DamageRerollThresholds = defaultDamageRerolls()): WeaponProfile {
   const effects = abilities.flatMap((a) => a.effects);
   const out: WeaponProfile = {
     ...profile,
@@ -244,6 +276,8 @@ export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitA
     } else if (e.kind === 'reroll') {
       if (e.roll === 'hit') m.rerollHits = strongerReroll(m.rerollHits, e.which);
       else m.rerollWounds = strongerReroll(m.rerollWounds, e.which);
+    } else if (e.kind === 'rerollDamage') {
+      m.rerollDamageBelow = damageRerollBelow(out.damage, damageRerolls);
     } else if (e.kind === 'grant') {
       out.abilities = grantAbilities(out.abilities, e.abilities);
     }
@@ -259,12 +293,14 @@ export const EFFECT_KIND_NAMES: Record<AbilityEffectKind, string> = {
   roll: 'Roll modifier',
   critical: 'Critical on',
   reroll: 'Re-roll',
+  rerollDamage: 'Re-roll damage',
   grant: 'Gain weapon abilities',
+  mortalWounds: 'Inflict mortal wounds',
 };
 
 const STAT_SHORT = { attacks: 'A', strength: 'S', damage: 'D' } as const;
 
-/** "+1 A", "Improve AP by 1", "+1 to hit", "Critical wounds on 5+", "Re-roll hits of 1", "Gain Lethal Hits". */
+/** "+1 A", "Improve AP by 1", "+1 to hit", "Critical wounds on 5+", "Re-roll hits of 1", "Gain Lethal Hits", "D6 per model, 4+: 1 MW". */
 export function effectSummary(e: AbilityEffect): string {
   switch (e.kind) {
     case 'stat':
@@ -277,10 +313,14 @@ export function effectSummary(e: AbilityEffect): string {
       return `Critical ${e.roll}s on ${e.on}+`;
     case 'reroll':
       return e.which === 'ones' ? `Re-roll ${e.roll}s of 1` : `Re-roll failed ${e.roll}s`;
+    case 'rerollDamage':
+      return 'Re-roll damage';
     case 'grant': {
       const text = abilitiesSummary(e.abilities);
       return text === '' ? 'Gain nothing' : `Gain ${text}`;
     }
+    case 'mortalWounds':
+      return `D6 per model, ${e.on}+: ${normaliseDice(e.perSuccess)} MW`;
   }
 }
 

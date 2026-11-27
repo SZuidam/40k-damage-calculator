@@ -90,17 +90,17 @@ describe('armies in the dropdown', () => {
 
 describe('reconcile', () => {
   it('syncs the attacker’s loadout and moves its army to the unit’s army', () => {
-    const sel: AttackerSelection = { armyId: 'cd', unitId: 'u1', leaderId: null, rows: [row('w-pistol', true, 2), row('w-gone', true, 1)] };
+    const sel: AttackerSelection = { armyId: 'cd', unitId: 'u1', leaderId: null, models: 5, rows: [row('w-pistol', true, 2), row('w-gone', true, 1)] };
     reconcileAttacker(sel, armies(), [unit()]);
-    expect(sel).toEqual({ armyId: 'sm', unitId: 'u1', leaderId: null, rows: [row('w-pistol', true, 2), row('w-bolt', false, 5), row('w-ccw', false, 5)] });
+    expect(sel).toEqual({ armyId: 'sm', unitId: 'u1', leaderId: null, models: 5, rows: [row('w-pistol', true, 2), row('w-bolt', false, 5), row('w-ccw', false, 5)] });
   });
 
   it('unpicks a deleted unit and keeps the army dropdown on an existing choice', () => {
-    const sel: AttackerSelection = { armyId: 'gone', unitId: 'gone', leaderId: null, rows: [row('w-bolt', true, 5)] };
+    const sel: AttackerSelection = { armyId: 'gone', unitId: 'gone', leaderId: null, models: 5, rows: [row('w-bolt', true, 5)] };
     reconcileAttacker(sel, armies(), [unit()]);
-    expect(sel).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
+    expect(sel).toEqual({ armyId: 'sm', unitId: null, leaderId: null, models: 5, rows: [] });
 
-    const kept: AttackerSelection = { armyId: 'cd', unitId: null, leaderId: null, rows: [] };
+    const kept: AttackerSelection = { armyId: 'cd', unitId: null, leaderId: null, models: 5, rows: [] };
     reconcileAttacker(kept, armies(), [unit()]);
     expect(kept.armyId).toBe('cd');
   });
@@ -184,6 +184,15 @@ describe('abilities in the loadout', () => {
     const on = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [oath], toggles: ['a-oath'], keywords: null });
     expect(off.every((p) => p.modifiers.rerollHits === 'none')).toBe(true);
     expect(on.every((p) => p.modifiers.rerollHits === 'failed')).toBe(true);
+  });
+
+  it('passes the damage re-roll thresholds of the Settings on', () => {
+    const u = squad();
+    u.weapons[0].damage = 'D3';
+    u.weapons[1].damage = 'D6+1';
+    const reroll: UnitAbility = { ...shock, id: 'a-dmg', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'rerollDamage' }] };
+    const profiles = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [reroll], toggles: [], keywords: null, damageRerolls: { d3: 3, d6: 5 } });
+    expect(profiles.map((p) => p.modifiers.rerollDamageBelow)).toEqual([3, 5, 0]);
   });
 
   it('offers the units of the same army that can lead', () => {

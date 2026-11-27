@@ -43,6 +43,7 @@ describe('ability choices', () => {
       'Melta X…',
       'Lance',
       'Twin-linked',
+      'Torrent',
     ]);
     expect(ABILITY_CHOICES.filter(isAntiChoice).map((c) => c.keyword)).toEqual(['vehicle', 'monster', 'psyker', 'infantry', 'fly']);
     expect(ABILITY_CHOICES.filter(isAntiChoice).every((c) => !isValueChoice(c))).toBe(true);
@@ -92,7 +93,7 @@ describe('activeAbilities', () => {
   });
 
   it('marks the abilities with an X as editable', () => {
-    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false };
+    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false, torrent: false };
     expect(activeAbilities(all).map((a) => a.valueKey)).toEqual([undefined, 'sustainedHits', undefined, 'blast', 'cleave']);
     expect(activeAbilities(all).find((a) => a.key === 'blast')?.description).toBe('Adds D3 attacks per model for every 5 models in the target unit.');
     expect(activeAbilities(all).find((a) => a.key === 'cleave')?.description).toMatch(/^Adds 1 attack per model/);
@@ -257,5 +258,17 @@ describe('Anti-X Y+', () => {
     expect(sameAbilities({ ...none, anti: { vehicle: 4 } }, { ...none, anti: { vehicle: 3 } })).toBe(false);
     expect(sameAbilities({ ...none, anti: { vehicle: 4 } }, { ...none, anti: { monster: 4 } })).toBe(false);
     expect(sameAbilities({ ...none, anti: { vehicle: 4 } }, none)).toBe(false);
+  });
+});
+
+describe('Torrent', () => {
+  it('is an on / off ability that is summarised and compared like the others', () => {
+    const torrent = flag('torrent').apply(noAbilities());
+    expect(torrent).toEqual({ ...noAbilities(), torrent: true });
+    expect(flag('torrent').isActive(torrent)).toBe(true);
+    expect(activeAbilities(torrent).map((a) => a.label)).toEqual(['Torrent']);
+    expect(abilitiesSummary({ ...torrent, lethalHits: true })).toBe('Lethal Hits, Torrent');
+    expect(sameAbilities(torrent, noAbilities())).toBe(false);
+    expect(withoutAbility(torrent, 'torrent')).toEqual(noAbilities());
   });
 });

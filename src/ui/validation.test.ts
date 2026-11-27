@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { noAbilities, type AbilityEffect, type Unit, type UnitAbility, type WeaponStats } from '../types';
-import { abilityValueError, antiValueError, validateAbilities, validateAbility, validateLoadoutRow, validateUnit, validateWeaponStats } from './validation';
+import { abilityValueError, antiValueError, validateAbilities, validateAbility, validateAttackerModels, validateLoadoutRow, validateUnit, validateWeaponStats } from './validation';
 
 const stats: WeaponStats = { name: 'Bolt rifle', type: 'ranged', attacks: '2', skill: 3, strength: 4, ap: -1, damage: '1', abilities: noAbilities() };
 
@@ -171,6 +171,19 @@ describe('validateAbility', () => {
     expect(effectError({ kind: 'grant', abilities: { ...noAbilities(), anti: { vehicle: 9 } } })).toMatch(/Anti-Vehicle/);
   });
 
+  it('checks the roll and the mortal wounds per success of Inflict mortal wounds', () => {
+    const effectError = (effect: AbilityEffect) => validateAbility(ability({ effects: [effect] })).effects;
+    expect(effectError({ kind: 'mortalWounds', on: 4, perSuccess: '1' })).toBeUndefined();
+    expect(effectError({ kind: 'mortalWounds', on: 2, perSuccess: 'D3' })).toBeUndefined();
+    expect(effectError({ kind: 'mortalWounds', on: 6, perSuccess: 'd6+1' })).toBeUndefined();
+    expect(effectError({ kind: 'mortalWounds', on: 1, perSuccess: '1' })).toMatch(/2\+ to 6\+/);
+    expect(effectError({ kind: 'mortalWounds', on: 4.5, perSuccess: '1' })).toMatch(/2\+ to 6\+/);
+    expect(effectError({ kind: 'mortalWounds', on: 4, perSuccess: '' })).toBe('Mortal wounds per success must be a number or dice like D3');
+    expect(effectError({ kind: 'mortalWounds', on: 4, perSuccess: '0' })).toBe('Mortal wounds per success must be a number or dice like D3');
+    expect(effectError({ kind: 'mortalWounds', on: 4, perSuccess: 'D7' })).toBe('Mortal wounds per success must be a number or dice like D3');
+    expect(effectError({ kind: 'mortalWounds', on: 4, perSuccess: '2D6+1' })).toMatch(/at most 12/);
+  });
+
   it('allows descriptions of up to 2000 characters', () => {
     expect(validateAbility(ability({ description: 'x'.repeat(2000) }))).toEqual({});
     expect(validateAbility(ability({ description: 'x'.repeat(2001) })).description).toMatch(/at most 2000/);
@@ -179,5 +192,16 @@ describe('validateAbility', () => {
   it('flags invalid and duplicate abilities of a unit', () => {
     expect(validateAbilities([ability(), ability({ id: 'a2', name: 'SHOCK assault' })])).toMatch(/Two abilities/);
     expect(validateUnit({ ...unit, abilities: [ability({ effects: [] })] }).abilities).toMatch(/^Shock Assault: Add at least one effect/);
+  });
+});
+
+describe('validateAttackerModels', () => {
+  it('keeps the attacker models a whole number between 1 and 40', () => {
+    expect(validateAttackerModels(1)).toBeUndefined();
+    expect(validateAttackerModels(40)).toBeUndefined();
+    expect(validateAttackerModels(0)).toMatch(/between 1 and 40/);
+    expect(validateAttackerModels(41)).toMatch(/between 1 and 40/);
+    expect(validateAttackerModels(2.5)).toMatch(/whole number/);
+    expect(validateAttackerModels(Number.NaN)).toMatch(/whole number/);
   });
 });
