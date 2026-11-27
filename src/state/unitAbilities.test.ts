@@ -1,22 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { weapon } from '../engine/testFixtures';
-import { noAbilities, noConditions, type AbilityEffect, type Army, type Unit, type UnitAbility } from '../types';
+import { noAbilities, noConditions, type AbilityEffect, type Army, type Unit, type UnitAbility, type WeaponAbilities } from '../types';
 import {
   abilitiesFor,
   abilitySummary,
   activeFor,
   addToDice,
   applyAbilities,
+  applyDefensiveAbilities,
   abilityNeeds,
   canLead,
   copyAbility,
+  defensiveAbilitiesFor,
   grantAbilities,
+  hasDefensiveEffect,
+  isDefensiveOnly,
   effectSummary,
   isActive,
   isUnitLevelOnly,
   mortalWoundSources,
   pruneToggles,
   sameAbilityContent,
+  woundPenalties,
   type AbilityContext,
 } from './unitAbilities';
 
@@ -193,6 +198,42 @@ describe('applyAbilities', () => {
     expect(out.abilities.lethalHits).toBe(true);
   });
 
+  it('a non-Monster / non-Vehicle limit goes with the ability it is on when granting', () => {
+    const limitedSh: WeaponAbilities = { ...noAbilities(), sustainedHits: '2', notVsMonsterVehicle: ['sustainedHits'] };
+    const limitedDw: WeaponAbilities = { ...noAbilities(), devastatingWounds: true, notVsMonsterVehicle: ['devastatingWounds'] };
+    const plainSh = { ...noAbilities(), sustainedHits: '1' };
+    const plainDw = { ...noAbilities(), devastatingWounds: true };
+    // Sustained Hits keeps the weapon's own X, with its limit (or none).
+    expect(grantAbilities(limitedSh, plainSh)).toEqual(limitedSh);
+    expect(grantAbilities(plainSh, limitedSh)).toEqual(plainSh);
+    expect(grantAbilities(noAbilities(), limitedSh)).toEqual(limitedSh);
+    // Devastating Wounds is only limited when every source that has it is.
+    expect(grantAbilities(limitedDw, plainDw)).toEqual(plainDw);
+    expect(grantAbilities(plainDw, limitedDw)).toEqual(plainDw);
+    expect(grantAbilities(limitedDw, limitedDw)).toEqual(limitedDw);
+    expect(grantAbilities(noAbilities(), limitedDw)).toEqual(limitedDw);
+    expect(grantAbilities(limitedDw, noAbilities())).toEqual(limitedDw);
+    expect(grantAbilities(limitedSh, limitedDw).notVsMonsterVehicle).toEqual(['sustainedHits', 'devastatingWounds']);
+  });
+
+  it('resolves limited abilities against the target before granting', () => {
+    const own: WeaponAbilities = { ...noAbilities(), sustainedHits: '2', notVsMonsterVehicle: ['sustainedHits'] };
+    const grant = [ability('Leader', [{ kind: 'grant', abilities: { ...noAbilities(), sustainedHits: '1', devastatingWounds: true, notVsMonsterVehicle: ['devastatingWounds'] } }])];
+    const profile = { ...base(), abilities: own };
+    // Against a Monster the weapon's limited Sustained Hits 2 drops out, so the granted 1 takes its place.
+    expect(applyAbilities(profile, grant, undefined, ['monster']).abilities).toEqual({ ...noAbilities(), sustainedHits: '1' });
+    expect(applyAbilities(profile, grant, undefined, ['infantry']).abilities).toEqual({
+      ...noAbilities(),
+      sustainedHits: '2',
+      devastatingWounds: true,
+      notVsMonsterVehicle: ['sustainedHits', 'devastatingWounds'],
+    });
+    expect(applyAbilities(profile, grant).abilities.sustainedHits).toBe('2');
+    // Without any ability, the weapon's own limited abilities are still resolved.
+    expect(applyAbilities(profile, [], undefined, ['vehicle']).abilities).toEqual(noAbilities());
+    expect(profile.abilities).toEqual(own);
+  });
+
   it('leaves the input profile alone', () => {
     const profile = base();
     const copy = structuredClone(profile);
@@ -281,5 +322,67 @@ describe('mortal wounds', () => {
     expect(effectSummary({ kind: 'mortalWounds', on: 4, perSuccess: '1' })).toBe('D6 per model, 4+: 1 MW');
     expect(effectSummary({ kind: 'mortalWounds', on: 5, perSuccess: 'd3' })).toBe('D6 per model, 5+: D3 MW');
     expect(abilitySummary(hammer)).toBe('Charged · Melee: D6 per model, 4+: 1 MW');
+  });
+});
+
+describe('defensive abilities', () => {
+  const ironHide = ability('Iron Hide', [{ kind: 'woundPenalty', strongerOnly: true }]);
+  const shockAssault = ability('Shock Assault', [{ kind: 'stat', stat: 'attacks', amount: 1 }]);
+  const mixed = ability('Mixed', [...shockAssault.effects, ...ironHide.effects]);
+
+  it('tells defensive effects and abilities apart', () => {
+    expect(hasDefensiveEffect(ironHide)).toBe(true);
+    expect(hasDefensiveEffect(mixed)).toBe(true);
+    expect(hasDefensiveEffect(shockAssault)).toBe(false);
+    expect(isDefensiveOnly(ironHide)).toBe(true);
+    expect(isDefensiveOnly(mixed)).toBe(false);
+    expect(isDefensiveOnly(ability('Empty', []))).toBe(false);
+  });
+
+  it('leaves abilities that only defend out of the attack', () => {
+    const squad = unit({ abilities: [ironHide, mixed, shockAssault] });
+    const army: Army = { id: 'sm', name: 'Space Marines', abilities: [ability('Army hide', ironHide.effects)] };
+    expect(abilitiesFor(squad, null, army).map((a) => a.ability.name)).toEqual(['Mixed', 'Shock Assault']);
+  });
+
+  it('takes the defender’s own abilities and army rules with a defensive effect, not those for a led unit', () => {
+    const squad = unit({ abilities: [ironHide, mixed, shockAssault, ability('Aura', ironHide.effects, { appliesTo: 'ledUnit' })] });
+    const army: Army = { id: 'sm', name: 'Space Marines', abilities: [ability('Army hide', ironHide.effects), ability('Oath', [{ kind: 'reroll', roll: 'hit', which: 'failed' }])] };
+    expect(defensiveAbilitiesFor(squad, army).map((a) => [a.ability.name, a.origin, a.from])).toEqual([
+      ['Iron Hide', 'defender', 'Intercessors'],
+      ['Mixed', 'defender', 'Intercessors'],
+      ['Army hide', 'defenderArmy', 'Space Marines'],
+    ]);
+    expect(defensiveAbilitiesFor(unit({ abilities: [shockAssault] }), null)).toEqual([]);
+  });
+
+  it('subtracts 1 from the wound roll only while S is greater than T, or always', () => {
+    const at = (strength: number) => weapon('Gun', 5, '2', 3, strength, 0, '1');
+    expect(applyDefensiveAbilities(at(5), [ironHide], 4).modifiers.wound).toBe(-1);
+    expect(applyDefensiveAbilities(at(4), [ironHide], 4).modifiers.wound).toBe(0);
+    expect(applyDefensiveAbilities(at(3), [ironHide], 4).modifiers.wound).toBe(0);
+    const always = ability('Always', [{ kind: 'woundPenalty', strongerOnly: false }]);
+    expect(applyDefensiveAbilities(at(3), [always], 4).modifiers.wound).toBe(-1);
+    // Summed with the attacker's modifiers; the engine caps the total.
+    expect(applyDefensiveAbilities({ ...at(8), modifiers: { ...at(8).modifiers, wound: 1 } }, [ironHide, always], 4).modifiers.wound).toBe(-1);
+    expect(woundPenalties(8, [ironHide, always, shockAssault], 4)).toBe(2);
+  });
+
+  it('ignores other effects and leaves the input profile alone', () => {
+    const profile = weapon('Gun', 5, '2', 3, 5, 0, '1');
+    expect(applyDefensiveAbilities(profile, [shockAssault], 4)).toBe(profile);
+    applyDefensiveAbilities(profile, [ironHide], 4);
+    expect(profile.modifiers.wound).toBe(0);
+  });
+
+  it('does nothing while the unit attacks', () => {
+    const profile = weapon('Gun', 5, '2', 3, 5, 0, '1');
+    expect(applyAbilities(profile, [ironHide])).toEqual(profile);
+  });
+
+  it('summarises the effect', () => {
+    expect(effectSummary({ kind: 'woundPenalty', strongerOnly: true })).toBe('Enemy -1 to wound if S > T');
+    expect(effectSummary({ kind: 'woundPenalty', strongerOnly: false })).toBe('Enemy -1 to wound');
+    expect(abilitySummary(ironHide)).toBe('Enemy -1 to wound if S > T');
   });
 });

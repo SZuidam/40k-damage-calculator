@@ -195,6 +195,55 @@ describe('abilities in the loadout', () => {
     expect(profiles.map((p) => p.modifiers.rerollDamageBelow)).toEqual([3, 5, 0]);
   });
 
+  it('drops a weapon’s abilities limited to non-Monster / non-Vehicle targets against one, also without unit abilities', () => {
+    const u = squad();
+    u.weapons[0].abilities = { ...noAbilities(), sustainedHits: '1', devastatingWounds: true, notVsMonsterVehicle: ['sustainedHits'] };
+    const vsMonster = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [], toggles: [], keywords: ['monster'] });
+    expect(vsMonster[0].abilities).toEqual({ ...noAbilities(), devastatingWounds: true });
+    const vsInfantry = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [], toggles: [], keywords: ['infantry'] });
+    expect(vsInfantry[0].abilities.sustainedHits).toBe('1');
+    expect(u.weapons[0].abilities.sustainedHits).toBe('1');
+  });
+
+  describe('the defender’s abilities', () => {
+    const ironHide: UnitAbility = { ...shock, id: 'a-hide', name: 'Iron Hide', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'woundPenalty', strongerOnly: true }] };
+    const strength = (u: Unit, ...values: number[]) => values.forEach((s, i) => (u.weapons[i].strength = s));
+    const wound = (profiles: { modifiers: { wound: number } }[]) => profiles.map((p) => p.modifiers.wound);
+
+    it('subtracts 1 from the wound roll of the weapons with S above the defender’s T', () => {
+      const u = squad();
+      strength(u, 5, 4, 3);
+      const profiles = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [], toggles: [], keywords: ['infantry'], defense: { abilities: [ironHide], toughness: 4 } });
+      expect(wound(profiles)).toEqual([-1, 0, 0]);
+      expect(wound(resolveLoadout(u, allCarried(u), noConditions(), { abilities: [], toggles: [], keywords: ['infantry'] }))).toEqual([0, 0, 0]);
+    });
+
+    it('compares the Strength after the attacker’s abilities', () => {
+      const u = squad();
+      const strong: UnitAbility = { ...shock, id: 'a-strong', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'stat', stat: 'strength', amount: 1 }, { kind: 'roll', roll: 'wound', amount: 1 }] };
+      const profiles = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [strong], toggles: [], keywords: ['infantry'], defense: { abilities: [ironHide], toughness: 4 } });
+      expect(profiles.map((p) => p.strength)).toEqual([5, 5, 5]);
+      // +1 to wound from the attacker and -1 from the defender cancel out.
+      expect(wound(profiles)).toEqual([0, 0, 0]);
+    });
+
+    it('checks the weapon type, the toggle, the conditions and the attacking unit’s keywords', () => {
+      const u = squad();
+      strength(u, 5, 5, 5);
+      const defense = (when: Partial<UnitAbility['when']>) => ({ abilities: [{ ...ironHide, when: { ...ironHide.when, ...when } }], toughness: 4 });
+      const run = (when: Partial<UnitAbility['when']>, toggles: string[] = [], conditions = noConditions()) =>
+        wound(resolveLoadout(u, allCarried(u), conditions, { abilities: [], toggles, keywords: ['monster'], defense: defense(when) }));
+      expect(run({ weaponType: 'melee' })).toEqual([0, 0, -1]);
+      expect(run({ toggle: true })).toEqual([0, 0, 0]);
+      expect(run({ toggle: true }, ['a-hide'])).toEqual([-1, -1, -1]);
+      expect(run({ conditions: ['charged'] })).toEqual([0, 0, 0]);
+      expect(run({ conditions: ['charged'] }, [], { halfRange: false, charged: true })).toEqual([-1, -1, -1]);
+      // "Target" is the attacker for a defending unit: the Intercessors are Infantry, the defender a Monster.
+      expect(run({ targetKeyword: 'infantry' })).toEqual([-1, -1, -1]);
+      expect(run({ targetKeyword: 'monster' })).toEqual([0, 0, 0]);
+    });
+  });
+
   it('offers the units of the same army that can lead', () => {
     const lead: UnitAbility = { ...shock, id: 'a-lead', appliesTo: 'ledUnit' };
     const captain = unit({ id: 'cap', name: 'Captain', abilities: [lead] });

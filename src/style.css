@@ -360,12 +360,23 @@ select[aria-invalid='true'] {
   padding: 0 3px;
 }
 
+/* A roll lever that comes (partly) from the defender's abilities, like "-1 to wound". */
+.row-abilities .ability-granted.ability-penalty {
+  outline-color: var(--danger);
+}
+
 /* An Anti ability that applies to the current defender's keywords. */
 .row-abilities .ability-active {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
   border-radius: 3px;
   padding: 0 3px;
+}
+
+/* An ability limited to non-Monster / non-Vehicle targets while the defender is one. */
+.row-abilities .ability-inactive {
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 
 .visually-hidden {
@@ -836,6 +847,14 @@ select[aria-invalid='true'] {
 
 .attack-abilities[hidden] {
   display: none;
+}
+
+/* The defender's abilities, under its stats in the Defender panel. */
+.attack-abilities--defense {
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-bottom: 0;
+  border-top: 1px solid var(--grid);
 }
 
 .attack-abilities-label {

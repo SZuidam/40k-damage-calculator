@@ -1,4 +1,4 @@
-import type { DamageRerollThresholds, DefenderKeyword, DefenderProfile, RerollKind, RollModifiers, WeaponAbilities, WeaponProfile } from '../types';
+import { MONSTER_VEHICLE, copyAbilities, type DamageRerollThresholds, type DefenderKeyword, type DefenderProfile, type RerollKind, type RollModifiers, type WeaponAbilities, type WeaponProfile } from '../types';
 import { convolve, diceDistribution, parseDice, repeatDice, rollDice, rollDiceSum, tryParseDice, type DiceExpr } from './dice';
 import type { Rng } from './rng';
 
@@ -174,6 +174,28 @@ export function antiCriticalWound(abilities: Pick<WeaponAbilities, 'anti'>, keyw
   return best;
 }
 
+/** Whether a target with these keywords is a Monster or a Vehicle (null: no target, so neither). */
+export function isMonsterOrVehicle(keywords: readonly DefenderKeyword[] | null): boolean {
+  return keywords !== null && keywords.some((k) => MONSTER_VEHICLE.includes(k));
+}
+
+/**
+ * The weapon abilities that apply against a target with these keywords: against a Monster or a
+ * Vehicle the abilities in `notVsMonsterVehicle` (Sustained Hits, Devastating Wounds) are
+ * switched off, and so dropped from that list. Without a target (null) or against any other
+ * target, a copy of `abilities`. Never changes `abilities`.
+ */
+export function abilitiesAgainst(abilities: WeaponAbilities, keywords: readonly DefenderKeyword[] | null): WeaponAbilities {
+  const out = copyAbilities(abilities);
+  if (!isMonsterOrVehicle(keywords) || out.notVsMonsterVehicle.length === 0) return out;
+  for (const key of out.notVsMonsterVehicle) {
+    if (key === 'sustainedHits') out.sustainedHits = null;
+    else out.devastatingWounds = false;
+  }
+  out.notVsMonsterVehicle = [];
+  return out;
+}
+
 /** Everything one attacking model rolls for its number of attacks: A plus Blast / Cleave / Rapid Fire. */
 export function attacksPerModel(ctx: AttackContext): DiceExpr[] {
   return [ctx.attacks, ...ctx.bonusAttacks];
@@ -224,7 +246,9 @@ export function rollDamage(ctx: AttackContext, rng: Rng): number {
 }
 
 export function createAttackContext(weapon: WeaponProfile, defender: DefenderProfile): AttackContext {
-  const { abilities } = weapon;
+  // Abilities limited to non-Monster / non-Vehicle targets drop out against one (state/loadout
+  // already resolves them before granted abilities are merged; this keeps the engine right on its own).
+  const abilities = abilitiesAgainst(weapon.abilities, defender.keywords);
   const critical = criticalThresholds(weapon.modifiers);
   const damage = parseDice(weapon.damage);
   const torrent = abilities.torrent;

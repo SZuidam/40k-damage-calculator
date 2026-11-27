@@ -1,4 +1,4 @@
-import { BUILTIN_CONDITIONS, conditionSummary, copyAbility, emptyGrant, newAbility, sortConditions } from '../state/unitAbilities';
+import { BUILTIN_CONDITIONS, conditionSummary, copyAbility, emptyGrant, hasDefensiveEffect, isDefensiveOnly, newAbility, sortConditions } from '../state/unitAbilities';
 import { DEFENDER_KEYWORDS, KEYWORD_NAMES, WEAPON_TYPE_NAMES, type AbilityEffect, type AbilityTarget, type DefenderKeyword, type UnitAbility, type WeaponType } from '../types';
 import { h, select, setFieldError } from './dom';
 import { openModal } from './modal';
@@ -28,6 +28,7 @@ const EFFECT_CHOICES: { value: string; label: string; create: () => AbilityEffec
   { value: 'reroll-damage', label: 'Re-roll damage', create: () => ({ kind: 'rerollDamage' }), matches: (e) => e.kind === 'rerollDamage' },
   { value: 'grant', label: 'Gain weapon abilities', create: emptyGrant, matches: (e) => e.kind === 'grant' },
   { value: 'mortal-wounds', label: 'Inflict mortal wounds', create: () => ({ kind: 'mortalWounds', on: 4, perSuccess: '1' }), matches: (e) => e.kind === 'mortalWounds' },
+  { value: 'wound-penalty', label: 'Defensive: enemy -1 to wound', create: () => ({ kind: 'woundPenalty', strongerOnly: true }), matches: (e) => e.kind === 'woundPenalty' },
 ];
 
 const AMOUNT_OPTIONS = [1, 2, 3, 4, 5, 6].map((v) => ({ value: v, label: `+${v}` }));
@@ -41,6 +42,10 @@ const D6_OPTIONS = [6, 5, 4, 3, 2].map((v) => ({ value: v, label: `${v}+` }));
 const REROLL_OPTIONS = [
   { value: 'ones', label: 'of 1' },
   { value: 'failed', label: 'that failed' },
+];
+const PENALTY_OPTIONS = [
+  { value: 'stronger', label: 'if S > T' },
+  { value: 'always', label: 'always' },
 ];
 
 let modalCounter = 0;
@@ -135,7 +140,10 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
                 { value: 'ledUnit', label: 'The unit it leads' },
               ],
               draft.appliesTo,
-              (value) => (draft.appliesTo = value),
+              (value) => {
+                draft.appliesTo = value;
+                validate();
+              },
             )
           : null;
 
@@ -175,6 +183,8 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
             return [h('span', { class: 'effect-note', title: 'A D3 or D6 damage roll below its threshold under ☰ → Settings is re-rolled once.' }, 'below the Settings threshold')];
           case 'grant':
             return [];
+          case 'woundPenalty':
+            return [numberSelect('When', PENALTY_OPTIONS, e.strongerOnly ? 'stronger' : 'always', (v) => (e.strongerOnly = v === 'stronger'), i)];
           case 'mortalWounds': {
             const perSuccess = h('input', {
               id: id(`effect-${i}-per-success`),
@@ -244,11 +254,17 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
 
       // Mortal wounds are unit-level: say so when the ability also filters by weapon type.
       const mortalNote = h('p', { class: 'modal-hint effect-mortal-note', hidden: true }, 'Mortal wounds ignore the Weapons filter: they are rolled for the unit, before any weapon.');
+      // Defensive effects work while the unit is the defender, where When reads from the attack's side.
+      const defenseNote = h('p', { class: 'modal-hint effect-defense-note', hidden: true });
 
       // ---------- validation ----------
       let nameTouched = initial !== undefined;
       const validate = () => {
         mortalNote.hidden = draft.when.weaponType === 'any' || !draft.effects.some((e) => e.kind === 'mortalWounds');
+        defenseNote.hidden = !hasDefensiveEffect(draft);
+        defenseNote.textContent = draft.appliesTo === 'ledUnit'
+          ? 'Defensive effects only work for this unit itself: the defender on the main page has no leader, so they don’t apply to the unit it leads.'
+          : `Defensive effects work on attacks against this unit while it is the defender${isDefensiveOnly(draft) ? '' : ' (and do nothing while it attacks)'}. Weapons then means the attacking weapon, Target the attacking unit.`;
         const result = validateAbility(draft, options.takenNames);
         const nameError = nameTouched ? result.name : undefined;
         setFieldError(name, nameError);
@@ -301,6 +317,7 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
           h('h3', { id: id('effects-title') }, 'Effects'),
           effectList,
           mortalNote,
+          defenseNote,
           h('div', { class: 'panel-actions-group' }, addEffect),
         ),
         errors,

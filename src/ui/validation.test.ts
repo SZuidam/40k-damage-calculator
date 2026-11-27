@@ -171,6 +171,11 @@ describe('validateAbility', () => {
     expect(effectError({ kind: 'grant', abilities: { ...noAbilities(), anti: { vehicle: 9 } } })).toMatch(/Anti-Vehicle/);
   });
 
+  it('accepts the defensive -1 to wound effect', () => {
+    expect(validateAbility(ability({ effects: [{ kind: 'woundPenalty', strongerOnly: true }] }))).toEqual({});
+    expect(validateAbility(ability({ effects: [{ kind: 'woundPenalty', strongerOnly: false }] }))).toEqual({});
+  });
+
   it('checks the roll and the mortal wounds per success of Inflict mortal wounds', () => {
     const effectError = (effect: AbilityEffect) => validateAbility(ability({ effects: [effect] })).effects;
     expect(effectError({ kind: 'mortalWounds', on: 4, perSuccess: '1' })).toBeUndefined();

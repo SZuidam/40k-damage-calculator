@@ -56,10 +56,24 @@ export interface WeaponAbilities {
    * Hits and Sustained Hits can't trigger).
    */
   torrent: boolean;
+  /**
+   * The abilities of this weapon that only work against non-MONSTER / non-VEHICLE targets
+   * ("Sustained Hits 1 (non-Monster/Vehicle)"): against a target with either keyword they don't
+   * apply. In RESTRICTABLE_ABILITIES order without duplicates; [] for none. Only the abilities
+   * the weapon has are listed (removing an ability drops it here too).
+   */
+  notVsMonsterVehicle: RestrictableAbility[];
 }
 
+/** The weapon abilities that can be limited to non-MONSTER / non-VEHICLE targets. */
+export const RESTRICTABLE_ABILITIES = ['sustainedHits', 'devastatingWounds'] as const;
+export type RestrictableAbility = (typeof RESTRICTABLE_ABILITIES)[number];
+
+/** A target with any of these keywords stops the abilities in `WeaponAbilities.notVsMonsterVehicle`. */
+export const MONSTER_VEHICLE: readonly DefenderKeyword[] = ['monster', 'vehicle'];
+
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false, torrent: false };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false, torrent: false, notVsMonsterVehicle: [] };
 }
 
 /**
@@ -79,7 +93,7 @@ export function noConditions(): AttackConditions {
 
 /** A copy that shares no objects with `a`. */
 export function copyAbilities(a: WeaponAbilities): WeaponAbilities {
-  return { ...a, anti: { ...a.anti } };
+  return { ...a, anti: { ...a.anti }, notVsMonsterVehicle: [...a.notVsMonsterVehicle] };
 }
 
 /** Whether a weapon shoots or fights in melee: unit abilities can target one kind only. */
@@ -286,7 +300,16 @@ export type AbilityEffect =
    * unit, each `on`+ (2–6) inflicts `perSuccess` (a dice expression) mortal wounds. Unit-level:
    * it ignores the ability's weapon type, and the engine resolves it before every weapon.
    */
-  | { kind: 'mortalWounds'; on: number; perSuccess: string };
+  | { kind: 'mortalWounds'; on: number; perSuccess: string }
+  /**
+   * Defensive: subtract 1 from the wound roll of attacks against this unit, while it is the
+   * defender. With `strongerOnly`, only for attacks whose Strength (after the attacker's
+   * abilities) is greater than this unit's Toughness. Ignored while the unit attacks.
+   */
+  | { kind: 'woundPenalty'; strongerOnly: boolean };
+
+/** The effect kinds that work while the unit defends (and do nothing while it attacks). */
+export const DEFENSIVE_EFFECT_KINDS: readonly AbilityEffect['kind'][] = ['woundPenalty'];
 
 export type AbilityEffectKind = AbilityEffect['kind'];
 
@@ -313,7 +336,7 @@ export interface UnitAbility {
 export interface Army {
   id: string;
   name: string;
-  /** Army rules: abilities every unit of the army has when it attacks. */
+  /** Army rules: abilities every unit of the army has when it attacks (or, for defensive effects, defends). */
   abilities: UnitAbility[];
 }
 

@@ -1,6 +1,7 @@
 import {
   DEFENDER_KEYWORDS,
   MAX_DAMAGE_REROLL_BELOW,
+  RESTRICTABLE_ABILITIES,
   defaultDamageRerolls,
   noAbilities,
   noConditions,
@@ -13,6 +14,7 @@ import {
   type DefenderKeyword,
   type DefenderSelection,
   type LoadoutRow,
+  type RestrictableAbility,
   type StoredWeapon,
   type Unit,
   type UnitAbility,
@@ -269,10 +271,12 @@ export function toWeaponStats(value: unknown): WeaponStats | null {
 function toAbilities(value: unknown): WeaponAbilities {
   const a = noAbilities();
   if (!isRecord(value)) return a;
+  const sustainedHits = toAbilityDice(value.sustainedHits);
+  const devastatingWounds = value.devastatingWounds === true;
   return {
     lethalHits: value.lethalHits === true,
-    sustainedHits: toAbilityDice(value.sustainedHits),
-    devastatingWounds: value.devastatingWounds === true,
+    sustainedHits,
+    devastatingWounds,
     blast: toAbilityDice(value.blast),
     cleave: toAbilityDice(value.cleave),
     anti: toAnti(value.anti),
@@ -281,7 +285,19 @@ function toAbilities(value: unknown): WeaponAbilities {
     lance: value.lance === true,
     twinLinked: value.twinLinked === true,
     torrent: value.torrent === true,
+    notVsMonsterVehicle: toRestrictions(value.notVsMonsterVehicle, { sustainedHits, devastatingWounds }),
   };
+}
+
+/**
+ * The abilities limited to non-Monster / non-Vehicle targets: known names of abilities the
+ * weapon has, deduplicated, in RESTRICTABLE_ABILITIES order. Weapons saved before this existed
+ * have none.
+ */
+function toRestrictions(value: unknown, has: Pick<WeaponAbilities, RestrictableAbility>): RestrictableAbility[] {
+  if (!Array.isArray(value)) return [];
+  const present = (key: RestrictableAbility) => (key === 'sustainedHits' ? has.sustainedHits !== null : has.devastatingWounds);
+  return RESTRICTABLE_ABILITIES.filter((key) => value.includes(key) && present(key));
 }
 
 /**
@@ -379,6 +395,8 @@ export function toAbilityEffect(value: unknown): AbilityEffect | null {
       return isRecord(value.abilities) ? { kind: 'grant', abilities: toAbilities(value.abilities) } : null;
     case 'mortalWounds':
       return finite(value.on) && typeof value.perSuccess === 'string' ? { kind: 'mortalWounds', on: value.on, perSuccess: value.perSuccess } : null;
+    case 'woundPenalty':
+      return typeof value.strongerOnly === 'boolean' ? { kind: 'woundPenalty', strongerOnly: value.strongerOnly } : null;
     default:
       return null;
   }

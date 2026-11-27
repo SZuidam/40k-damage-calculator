@@ -2,12 +2,26 @@ import { formatDiceSum, tryParseDice, type DiceExpr } from '../engine/dice';
 import { bonusAttacks, bonusDamage, hitModifier, woundModifier } from '../engine/rules';
 import { activeAbilities, normaliseDice } from '../state/abilities';
 import { pickStats, skillValue } from '../state/presets';
-import { apAmount, applyAbilities, effectSummary, statAmount, type SourcedAbility } from '../state/unitAbilities';
-import { KEYWORD_NAMES, noModifiers, type AbilityEffect, type AttackConditions, type DamageRerollThresholds, type DefenderProfile, type WeaponProfile, type WeaponStats } from '../types';
+import { apAmount, applyAbilities, applyDefensiveAbilities, effectSummary, statAmount, woundPenalties, type SourcedAbility } from '../state/unitAbilities';
+import { KEYWORD_NAMES, MONSTER_VEHICLE, noModifiers, type AbilityEffect, type AttackConditions, type DamageRerollThresholds, type DefenderProfile, type WeaponProfile, type WeaponStats } from '../types';
 import { h } from './dom';
 
 /** What the stat chips need to know about the defender: its size (Blast / Cleave) and keywords (Anti). */
 export type ChipDefender = Pick<DefenderProfile, 'models' | 'keywords'>;
+
+/** The defender's defensive abilities active for a weapon, with its Toughness ("-1 to wound if S > T"). */
+export interface ChipDefense {
+  applied: readonly SourcedAbility[];
+  toughness: number;
+}
+
+/** What the defender's abilities do to a weapon's wound roll, for the row's lever. */
+interface WoundPenalty {
+  /** How much they subtract (before the engine's cap). */
+  amount: number;
+  /** "Iron Hide (S 5 above T 4)": the abilities that subtract, for the tooltip. */
+  from: string;
+}
 
 export const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities' | 'type'>; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
   { key: 'attacks', label: 'A', title: 'Attacks' },
@@ -39,7 +53,10 @@ const constant = (x: number): DiceExpr => ({ count: 0, sides: 0, bonus: x });
  * A and Melta on D), an improved AP in blue, a hit modifier on the BS chip, and their roll levers
  * and granted weapon abilities as dashed entries in the ability text. Weapon abilities that apply
  * to the defender's keywords or the current conditions are outlined. A Torrent weapon (its own or
- * granted) reads "BS N/A". `damageRerolls` are the Settings thresholds for "Re-roll damage".
+ * granted) reads "BS N/A". An ability limited to non-Monster / non-Vehicle targets is struck
+ * through while the defender is a Monster or Vehicle. `damageRerolls` are the Settings thresholds
+ * for "Re-roll damage". `defense` holds the defender's defensive abilities active for this weapon:
+ * a "-1 to wound" from them shows in the wound lever, outlined in red.
  */
 export function statChips(
   weapon: WeaponStats | undefined,
@@ -47,11 +64,25 @@ export function statChips(
   conditions: AttackConditions,
   applied: readonly SourcedAbility[] = [],
   damageRerolls?: DamageRerollThresholds,
+  defense?: ChipDefense,
 ): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
   const effects = applied.flatMap((a) => a.ability.effects);
   const base: WeaponProfile = { ...pickStats(weapon), id: '', models: 1, conditions, modifiers: noModifiers() };
-  const resolved = applied.length === 0 ? base : applyAbilities(base, applied.map((a) => a.ability), damageRerolls);
+  const abilities = applied.map((a) => a.ability);
+  // `resolved` is what the engine gets against the current defender; `listed` keeps the abilities
+  // limited to non-Monster / non-Vehicle targets, so the row can show them as inactive.
+  const attacked = applyAbilities(base, abilities, damageRerolls, defender?.keywords ?? null);
+  const listed = applyAbilities(base, abilities, damageRerolls);
+  // The defender's "-1 to wound" compares the Strength the attacker's abilities raised.
+  const penalized = (e: AbilityEffect) => e.kind === 'woundPenalty' && (!e.strongerOnly || (defense !== undefined && attacked.strength > defense.toughness));
+  const penalty: WoundPenalty | null = defense
+    ? {
+        amount: woundPenalties(attacked.strength, defense.applied.map((a) => a.ability), defense.toughness),
+        from: `${sourcesOf(defense.applied, penalized)}${attacked.strength > defense.toughness ? ` (S ${attacked.strength} above T ${defense.toughness})` : ''}`,
+      }
+    : null;
+  const resolved = defense ? applyDefensiveAbilities(attacked, defense.applied.map((a) => a.ability), defense.toughness) : attacked;
   const melee = weapon.type === 'melee';
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, key === 'skill' && melee ? 'WS' : label), ' ', format ? format(weapon) : String(weapon[key])),
@@ -105,25 +136,46 @@ export function statChips(
     dChip.title = `Damage: ${weapon.damage}, plus ${sources.join(' and ')}`;
   }
 
-  const text = abilityText(weapon, resolved, defender, conditions, applied);
+  const text = abilityText(weapon, listed, resolved, defender, conditions, applied, penalty);
   return text ? [...tag, ...chips, text] : [...tag, ...chips];
 }
 
 /**
  * The ability text of a row: the weapon's abilities (with any granted by unit abilities, dashed)
- * and the roll levers of unit abilities (dashed), or null when there are none.
+ * and the roll levers of unit abilities (dashed), or null when there are none. `listed` holds
+ * every ability, `resolved` only those that apply against the defender: a limited ability
+ * missing from it is struck through, and a granted one that took its place is added after.
  */
-function abilityText(weapon: WeaponStats, resolved: WeaponProfile, defender: ChipDefender | undefined, conditions: AttackConditions, applied: readonly SourcedAbility[]): HTMLElement | null {
+function abilityText(
+  weapon: WeaponStats,
+  listed: WeaponProfile,
+  resolved: WeaponProfile,
+  defender: ChipDefender | undefined,
+  conditions: AttackConditions,
+  applied: readonly SourcedAbility[],
+  penalty: WoundPenalty | null,
+): HTMLElement | null {
   const own = new Set(activeAbilities(weapon.abilities).map((a) => a.label));
-  const abilities = activeAbilities(resolved.abilities);
-  const levers = rollLevers(resolved, weapon, applied);
+  const shown = activeAbilities(listed.abilities);
+  const shownLabels = new Set(shown.map((a) => a.label));
+  const abilities = [...shown, ...activeAbilities(resolved.abilities).filter((a) => !shownLabels.has(a.label))];
+  const blocked = defender ? defender.keywords.filter((k) => MONSTER_VEHICLE.includes(k)) : [];
+  const levers = rollLevers(resolved, weapon, applied, penalty);
   if (abilities.length === 0 && levers.length === 0) return null;
   // Read-only; abilities are edited in the weapon profile modal and the unit's abilities (Units tab).
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
   const items: HTMLElement[] = [];
-  for (const { label, description, anti, condition } of abilities) {
+  for (const { label, description, anti, condition, limited } of abilities) {
     const granted = !own.has(label);
     const from = granted ? ` Gained from ${sourcesOf(applied, (e) => e.kind === 'grant')}.` : '';
+    // Limited to non-Monster / non-Vehicle targets and the defender is one: struck through.
+    if (limited && blocked.length > 0) {
+      const names = blocked.map((k) => KEYWORD_NAMES[k]).join(' and ');
+      const classes = ['ability-inactive', granted ? 'ability-granted' : ''].filter(Boolean).join(' ');
+      const title = `${description}${from} Inactive: the target has the ${names} keyword${blocked.length === 1 ? '' : 's'}.`;
+      items.push(h('span', { class: classes, title }, label, h('span', { class: 'visually-hidden' }, ' (inactive)')));
+      continue;
+    }
     // An Anti ability is outlined when the current defender has one of its keywords, a
     // conditional ability (Rapid Fire, Melta, Lance) while its attack condition is on.
     let active: string | null = null;
@@ -138,7 +190,7 @@ function abilityText(weapon: WeaponStats, resolved: WeaponProfile, defender: Chi
     const title = `${description}${from}${active === null ? '' : ` ${active}`}`;
     items.push(h('span', { class: classes || undefined, title }, label, active !== null ? h('span', { class: 'visually-hidden' }, ' (active)') : null));
   }
-  for (const lever of levers) items.push(h('span', { class: 'ability-granted', title: lever.title }, lever.label));
+  for (const lever of levers) items.push(h('span', { class: lever.penalty ? 'ability-granted ability-penalty' : 'ability-granted', title: lever.title }, lever.label));
   items.forEach((item, i) => {
     if (i > 0) text.append(', ');
     text.append(item);
@@ -146,15 +198,29 @@ function abilityText(weapon: WeaponStats, resolved: WeaponProfile, defender: Chi
   return text;
 }
 
-/** Roll levers of the applied abilities: "+1 to wound", "Critical hits on 5+", "Re-roll hits of 1". */
-function rollLevers(resolved: WeaponProfile, weapon: WeaponStats, applied: readonly SourcedAbility[]): { label: string; title: string }[] {
+/**
+ * Roll levers of the applied abilities: "+1 to wound", "Critical hits on 5+", "Re-roll hits of 1".
+ * `penalty` is what the defender's abilities subtract from the wound roll; a lever it is part of
+ * has `penalty` set.
+ */
+function rollLevers(resolved: WeaponProfile, weapon: WeaponStats, applied: readonly SourcedAbility[], penalty: WoundPenalty | null): { label: string; title: string; penalty?: boolean }[] {
   const m = resolved.modifiers;
-  const out: { label: string; title: string }[] = [];
+  const out: { label: string; title: string; penalty?: boolean }[] = [];
   const from = (pred: (e: AbilityEffect) => boolean) => `From ${sourcesOf(applied, pred)}.`;
-  // The wound modifier as the engine sums it, with Lance; shown only when an ability adds to it.
-  if (m.wound !== 0) {
+  // The wound modifier as the engine sums it, with Lance; shown only when an ability of the
+  // attacker or the defender adds to it (even when they cancel out).
+  const penaltyAmount = penalty?.amount ?? 0;
+  const attackerWound = m.wound + penaltyAmount;
+  if (attackerWound !== 0 || penaltyAmount > 0) {
     const total = woundModifier(resolved);
-    out.push({ label: `${total >= 0 ? '+' : ''}${total} to wound`, title: `${from((e) => e.kind === 'roll' && e.roll === 'wound')} Wound roll modifiers add up to at most +1 / -1.` });
+    const title = [
+      attackerWound !== 0 ? from((e) => e.kind === 'roll' && e.roll === 'wound') : '',
+      penalty && penaltyAmount > 0 ? `-${penaltyAmount} from the defender’s ${penalty.from}.` : '',
+      'Wound roll modifiers add up to at most +1 / -1.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    out.push({ label: `${total >= 0 ? '+' : ''}${total} to wound`, title, penalty: penaltyAmount > 0 });
   }
   if (m.criticalHit < 6) out.push({ label: effectSummary({ kind: 'critical', roll: 'hit', on: m.criticalHit }), title: from((e) => e.kind === 'critical' && e.roll === 'hit') });
   if (m.criticalWound < 6) out.push({ label: effectSummary({ kind: 'critical', roll: 'wound', on: m.criticalWound }), title: from((e) => e.kind === 'critical' && e.roll === 'wound') });

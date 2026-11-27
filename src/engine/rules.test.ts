@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { WeaponAbilities } from '../types';
+import { noAbilities, type WeaponAbilities } from '../types';
 import {
   IMPOSSIBLE,
+  abilitiesAgainst,
   antiCriticalWound,
   attacksPerModel,
   bonusAttacks,
@@ -15,6 +16,7 @@ import {
   hitRollFaces,
   hitSucceeds,
   isCriticalHit,
+  isMonsterOrVehicle,
   isCriticalWound,
   rollSucceeds,
   saveChance,
@@ -536,5 +538,41 @@ describe('re-roll damage', () => {
     const ctx = ctxOf('D6', 4, { melta: '2' }, true);
     expect(damagePerWound(ctx)).toHaveLength(2);
     expect(damageDistribution(ctx).reduce((sum, p, v) => sum + p * v, 0)).toBeCloseTo(6.25, 12);
+  });
+});
+
+describe('abilities limited to non-Monster / non-Vehicle targets', () => {
+  const limited: WeaponAbilities = { ...noAbilities(), lethalHits: true, sustainedHits: '2', devastatingWounds: true, notVsMonsterVehicle: ['sustainedHits', 'devastatingWounds'] };
+
+  it('a target is a Monster or Vehicle by either keyword; no target is neither', () => {
+    expect(isMonsterOrVehicle(['monster'])).toBe(true);
+    expect(isMonsterOrVehicle(['infantry', 'vehicle'])).toBe(true);
+    expect(isMonsterOrVehicle(['infantry', 'fly'])).toBe(false);
+    expect(isMonsterOrVehicle([])).toBe(false);
+    expect(isMonsterOrVehicle(null)).toBe(false);
+  });
+
+  it('drops the limited abilities against a Monster or Vehicle, and keeps them otherwise', () => {
+    expect(abilitiesAgainst(limited, ['monster'])).toEqual({ ...noAbilities(), lethalHits: true });
+    expect(abilitiesAgainst(limited, ['vehicle', 'fly'])).toEqual({ ...noAbilities(), lethalHits: true });
+    expect(abilitiesAgainst(limited, ['infantry'])).toEqual(limited);
+    expect(abilitiesAgainst(limited, null)).toEqual(limited);
+    expect(limited.notVsMonsterVehicle).toEqual(['sustainedHits', 'devastatingWounds']);
+  });
+
+  it('only drops the abilities that are limited', () => {
+    const one: WeaponAbilities = { ...limited, notVsMonsterVehicle: ['devastatingWounds'] };
+    expect(abilitiesAgainst(one, ['monster'])).toEqual({ ...noAbilities(), lethalHits: true, sustainedHits: '2' });
+    const none: WeaponAbilities = { ...limited, notVsMonsterVehicle: [] };
+    expect(abilitiesAgainst(none, ['monster'])).toEqual(none);
+  });
+
+  it('the attack context leaves them out against a Monster or Vehicle', () => {
+    const w = weapon('Talons', 5, '2', 3, 5, -1, '1', limited);
+    const vsMonster = createAttackContext(w, defender(1, 10, 2, 12, null, ['monster']));
+    expect([vsMonster.sustainedHits, vsMonster.devastatingWounds, vsMonster.lethalHits]).toEqual([null, false, true]);
+    const vsInfantry = createAttackContext(w, defender(10, 3, 5, 1, null, ['infantry']));
+    expect(vsInfantry.sustainedHits).toEqual({ count: 0, sides: 0, bonus: 2 });
+    expect(vsInfantry.devastatingWounds).toBe(true);
   });
 });
