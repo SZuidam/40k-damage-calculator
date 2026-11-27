@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultDamageRerolls, noAbilities, noConditions, type StoredWeapon, type Unit } from '../types';
 import { STORAGE_KEY, V4_STORAGE_KEY, defaultState, loadState, saveState, type KeyValueStorage } from './storage';
+import { DEFAULT_UNIT_MODELS } from './loadout';
 
 function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & { data: Record<string, string> } {
   const data = { ...initial };
@@ -91,6 +92,7 @@ describe('loadState', () => {
       armyId: unit.armyId,
       unitId: unit.id,
       leaderId: null,
+      models: 5,
       rows: [
         { weaponId: unit.weapons[0].id, carried: true, count: 5 },
         { weaponId: unit.weapons[1].id, carried: false, count: 5 },
@@ -122,7 +124,7 @@ describe('loadState', () => {
     const state = load(v5({ armies: [], units: [] }));
     expect(state.armies).toEqual([]);
     expect(state.units).toEqual([]);
-    expect(state.attacker).toEqual({ armyId: null, unitId: null, leaderId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: null, unitId: null, leaderId: null, models: 5, rows: [] });
     expect(state.defender).toEqual({ armyId: null, unitId: null, models: 10 });
   });
 
@@ -216,7 +218,7 @@ describe('attacker and defender on load', () => {
 
   it('unpicks a unit that is gone and keeps the army dropdown on an existing choice', () => {
     const state = load(v5({ attacker: { armyId: 'sm', unitId: 'gone', leaderId: null, rows: [{ weaponId: 'w-bolt', carried: true, count: 5 }] }, defender: { armyId: 'gone', unitId: 'gone', models: 'x' } }));
-    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, models: 5, rows: [] });
     expect(state.defender).toEqual({ armyId: 'sm', unitId: null, models: 5 });
   });
 
@@ -238,7 +240,7 @@ describe('attacker and defender on load', () => {
   it('starts without a selection when nothing was saved for it', () => {
     const { attacker: _a, defender: _d, ...rest } = v5();
     const state = load(rest);
-    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, models: 5, rows: [] });
     expect(state.defender).toEqual({ armyId: 'sm', unitId: null, models: 5 });
   });
 });
@@ -253,7 +255,7 @@ describe('v4 → v5', () => {
     expect(state.conditions).toEqual({ halfRange: false, charged: true });
     expect(state.iterations).toBe(20_000);
     // No unit is picked yet; the army dropdowns start on the first army (by name) that has units.
-    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
+    expect(state.attacker).toEqual({ armyId: 'sm', unitId: null, leaderId: null, models: 5, rows: [] });
     expect(state.defender).toEqual({ armyId: 'sm', unitId: null, models: 5 });
   });
 
@@ -448,5 +450,34 @@ describe('damage re-roll thresholds on load', () => {
   it('keeps the Re-roll damage effect of unit abilities', () => {
     const reroll = { id: 'a-dmg', name: 'Gets Hot', description: '', appliesTo: 'unit', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'rerollDamage' }] };
     expect(load(v5({ units: [{ ...intercessors(), abilities: [reroll] }] })).units[0].abilities[0].effects).toEqual([{ kind: 'rerollDamage' }]);
+  });
+});
+
+describe('mortal wounds and attacker models', () => {
+  const ability = (effects: unknown[]) => ({ id: 'a-mw', name: 'Hammer of Wrath', description: '', appliesTo: 'unit', when: { toggle: false, conditions: ['charged'], weaponType: 'any', targetKeyword: null }, effects });
+  const effectsOf = (effects: unknown[]) => load(v5({ units: [{ ...intercessors(), abilities: [ability(effects)] }] })).units[0].abilities[0]?.effects;
+
+  it('keeps the Inflict mortal wounds effect', () => {
+    expect(effectsOf([{ kind: 'mortalWounds', on: 4, perSuccess: 'D3' }])).toEqual([{ kind: 'mortalWounds', on: 4, perSuccess: 'D3' }]);
+  });
+
+  it('drops a mortal wounds effect with a missing or mistyped field, and keeps out-of-range values for validation', () => {
+    expect(effectsOf([{ kind: 'mortalWounds', on: '4', perSuccess: '1' }, { kind: 'mortalWounds', on: 4 }, { kind: 'mortalWounds', on: 9, perSuccess: 'x' }])).toEqual([
+      { kind: 'mortalWounds', on: 9, perSuccess: 'x' },
+    ]);
+  });
+
+  it('round trips the attacker models', () => {
+    const storage = memoryStorage();
+    const state = load(v5({ attacker: { ...v5().attacker, models: 10 } }));
+    expect(state.attacker.models).toBe(10);
+    saveState(state, storage);
+    expect(loadState(storage).attacker.models).toBe(10);
+  });
+
+  it('gives an old save without attacker models the default, and keeps out-of-range values', () => {
+    expect(load(v5()).attacker.models).toBe(DEFAULT_UNIT_MODELS);
+    expect(load(v5({ attacker: { ...v5().attacker, models: 'ten' } })).attacker.models).toBe(DEFAULT_UNIT_MODELS);
+    expect(load(v5({ attacker: { ...v5().attacker, models: 99 } })).attacker.models).toBe(99);
   });
 });

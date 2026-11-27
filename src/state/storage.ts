@@ -98,12 +98,12 @@ function withExample(state: StoredState): StoredState {
     ...state,
     armies: [army],
     units: [unit],
-    attacker: { armyId: army.id, unitId: unit.id, leaderId: null, rows },
+    attacker: { armyId: army.id, unitId: unit.id, leaderId: null, models: DEFAULT_UNIT_MODELS, rows },
     defender: { armyId: army.id, unitId: unit.id, models: DEFAULT_UNIT_MODELS },
   };
 }
 
-const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, leaderId: null, rows: [] });
+const noAttacker = (): AttackerSelection => ({ armyId: null, unitId: null, leaderId: null, models: DEFAULT_UNIT_MODELS, rows: [] });
 const noDefender = (): DefenderSelection => ({ armyId: null, unitId: null, models: DEFAULT_UNIT_MODELS });
 
 function browserStorage(): KeyValueStorage | undefined {
@@ -183,10 +183,16 @@ function fromV4(raw: unknown): StoredState {
   return state.armies.length === 0 && state.units.length === 0 ? withExample(state) : state;
 }
 
-/** The attacker: ids as saved (reconciled afterwards) and its loadout rows. */
+/** The attacker: ids as saved (reconciled afterwards), its size (saves from before it existed get the default) and its loadout rows. */
 function toAttacker(value: unknown): AttackerSelection {
   if (!isRecord(value)) return noAttacker();
-  return { armyId: optionalId(value.armyId), unitId: optionalId(value.unitId), leaderId: optionalId(value.leaderId), rows: list(value.rows, toLoadoutRow) };
+  return {
+    armyId: optionalId(value.armyId),
+    unitId: optionalId(value.unitId),
+    leaderId: optionalId(value.leaderId),
+    models: num(value.models, DEFAULT_UNIT_MODELS),
+    rows: list(value.rows, toLoadoutRow),
+  };
 }
 
 function toLoadoutRow(value: unknown): LoadoutRow | null {
@@ -371,6 +377,8 @@ export function toAbilityEffect(value: unknown): AbilityEffect | null {
       return { kind: 'rerollDamage' };
     case 'grant':
       return isRecord(value.abilities) ? { kind: 'grant', abilities: toAbilities(value.abilities) } : null;
+    case 'mortalWounds':
+      return finite(value.on) && typeof value.perSuccess === 'string' ? { kind: 'mortalWounds', on: value.on, perSuccess: value.perSuccess } : null;
     default:
       return null;
   }

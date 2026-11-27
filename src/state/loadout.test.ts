@@ -90,17 +90,17 @@ describe('armies in the dropdown', () => {
 
 describe('reconcile', () => {
   it('syncs the attacker’s loadout and moves its army to the unit’s army', () => {
-    const sel: AttackerSelection = { armyId: 'cd', unitId: 'u1', leaderId: null, rows: [row('w-pistol', true, 2), row('w-gone', true, 1)] };
+    const sel: AttackerSelection = { armyId: 'cd', unitId: 'u1', leaderId: null, models: 5, rows: [row('w-pistol', true, 2), row('w-gone', true, 1)] };
     reconcileAttacker(sel, armies(), [unit()]);
-    expect(sel).toEqual({ armyId: 'sm', unitId: 'u1', leaderId: null, rows: [row('w-pistol', true, 2), row('w-bolt', false, 5), row('w-ccw', false, 5)] });
+    expect(sel).toEqual({ armyId: 'sm', unitId: 'u1', leaderId: null, models: 5, rows: [row('w-pistol', true, 2), row('w-bolt', false, 5), row('w-ccw', false, 5)] });
   });
 
   it('unpicks a deleted unit and keeps the army dropdown on an existing choice', () => {
-    const sel: AttackerSelection = { armyId: 'gone', unitId: 'gone', leaderId: null, rows: [row('w-bolt', true, 5)] };
+    const sel: AttackerSelection = { armyId: 'gone', unitId: 'gone', leaderId: null, models: 5, rows: [row('w-bolt', true, 5)] };
     reconcileAttacker(sel, armies(), [unit()]);
-    expect(sel).toEqual({ armyId: 'sm', unitId: null, leaderId: null, rows: [] });
+    expect(sel).toEqual({ armyId: 'sm', unitId: null, leaderId: null, models: 5, rows: [] });
 
-    const kept: AttackerSelection = { armyId: 'cd', unitId: null, leaderId: null, rows: [] };
+    const kept: AttackerSelection = { armyId: 'cd', unitId: null, leaderId: null, models: 5, rows: [] };
     reconcileAttacker(kept, armies(), [unit()]);
     expect(kept.armyId).toBe('cd');
   });

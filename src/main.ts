@@ -4,9 +4,10 @@ import { simulate } from './engine/simulate';
 import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
 import { bannerCss, loadBanners, pruneBanners, saveBanners } from './state/banners';
 import { loadState, saveState } from './state/storage';
-import { abilitiesFor, activeFor, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
-import { MAX_DAMAGE_REROLL_BELOW, type StoredWeapon, type Unit, type WeaponProfile } from './types';
+import { abilitiesFor, activeFor, mortalWoundSources, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
+import { MAX_DAMAGE_REROLL_BELOW, type MortalWoundSource, type StoredWeapon, type Unit, type WeaponProfile } from './types';
 import { renderAbilitiesLine } from './ui/abilitiesLine';
+import { renderAttackerModels } from './ui/attackerModels';
 import { renderAttackConditions } from './ui/conditionsForm';
 import { renderDefenderPanel } from './ui/defenderPanel';
 import { field, h, numberValue, select, setFieldError } from './ui/dom';
@@ -16,7 +17,7 @@ import { createResultsView } from './ui/results';
 import { openExportModal, openImportModal } from './ui/shareModal';
 import { UnitPicker } from './ui/unitPicker';
 import { UnitsPanel } from './ui/unitsPanel';
-import { hasErrors, validateAbilities, validateDefender, validateIterations, validateLoadoutRow } from './ui/validation';
+import { hasErrors, validateAbilities, validateAttackerModels, validateDefender, validateIterations, validateLoadoutRow } from './ui/validation';
 
 const OPTIMISE_DEBOUNCE_MS = 200;
 
@@ -80,6 +81,16 @@ function attackerWeapons(): WeaponProfile[] {
   });
 }
 
+/**
+ * Engine input for the mortal wounds the attacker's active abilities inflict before the attacks:
+ * one D6 per model of the unit, plus one for an attached leader.
+ */
+function attackerMortals(): MortalWoundSource[] {
+  if (!attackingUnit()) return [];
+  const dice = state.attacker.models + (state.attacker.leaderId !== null ? 1 : 0);
+  return mortalWoundSources(attackAbilities().map((a) => a.ability), abilityContext(), dice);
+}
+
 /** The first ability of the attack that is invalid (only from a bad save or import), with whose it is. */
 function invalidAbility(): string | undefined {
   const bySource = new Map<string, SourcedAbility[]>();
@@ -103,6 +114,7 @@ function blockedReason(): string {
   if (unit.weapons.length === 0) return 'Give the attacking unit weapons under ☰ → Units to simulate.';
   if (carried().length === 0) return 'Tick the weapons the attacking unit carries to simulate.';
   if (!carriedValid()) return 'Fix the highlighted weapons to simulate.';
+  if (validateAttackerModels(state.attacker.models) !== undefined) return 'Fix the attacker’s Models to simulate.';
   const badAbilities = invalidAbility();
   if (badAbilities !== undefined) return `Fix the abilities of ${badAbilities} under ☰ → Units to simulate.`;
   if (!defendingUnit()) return 'Pick a defending unit to simulate.';
@@ -141,6 +153,7 @@ function onUnitsChanged(): void {
   pruneToggles(state.toggles, [...state.armies, ...state.units].flatMap((x) => x.abilities));
   if (pruneBanners(banners, state.units.map((u) => u.id))) saveBanners(banners);
   attackerPicker.render();
+  attackerModels.render();
   defenderPicker.render();
   loadoutRows.render();
   defenderPanel.render();
@@ -160,7 +173,8 @@ function runOptimise(): void {
   if (carried().length < 2) return setOptimiseState('single');
   if (blockedReason() !== '') return setOptimiseState('invalid');
   // Resolved index i is carried row i.
-  lastOptimise = optimiseOrder(attackerWeapons(), defenderOf(defendingUnit()!, state.defender.models));
+  // Mortal wounds always come first and aren't reordered.
+  lastOptimise = optimiseOrder(attackerWeapons(), defenderOf(defendingUnit()!, state.defender.models), undefined, attackerMortals());
   setOptimiseState('ready');
 }
 
@@ -228,11 +242,12 @@ function runSimulation(): void {
   // Let the status paint before the (synchronous) simulation blocks the thread.
   window.setTimeout(() => {
     const weapons = attackerWeapons();
+    const mortals = attackerMortals();
     const defender = defenderOf(defendingUnit()!, state.defender.models);
     const started = performance.now();
-    const result = simulate(weapons, defender, state.iterations);
+    const result = simulate(weapons, defender, state.iterations, undefined, mortals);
     const ms = Math.round(performance.now() - started);
-    results.show(result, weapons, defender);
+    results.show(result, weapons, defender, mortals);
     hasResults = true;
     simulateButton.disabled = false;
     runStatus.textContent = `${state.iterations.toLocaleString()} runs in ${ms.toLocaleString()} ms.`;
@@ -240,6 +255,9 @@ function runSimulation(): void {
 }
 
 // ---------- Attacker ----------
+
+// The unit's size, at the end of the picker row. It stays when another unit is picked (like the defender's).
+const attackerModels = renderAttackerModels(state.attacker, onInputsChanged);
 
 const attackerPicker = new UnitPicker({
   idPrefix: 'attacker',
@@ -266,10 +284,12 @@ const attackerPicker = new UnitPicker({
     selected: () => state.attacker.leaderId,
     onChange: (leaderId) => {
       state.attacker.leaderId = leaderId;
+      attackerModels.render();
       loadoutRows.refreshStats();
       onInputsChanged();
     },
   },
+  extra: [attackerModels.field, attackerModels.hint],
 });
 // The picked units' banner images, faintly behind each panel's heading and Army / Unit pickers
 // (not the conditions, weapons or defender stats).
@@ -296,6 +316,7 @@ function pickAttacker(unitId: string | null): void {
   state.attacker.unitId = unit?.id ?? null;
   state.attacker.leaderId = null;
   state.attacker.rows = unit ? newLoadout(unit) : [];
+  attackerModels.render();
   loadoutRows.render();
 }
 

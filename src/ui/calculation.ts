@@ -1,4 +1,4 @@
-import type { Breakdown, DiceTerm, RollBreakdown, WeaponBreakdown } from '../engine/breakdown';
+import type { Breakdown, DiceTerm, MortalBreakdown, RollBreakdown, WeaponBreakdown } from '../engine/breakdown';
 import { KEYWORD_NAMES, type DefenderProfile } from '../types';
 import { h } from './dom';
 
@@ -107,7 +107,8 @@ export function defenderLine(defender: DefenderProfile): string {
   return parts.join(' · ');
 }
 
-export function weaponCalc(b: WeaponBreakdown, index: number, defender: DefenderProfile): WeaponCalc {
+/** `afterOthers`: weapons or mortal wounds resolved before this weapon (the defender may be weakened). */
+export function weaponCalc(b: WeaponBreakdown, index: number, defender: DefenderProfile, afterOthers = index > 0): WeaponCalc {
   const w = b.weapon;
   const lines: CalcLine[] = [];
   const notes = (...items: (string | null)[]) => items.filter((n): n is string => n !== null);
@@ -185,7 +186,7 @@ export function weaponCalc(b: WeaponBreakdown, index: number, defender: Defender
     formula: `${num(b.damage)} − ${num(Math.max(0, b.damage - b.applied))} lost`,
     value: fixed(b.applied),
     notes: [
-      `Damage beyond a model's remaining wounds (${defender.wounds} W each) is lost, as is damage after the whole unit is destroyed. Worked out exactly over every possible roll${index > 0 ? ', starting from what the weapons before left behind (a partly wounded model carries over)' : ''}.`,
+      `Damage beyond a model's remaining wounds (${defender.wounds} W each) is lost, as is damage after the whole unit is destroyed. Worked out exactly over every possible roll${afterOthers ? ', starting from what was resolved before it left behind (a partly wounded model carries over)' : ''}.`,
     ],
   });
   lines.push({
@@ -198,11 +199,54 @@ export function weaponCalc(b: WeaponBreakdown, index: number, defender: Defender
   return { title: weaponTitle(b, index), statLine: weaponStatLine(b), lines };
 }
 
+/**
+ * A mortal wound source worked out, in the same shape as a weapon:
+ * `11 D6 × 3/6 = 5.5 successes`, `5.5 × 1 = 5.5 mortal wounds`, then applied and destroyed.
+ */
+export function mortalCalc(m: MortalBreakdown, defender: DefenderProfile, isFirst: boolean): WeaponCalc {
+  const perSuccessIsDice = m.perSuccessExpr !== num(m.perSuccessMean);
+  const lines: CalcLine[] = [
+    {
+      step: 'Successes',
+      formula: `${m.dice} D6 × ${chance(m.chance)}`,
+      value: fixed(m.successes),
+      notes: [`One D6 per model (an attached leader adds one); each roll of ${m.on}+ succeeds.`],
+    },
+    {
+      step: 'Mortal',
+      formula: `${num(m.successes)} × ${num(m.perSuccessMean)}`,
+      value: fixed(m.mortalWounds),
+      notes: [
+        `Each success inflicts ${m.perSuccessExpr}${perSuccessIsDice ? ` (avg ${num(m.perSuccessMean)})` : ''} mortal wound${m.perSuccessExpr === '1' ? '' : 's'}. Mortal wounds skip the hit, wound and save rolls (armour and invulnerable), and each one removes 1 wound.`,
+      ],
+    },
+    {
+      step: 'Applied',
+      formula: `${num(m.mortalWounds)} − ${num(Math.max(0, m.mortalWounds - m.applied))} lost`,
+      value: fixed(m.applied),
+      notes: [
+        `Only damage after the whole unit is destroyed is lost. Worked out exactly over every possible roll${isFirst ? '' : ', after the mortal wounds before'}; they resolve before every weapon.`,
+      ],
+    },
+    {
+      step: 'Destroyed',
+      formula: 'exact',
+      value: fixed(m.destroyed),
+      notes: [`Models destroyed on average (${defender.wounds} W each), over every possible roll.`],
+    },
+  ];
+  return { title: `${m.source.name} (mortal wounds)`, statLine: `${m.dice} D6, each ${m.on}+: ${m.perSuccessExpr} MW`, lines };
+}
+
+/** Every block of the calculation in order: the mortal wound sources, then the weapons. */
+function allCalcs(calc: Breakdown, defender: DefenderProfile): WeaponCalc[] {
+  return [...calc.mortals.map((m, i) => mortalCalc(m, defender, i === 0)), ...calc.weapons.map((b, i) => weaponCalc(b, i, defender, i > 0 || calc.mortals.length > 0))];
+}
+
 /** The whole calculation as plain text, for copying. */
 export function calculationText(calc: Breakdown, defender: DefenderProfile): string {
   const out = [`Against ${defenderLine(defender)}`, ''];
-  calc.weapons.forEach((b, i) => {
-    const wc = weaponCalc(b, i, defender);
+  allCalcs(calc, defender).forEach((wc) => {
     out.push(`${wc.title} (${wc.statLine})`);
     for (const line of wc.lines) {
       out.push(`  ${line.step.padEnd(10)}${line.formula} = ${line.value}`);
@@ -216,8 +260,7 @@ export function calculationText(calc: Breakdown, defender: DefenderProfile): str
 
 /** The "Show the calculation" content: one block per weapon, then the exact totals. */
 export function renderCalculation(calc: Breakdown, defender: DefenderProfile): HTMLElement {
-  const blocks = calc.weapons.map((b, i) => {
-    const wc = weaponCalc(b, i, defender);
+  const blocks = allCalcs(calc, defender).map((wc) => {
     const rows = wc.lines.flatMap((line) => [
       h('span', { class: 'calc-step' }, line.step),
       h('span', { class: 'calc-formula' }, line.formula),

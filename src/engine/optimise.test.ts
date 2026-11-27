@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { exactResult } from './exact';
 import { MAX_EXHAUSTIVE_WEAPONS, optimiseOrder } from './optimise';
-import { boltRifles, defender, gravis, heavyBolter, lascannon, multiMelta, plasma, weapon } from './testFixtures';
+import { boltRifles, defender, gravis, heavyBolter, lascannon, mortal, multiMelta, plasma, weapon } from './testFixtures';
 
 describe('optimiseOrder', () => {
   it('puts the lascannon first so bolt rifles and heavy bolter finish wounded models', () => {
@@ -53,5 +53,21 @@ describe('optimiseOrder', () => {
     expect(result.method).toBe('greedy');
     expect(result.gain).toBeGreaterThanOrEqual(0);
     expect([...result.bestOrder].sort((a, b) => a - b)).toEqual(many.map((_, i) => i));
+  });
+});
+
+describe('optimiseOrder with mortal wounds', () => {
+  it('starts from the state the mortal wounds leave behind and only reorders the weapons', () => {
+    const weapons = [boltRifles, lascannon, heavyBolter];
+    const mortals = [mortal('Hammer of Wrath', 5, 4, '1')];
+    const result = optimiseOrder(weapons, gravis, undefined, mortals);
+    expect([...result.bestOrder].sort()).toEqual([0, 1, 2]);
+    expect(result.current.expectedModelsDestroyed).toBeCloseTo(exactResult(weapons, gravis, mortals).expectedModelsDestroyed, 10);
+    const best = exactResult(
+      result.bestOrder.map((i) => weapons[i]),
+      gravis,
+      mortals,
+    );
+    expect(result.best.expectedModelsDestroyed).toBeCloseTo(best.expectedModelsDestroyed, 10);
   });
 });

@@ -1,6 +1,6 @@
-import type { DefenderProfile, RerollKind, WeaponProfile } from '../types';
-import { formatDiceSum, meanValue, type DiceExpr } from './dice';
-import { applyWeapon, evaluateState, initialState, weaponKernel } from './exact';
+import type { DefenderProfile, MortalWoundSource, RerollKind, WeaponProfile } from '../types';
+import { formatDiceSum, meanValue, parseDice, type DiceExpr } from './dice';
+import { applyWeapon, evaluateState, initialState, mortalKernel, weaponKernel } from './exact';
 import {
   attacksPerModel,
   createAttackContext,
@@ -113,7 +113,28 @@ export interface WeaponBreakdown {
   destroyed: number;
 }
 
+/** A mortal wound source worked out: dice × P(success) × mortal wounds per success. */
+export interface MortalBreakdown {
+  source: MortalWoundSource;
+  dice: number;
+  on: number;
+  /** P(a die rolls `on`+). */
+  chance: number;
+  successes: number;
+  /** The perSuccess expression as written ("1", "D3"), and its average. */
+  perSuccessExpr: string;
+  perSuccessMean: number;
+  /** successes × perSuccessMean, before damage beyond the unit is lost. */
+  mortalWounds: number;
+  /** Exact expected damage applied, given the sources before it. */
+  applied: number;
+  /** Exact expected models destroyed, given the sources before it. */
+  destroyed: number;
+}
+
 export interface Breakdown {
+  /** Mortal wound sources, resolved before the weapons. */
+  mortals: MortalBreakdown[];
   weapons: WeaponBreakdown[];
   appliedTotal: number;
   destroyedTotal: number;
@@ -231,10 +252,35 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
   };
 }
 
-/** The worked-out expectation of every weapon in firing order, with the exact damage each one applies. */
-export function breakdown(weapons: WeaponProfile[], defender: DefenderProfile): Breakdown {
+/**
+ * The worked-out expectation of every mortal wound source and then every weapon in firing order,
+ * with the exact damage each one applies (the weapons' given what the mortal wounds left behind).
+ */
+export function breakdown(weapons: WeaponProfile[], defender: DefenderProfile, mortals: MortalWoundSource[] = []): Breakdown {
   let state = initialState(defender);
   let before = evaluateState(state, defender);
+  const mortalOut: MortalBreakdown[] = [];
+  for (const source of mortals) {
+    state = applyWeapon(state, mortalKernel(source, defender), defender);
+    const after = evaluateState(state, defender);
+    const chance = Math.max(0, Math.min(1, (7 - source.on) / 6));
+    const successes = source.dice * chance;
+    const perSuccess = parseDice(source.perSuccess);
+    const perSuccessMean = meanValue(perSuccess);
+    mortalOut.push({
+      source,
+      dice: source.dice,
+      on: source.on,
+      chance,
+      successes,
+      perSuccessExpr: formatDiceSum([perSuccess]),
+      perSuccessMean,
+      mortalWounds: successes * perSuccessMean,
+      applied: after.expectedDamage - before.expectedDamage,
+      destroyed: after.expectedModelsDestroyed - before.expectedModelsDestroyed,
+    });
+    before = after;
+  }
   const out: WeaponBreakdown[] = [];
   for (const weapon of weapons) {
     state = applyWeapon(state, weaponKernel(weapon, defender), defender);
@@ -246,5 +292,5 @@ export function breakdown(weapons: WeaponProfile[], defender: DefenderProfile): 
     });
     before = after;
   }
-  return { weapons: out, appliedTotal: before.expectedDamage, destroyedTotal: before.expectedModelsDestroyed };
+  return { mortals: mortalOut, weapons: out, appliedTotal: before.expectedDamage, destroyedTotal: before.expectedModelsDestroyed };
 }

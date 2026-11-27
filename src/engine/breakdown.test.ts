@@ -4,7 +4,7 @@ import { exactResult } from './exact';
 import { mulberry32 } from './rng';
 import { createAttackContext, unsavedPerAttack } from './rules';
 import { simulate } from './simulate';
-import { boltRifles, defender, gravis, heavyBolter, lascannon, weapon } from './testFixtures';
+import { boltRifles, defender, gravis, heavyBolter, lascannon, mortal, weapon } from './testFixtures';
 
 const withAbilities = [
   weapon('Sustained lethal', 5, 'D6', 3, 4, -1, '1', { sustainedHits: 'D3', lethalHits: true }),
@@ -104,5 +104,33 @@ describe('breakdown', () => {
     expect(b.weapons.reduce((total, w) => total + w.applied, 0)).toBeCloseTo(exact.expectedDamage, 10);
     expect(b.weapons.reduce((total, w) => total + w.destroyed, 0)).toBeCloseTo(exact.expectedModelsDestroyed, 10);
     for (const w of b.weapons) expect(w.applied).toBeLessThanOrEqual(w.damage + 1e-9);
+  });
+});
+
+describe('breakdown with mortal wounds', () => {
+  it('works out the mortal wounds first, and the weapons from the weakened unit', () => {
+    const mortals = [mortal('Hammer of Wrath', 11, 4, 'D3')];
+    const calc = breakdown([boltRifles, lascannon], target, mortals);
+    expect(calc.mortals).toHaveLength(1);
+    const m = calc.mortals[0];
+    expect(m.dice).toBe(11);
+    expect(m.chance).toBeCloseTo(3 / 6, 12);
+    expect(m.successes).toBeCloseTo(5.5, 12);
+    expect(m.perSuccessExpr).toBe('D3');
+    expect(m.perSuccessMean).toBe(2);
+    expect(m.mortalWounds).toBeCloseTo(11, 12);
+    expect(m.applied).toBeLessThanOrEqual(m.mortalWounds);
+
+    const exact = exactResult([boltRifles, lascannon], target, mortals);
+    expect(calc.appliedTotal).toBeCloseTo(exact.expectedDamage, 10);
+    expect(calc.destroyedTotal).toBeCloseTo(exact.expectedModelsDestroyed, 10);
+    const sumDestroyed = m.destroyed + calc.weapons.reduce((sum, b) => sum + b.destroyed, 0);
+    expect(sumDestroyed).toBeCloseTo(exact.expectedModelsDestroyed, 10);
+    // The weapons apply less than they would to a fresh unit.
+    expect(calc.weapons[0].applied).toBeLessThan(breakdown([boltRifles], target).weapons[0].applied + 1e-12);
+  });
+
+  it('has no mortal wound blocks without sources', () => {
+    expect(breakdown([boltRifles], target).mortals).toEqual([]);
   });
 });

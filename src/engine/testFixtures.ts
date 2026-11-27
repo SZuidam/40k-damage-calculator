@@ -1,4 +1,4 @@
-import { noAbilities, noConditions, noModifiers, type AttackConditions, type DefenderKeyword, type DefenderProfile, type RollModifiers, type WeaponAbilities, type WeaponProfile } from '../types';
+import { noAbilities, noConditions, noModifiers, type AttackConditions, type DefenderKeyword, type DefenderProfile, type MortalWoundSource, type RollModifiers, type WeaponAbilities, type WeaponProfile } from '../types';
 
 export function weapon(
   name: string,
@@ -27,3 +27,8 @@ export const plasma = weapon('Plasma guns', 2, '1', 3, 7, -2, '2');
 
 /** 5 Space Marine-like models with 3 wounds each. */
 export const gravis = defender(5, 4, 3, 3);
+
+/** A mortal wound source: `dice` D6, each `on`+ inflicts `perSuccess` mortal wounds. */
+export function mortal(name: string, dice: number, on: number, perSuccess: string): MortalWoundSource {
+  return { id: name, name, dice, on, perSuccess };
+}

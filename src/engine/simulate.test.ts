@@ -3,7 +3,7 @@ import type { DefenderProfile, WeaponProfile } from '../types';
 import { exactResult } from './exact';
 import { mulberry32 } from './rng';
 import { atLeast, simulate } from './simulate';
-import { boltRifles, defender, gravis, heavyBolter, lascannon, multiMelta, plasma, weapon } from './testFixtures';
+import { boltRifles, defender, gravis, heavyBolter, lascannon, mortal, multiMelta, plasma, weapon } from './testFixtures';
 
 const ITERATIONS = 100_000;
 
@@ -246,5 +246,47 @@ describe('Torrent and damage re-rolls', () => {
 describe('atLeast', () => {
   it('turns exact probabilities into cumulative tails', () => {
     expect(atLeast([0.25, 0.5, 0.25])).toEqual([1, 0.75, 0.25]);
+  });
+});
+
+describe('mortal wounds', () => {
+  it('matches the exact engine, mortal wounds first and then the weapons', () => {
+    const target = defender(10, 4, 3, 2);
+    const mortals = [mortal('Hammer of Wrath', 10, 4, 'D3')];
+    const sim = simulate([boltRifles], target, ITERATIONS, mulberry32(11), mortals);
+    const exact = exactResult([boltRifles], target, mortals);
+    expectClose(sim.total.modelsDestroyed, exact.expectedModelsDestroyed);
+    expectClose(sim.total.damage, exact.expectedDamage);
+    sim.killDistribution.forEach((p, k) => expect(Math.abs(p - exact.killDistribution[k])).toBeLessThan(0.01));
+  });
+
+  it('puts the mortal wound rows first, with no attacks or hits', () => {
+    const sim = simulate([boltRifles], defender(20, 4, 3, 1), ITERATIONS, mulberry32(3), [mortal('Hammer of Wrath', 10, 4, '1')]);
+    expect(sim.perWeapon.map((p) => [p.name, p.kind])).toEqual([
+      ['Hammer of Wrath', 'mortal'],
+      ['Bolt rifles', 'weapon'],
+    ]);
+    const mw = sim.perWeapon[0].stats;
+    expect(mw.attacks).toBe(0);
+    expect(mw.hits).toBe(0);
+    expectClose(mw.wounds, 5);
+    expect(mw.unsaved).toBe(mw.wounds);
+    // 20 one-wound models: every mortal wound destroys one.
+    expectClose(mw.damage, 5);
+    expectClose(mw.modelsDestroyed, 5);
+  });
+
+  it('stops applying mortal wounds once every model is destroyed, but keeps counting them', () => {
+    const sim = simulate([], defender(2, 4, 3, 1), 2_000, mulberry32(5), [mortal('Overkill', 20, 2, '1')]);
+    expect(sim.total.modelsDestroyed).toBeLessThanOrEqual(2);
+    expect(sim.total.damage).toBeLessThanOrEqual(2);
+    expect(sim.perWeapon[0].stats.wounds).toBeGreaterThan(10);
+  });
+
+  it('leaves fewer models for the weapons after them', () => {
+    const target = defender(5, 4, 3, 1);
+    const withMortals = simulate([boltRifles], target, ITERATIONS, mulberry32(9), [mortal('MW', 6, 2, '1')]);
+    const alone = simulate([boltRifles], target, ITERATIONS, mulberry32(9));
+    expect(withMortals.perWeapon[1].stats.modelsDestroyed).toBeLessThan(alone.perWeapon[0].stats.modelsDestroyed);
   });
 });

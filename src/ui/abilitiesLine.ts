@@ -1,4 +1,4 @@
-import { abilityNeeds, abilitySummary, conditionName, type AbilityContext, type SourcedAbility } from '../state/unitAbilities';
+import { abilityNeeds, abilitySummary, conditionName, isUnitLevelOnly, type AbilityContext, type SourcedAbility } from '../state/unitAbilities';
 import { KEYWORD_NAMES, WEAPON_TYPE_NAMES, type WeaponType } from '../types';
 import { h } from './dom';
 import { markupToText } from './markup';
@@ -13,7 +13,8 @@ export interface AbilityStatus {
 /**
  * The status of `sourced` for the attack: active when it is switched on (if it is switched on by
  * hand), every built-in condition it needs is on, the target has the keyword it needs and at
- * least one ticked weapon is of its weapon type.
+ * least one ticked weapon is of its weapon type. An ability that only inflicts mortal wounds
+ * doesn't need a weapon: it is rolled for the unit.
  */
 export function abilityStatus(sourced: SourcedAbility, carriedTypes: readonly WeaponType[], ctx: AbilityContext): AbilityStatus {
   const { when } = sourced.ability;
@@ -21,6 +22,7 @@ export function abilityStatus(sourced: SourcedAbility, carriedTypes: readonly We
   if (needs.toggle) return { active: false, reason: 'Switched off' };
   if (needs.conditions.length > 0) return { active: false, reason: `Needs: ${needs.conditions.map(conditionName).join(', ')}` };
   if (needs.targetKeyword && when.targetKeyword !== null) return { active: false, reason: `Needs a ${KEYWORD_NAMES[when.targetKeyword]} target` };
+  if (isUnitLevelOnly(sourced.ability)) return { active: true, reason: '' };
   if (when.weaponType !== 'any' && !carriedTypes.includes(when.weaponType)) return { active: false, reason: `No ${WEAPON_TYPE_NAMES[when.weaponType].toLowerCase()} weapon ticked` };
   if (when.weaponType === 'any' && carriedTypes.length === 0) return { active: false, reason: 'No weapon ticked' };
   return { active: true, reason: '' };

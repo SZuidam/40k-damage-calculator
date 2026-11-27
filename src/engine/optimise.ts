@@ -1,5 +1,5 @@
-import type { DefenderProfile, WeaponProfile } from '../types';
-import { applyWeapon, evaluateState, initialState, weaponKernel, type StateVector, type WeaponKernel } from './exact';
+import type { DefenderProfile, MortalWoundSource, WeaponProfile } from '../types';
+import { applyWeapon, evaluateState, initialState, mortalKernel, weaponKernel, type StateVector, type WeaponKernel } from './exact';
 
 export interface OrderScore {
   expectedModelsDestroyed: number;
@@ -41,14 +41,19 @@ function score(state: StateVector, defender: DefenderProfile): OrderScore {
  * expected damage). Every permutation is evaluated with the exact engine for up
  * to MAX_EXHAUSTIVE_WEAPONS weapons, sharing work between orders with the same
  * prefix; longer lists fall back to a greedy pick-the-best-next heuristic.
+ *
+ * `mortals` always resolve first and are never reordered: the search starts from the state
+ * they leave behind, and the indices in `bestOrder` refer to `weapons` only.
  */
 export function optimiseOrder(
   weapons: WeaponProfile[],
   defender: DefenderProfile,
   threshold = DEFAULT_GAIN_THRESHOLD,
+  mortals: MortalWoundSource[] = [],
 ): OptimiseResult {
   const kernels = weapons.map((w) => weaponKernel(w, defender));
-  const start = initialState(defender);
+  let start = initialState(defender);
+  for (const source of mortals) start = applyWeapon(start, mortalKernel(source, defender), defender);
 
   let state = start;
   for (const kernel of kernels) state = applyWeapon(state, kernel, defender);

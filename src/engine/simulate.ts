@@ -1,5 +1,5 @@
-import { emptyStats, type DefenderProfile, type SimulationResult, type StepStats, type WeaponProfile } from '../types';
-import { rollDice, rollDiceSum } from './dice';
+import { emptyStats, type DefenderProfile, type MortalWoundSource, type SimulationResult, type StepStats, type WeaponProfile } from '../types';
+import { parseDice, rollDice, rollDiceSum } from './dice';
 import { d6, defaultRng, type Rng } from './rng';
 import { attacksPerModel, createAttackContext, hitSucceeds, isCriticalHit, isCriticalWound, isRerolled, rollDamage, saveSucceeds, woundSucceeds } from './rules';
 
@@ -8,20 +8,45 @@ import { attacksPerModel, createAttackContext, hitSucceeds, isCriticalHit, isCri
  * order; a partially wounded defender model carries over to the next weapon.
  * Once every defender model is destroyed, further damage is not applied, but
  * hits / wounds / unsaved wounds keep being counted.
+ *
+ * `mortals` resolve first, before every weapon: per source `dice` D6, each `on`+ inflicts
+ * `perSuccess` mortal wounds, and each mortal wound removes 1 wound (no save of any kind).
  */
 export function simulate(
   weapons: WeaponProfile[],
   defender: DefenderProfile,
   iterations: number,
   rng: Rng = defaultRng,
+  mortals: MortalWoundSource[] = [],
 ): SimulationResult {
   const contexts = weapons.map((w) => createAttackContext(w, defender));
   const sums: StepStats[] = weapons.map(() => emptyStats());
+  const mortalDice = mortals.map((m) => parseDice(m.perSuccess));
+  const mortalSums: StepStats[] = mortals.map(() => emptyStats());
   const histogram = new Array<number>(defender.models + 1).fill(0);
 
   for (let it = 0; it < iterations; it++) {
     let modelsLeft = defender.models;
     let woundsLeft = defender.wounds;
+
+    // Mortal wounds: no hit, wound or save roll; each one removes 1 wound.
+    for (let mi = 0; mi < mortals.length; mi++) {
+      const source = mortals[mi];
+      const s = mortalSums[mi];
+      let inflicted = 0;
+      for (let d = 0; d < source.dice; d++) if (d6(rng) >= source.on) inflicted += rollDice(mortalDice[mi], rng);
+      s.wounds += inflicted;
+      s.unsaved += inflicted;
+      for (let k = 0; k < inflicted && modelsLeft > 0; k++) {
+        s.damage++;
+        woundsLeft--;
+        if (woundsLeft === 0) {
+          s.modelsDestroyed++;
+          modelsLeft--;
+          woundsLeft = defender.wounds;
+        }
+      }
+    }
 
     for (let wi = 0; wi < contexts.length; wi++) {
       const ctx = contexts[wi];
@@ -81,7 +106,10 @@ export function simulate(
     histogram[defender.models - modelsLeft]++;
   }
 
-  const perWeapon = weapons.map((w, i) => ({ id: w.id, name: w.name, stats: scale(sums[i], 1 / iterations) }));
+  const perWeapon = [
+    ...mortals.map((m, i) => ({ id: m.id, name: m.name, kind: 'mortal' as const, stats: scale(mortalSums[i], 1 / iterations) })),
+    ...weapons.map((w, i) => ({ id: w.id, name: w.name, kind: 'weapon' as const, stats: scale(sums[i], 1 / iterations) })),
+  ];
   const total = perWeapon.reduce((acc, p) => add(acc, p.stats), emptyStats());
   const killDistribution = histogram.map((count) => count / iterations);
 

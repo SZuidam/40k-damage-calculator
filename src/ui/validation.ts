@@ -9,6 +9,8 @@ export const LIMITS = {
   strength: { min: 1, max: 30 },
   ap: { min: -6, max: 0 },
   defenderModels: { min: 1, max: 40 },
+  /** The attacking unit's models (without an attached leader): the D6 rolled for "per model" abilities. */
+  attackerModels: { min: 1, max: 40 },
   toughness: { min: 1, max: 20 },
   wounds: { min: 1, max: 40 },
   /** Highest possible roll of X for Sustained Hits X / Blast X / Cleave X / Rapid Fire X / Melta X (2D6, D6+6). */
@@ -104,6 +106,11 @@ export function validateLoadoutRow(count: number, weapon: WeaponStats): LoadoutR
   return prune(errors);
 }
 
+/** The Models field of the attacker. */
+export function validateAttackerModels(models: number): string | undefined {
+  return intInRange(models, LIMITS.attackerModels, 'Models');
+}
+
 export function validateDefender(d: DefenderProfile): FieldErrors<DefenderProfile> {
   const errors: FieldErrors<DefenderProfile> = {
     models: intInRange(d.models, LIMITS.defenderModels, 'Models'),
@@ -192,7 +199,18 @@ export function effectError(e: AbilityEffect): string | undefined {
       return undefined;
     case 'grant':
       return activeAbilities(e.abilities).length === 0 ? 'Pick at least one weapon ability to gain' : abilityError(e.abilities);
+    case 'mortalWounds':
+      return mortalWoundsError(e.on, e.perSuccess);
   }
+}
+
+/** "Inflict mortal wounds": a D6 threshold of 2+ to 6+ and mortal wounds per success as dice (at most LIMITS.abilityValue.max). */
+function mortalWoundsError(on: number, perSuccess: string): string | undefined {
+  if (!(Number.isInteger(on) && on >= 2 && on <= 6)) return 'Mortal wounds: the roll must be 2+ to 6+';
+  const parsed = tryParseDice(perSuccess);
+  if (!parsed) return 'Mortal wounds per success must be a number or dice like D3';
+  const max = LIMITS.abilityValue.max;
+  return maxValue(parsed) > max ? `Mortal wounds per success can roll at most ${max}` : undefined;
 }
 
 /** The first problem with a list of abilities (a unit's or an army's): an invalid ability, or two with the same name. */

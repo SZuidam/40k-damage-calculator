@@ -1,5 +1,5 @@
-import type { DefenderProfile, WeaponProfile } from '../types';
-import { convolve, diceSumDistribution } from './dice';
+import type { DefenderProfile, MortalWoundSource, WeaponProfile } from '../types';
+import { convolve, diceDistribution, diceSumDistribution, parseDice } from './dice';
 import { attacksPerModel, createAttackContext, damageDistribution, unsavedDistribution } from './rules';
 
 /**
@@ -60,6 +60,33 @@ export function weaponKernel(weapon: WeaponProfile, defender: DefenderProfile): 
   for (let k = unsaved.length - 1; k >= 0; k--) tail[k] = tail[k + 1] + unsaved[k];
 
   return { unsaved, tail, damage: damageDistribution(ctx) };
+}
+
+/**
+ * A mortal wound source as a kernel: every mortal wound is one "unsaved wound" of damage 1, so
+ * it flows through applyWeapon like a weapon. Successes ~ Binomial(dice, P(D6 ≥ on)), each
+ * success inflicting `perSuccess` mortal wounds; counts at or above the cap are lumped together.
+ */
+export function mortalKernel(source: MortalWoundSource, defender: DefenderProfile): WeaponKernel {
+  const cap = defender.models * defender.wounds;
+  const p = (7 - source.on) / 6;
+  let successes = [1];
+  for (let i = 0; i < source.dice; i++) successes = convolve(successes, [1 - p, p]);
+  const perSuccess = diceDistribution(parseDice(source.perSuccess));
+
+  let unsaved = [0];
+  let row = [1];
+  for (let n = 0; n < successes.length; n++) {
+    if (n > 0) row = convolveCapped(row, perSuccess, cap);
+    if (successes[n] === 0) continue;
+    if (row.length > unsaved.length) unsaved = [...unsaved, ...new Array<number>(row.length - unsaved.length).fill(0)];
+    for (let k = 0; k < row.length; k++) unsaved[k] += successes[n] * row[k];
+  }
+
+  const tail = new Array<number>(unsaved.length + 1).fill(0);
+  for (let k = unsaved.length - 1; k >= 0; k--) tail[k] = tail[k + 1] + unsaved[k];
+
+  return { unsaved, tail, damage: [0, 1] };
 }
 
 /** convolve(a, b) with every value at or above `cap` added into index `cap`. */
@@ -148,8 +175,10 @@ export function evaluateState(state: StateVector, defender: DefenderProfile): Ex
   return { expectedModelsDestroyed, expectedDamage, killDistribution };
 }
 
-export function exactResult(weapons: WeaponProfile[], defender: DefenderProfile): ExactResult {
+/** Exact result of `mortals` (first) and then `weapons` in order. */
+export function exactResult(weapons: WeaponProfile[], defender: DefenderProfile, mortals: MortalWoundSource[] = []): ExactResult {
   let state = initialState(defender);
+  for (const source of mortals) state = applyWeapon(state, mortalKernel(source, defender), defender);
   for (const weapon of weapons) state = applyWeapon(state, weaponKernel(weapon, defender), defender);
   return evaluateState(state, defender);
 }

@@ -27,6 +27,7 @@ const EFFECT_CHOICES: { value: string; label: string; create: () => AbilityEffec
   { value: 'reroll-wound', label: 'Re-roll wounds', create: () => ({ kind: 'reroll', roll: 'wound', which: 'ones' }), matches: (e) => e.kind === 'reroll' && e.roll === 'wound' },
   { value: 'reroll-damage', label: 'Re-roll damage', create: () => ({ kind: 'rerollDamage' }), matches: (e) => e.kind === 'rerollDamage' },
   { value: 'grant', label: 'Gain weapon abilities', create: emptyGrant, matches: (e) => e.kind === 'grant' },
+  { value: 'mortal-wounds', label: 'Inflict mortal wounds', create: () => ({ kind: 'mortalWounds', on: 4, perSuccess: '1' }), matches: (e) => e.kind === 'mortalWounds' },
 ];
 
 const AMOUNT_OPTIONS = [1, 2, 3, 4, 5, 6].map((v) => ({ value: v, label: `+${v}` }));
@@ -36,6 +37,7 @@ const MODIFIER_OPTIONS = [
   { value: -1, label: '-1' },
 ];
 const THRESHOLD_OPTIONS = [5, 4, 3, 2].map((v) => ({ value: v, label: `${v}+` }));
+const D6_OPTIONS = [6, 5, 4, 3, 2].map((v) => ({ value: v, label: `${v}+` }));
 const REROLL_OPTIONS = [
   { value: 'ones', label: 'of 1' },
   { value: 'failed', label: 'that failed' },
@@ -173,6 +175,30 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
             return [h('span', { class: 'effect-note', title: 'A D3 or D6 damage roll below its threshold under ☰ → Settings is re-rolled once.' }, 'below the Settings threshold')];
           case 'grant':
             return [];
+          case 'mortalWounds': {
+            const perSuccess = h('input', {
+              id: id(`effect-${i}-per-success`),
+              type: 'text',
+              class: 'effect-dice',
+              value: e.perSuccess,
+              autocomplete: 'off',
+              spellcheck: false,
+              'aria-label': 'Mortal wounds per success',
+              title: 'Mortal wounds per success: a number or dice like D3',
+            });
+            perSuccess.addEventListener('input', () => {
+              e.perSuccess = perSuccess.value.trim();
+              validate();
+            });
+            const on = numberSelect('Each D6 of', D6_OPTIONS, e.on, (v) => (e.on = Number(v)), i);
+            on.classList.add('effect-value--short');
+            return [
+              h('span', { class: 'effect-note effect-note--nowrap' }, 'D6 per model, each'),
+              on,
+              perSuccess,
+              h('span', { class: 'effect-note' }, 'MW'),
+            ];
+          }
         }
       };
 
@@ -197,7 +223,8 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
               validate();
               (effectList.querySelector<HTMLSelectElement>('.effect-kind') ?? addEffect).focus();
             });
-            const row = h('li', { class: 'effect-row' }, h('div', { class: 'effect-line' }, kind, ...effectFields(effect, i), remove));
+            const line = h('div', { class: `effect-line${effect.kind === 'mortalWounds' ? ' effect-line--wrap' : ''}` }, kind, ...effectFields(effect, i), remove);
+            const row = h('li', { class: 'effect-row' }, line);
             if (effect.kind === 'grant') {
               const editor = weaponAbilityEditor({
                 id: id(`effect-${i}-grant`),
@@ -215,9 +242,13 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
         addEffect.disabled = draft.effects.length >= MAX_EFFECTS;
       };
 
+      // Mortal wounds are unit-level: say so when the ability also filters by weapon type.
+      const mortalNote = h('p', { class: 'modal-hint effect-mortal-note', hidden: true }, 'Mortal wounds ignore the Weapons filter: they are rolled for the unit, before any weapon.');
+
       // ---------- validation ----------
       let nameTouched = initial !== undefined;
       const validate = () => {
+        mortalNote.hidden = draft.when.weaponType === 'any' || !draft.effects.some((e) => e.kind === 'mortalWounds');
         const result = validateAbility(draft, options.takenNames);
         const nameError = nameTouched ? result.name : undefined;
         setFieldError(name, nameError);
@@ -269,6 +300,7 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
           { class: 'ability-section', 'aria-labelledby': id('effects-title') },
           h('h3', { id: id('effects-title') }, 'Effects'),
           effectList,
+          mortalNote,
           h('div', { class: 'panel-actions-group' }, addEffect),
         ),
         errors,

@@ -131,6 +131,11 @@ export interface AttackerSelection {
    * leads, or null. Only its abilities count; its weapons don't fire.
    */
   leaderId: string | null;
+  /**
+   * The number of models in the unit (an attached leader not counted). Weapons keep their own
+   * per-row counts; this is what "per model" abilities roll for (an attached leader adds one).
+   */
+  models: number;
   /** One row per weapon of the unit, in firing order (empty without a unit). */
   rows: LoadoutRow[];
 }
@@ -214,6 +219,20 @@ export interface WeaponProfile {
   modifiers: RollModifiers;
 }
 
+/**
+ * Engine input: mortal wounds inflicted before the attacks: `dice` D6, each `on`+ inflicts
+ * `perSuccess` mortal wounds. A mortal wound skips hit, wound and save rolls and removes 1 wound.
+ */
+export interface MortalWoundSource {
+  id: string;
+  name: string;
+  dice: number;
+  /** 2–6. */
+  on: number;
+  /** Mortal wounds per success, as a dice expression ("1", "D3"). */
+  perSuccess: string;
+}
+
 export interface DefenderProfile {
   models: number;
   toughness: number;
@@ -261,7 +280,13 @@ export type AbilityEffect =
   /** Re-roll a damage roll below the Settings threshold for the weapon's dice (DamageRerollThresholds). */
   | { kind: 'rerollDamage' }
   /** The weapon gains these weapon abilities (only the ones set count). */
-  | { kind: 'grant'; abilities: WeaponAbilities };
+  | { kind: 'grant'; abilities: WeaponAbilities }
+  /**
+   * Inflict mortal wounds outside the attack sequence: roll one D6 per model of the attacking
+   * unit, each `on`+ (2–6) inflicts `perSuccess` (a dice expression) mortal wounds. Unit-level:
+   * it ignores the ability's weapon type, and the engine resolves it before every weapon.
+   */
+  | { kind: 'mortalWounds'; on: number; perSuccess: string };
 
 export type AbilityEffectKind = AbilityEffect['kind'];
 
@@ -323,7 +348,11 @@ export interface StepStats {
 export interface SimulationResult {
   iterations: number;
   total: StepStats;
-  perWeapon: { id: string; name: string; stats: StepStats }[];
+  /**
+   * Mortal wound sources first (kind 'mortal': attacks and hits are 0, wounds and unsaved are
+   * the mortal wounds inflicted), then the weapons in firing order.
+   */
+  perWeapon: { id: string; name: string; kind: 'weapon' | 'mortal'; stats: StepStats }[];
   /** killDistribution[k] = P(exactly k models destroyed), k = 0..defender.models. */
   killDistribution: number[];
   /** killAtLeast[k] = P(at least k models destroyed), k = 0..defender.models. */
