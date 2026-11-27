@@ -300,7 +300,16 @@ export type AbilityEffect =
    * unit, each `on`+ (2–6) inflicts `perSuccess` (a dice expression) mortal wounds. Unit-level:
    * it ignores the ability's weapon type, and the engine resolves it before every weapon.
    */
-  | { kind: 'mortalWounds'; on: number; perSuccess: string };
+  | { kind: 'mortalWounds'; on: number; perSuccess: string }
+  /**
+   * Defensive: subtract 1 from the wound roll of attacks against this unit, while it is the
+   * defender. With `strongerOnly`, only for attacks whose Strength (after the attacker's
+   * abilities) is greater than this unit's Toughness. Ignored while the unit attacks.
+   */
+  | { kind: 'woundPenalty'; strongerOnly: boolean };
+
+/** The effect kinds that work while the unit defends (and do nothing while it attacks). */
+export const DEFENSIVE_EFFECT_KINDS: readonly AbilityEffect['kind'][] = ['woundPenalty'];
 
 export type AbilityEffectKind = AbilityEffect['kind'];
 
@@ -327,7 +336,7 @@ export interface UnitAbility {
 export interface Army {
   id: string;
   name: string;
-  /** Army rules: abilities every unit of the army has when it attacks. */
+  /** Army rules: abilities every unit of the army has when it attacks (or, for defensive effects, defends). */
   abilities: UnitAbility[];
 }
 

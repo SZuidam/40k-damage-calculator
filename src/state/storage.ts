@@ -395,6 +395,8 @@ export function toAbilityEffect(value: unknown): AbilityEffect | null {
       return isRecord(value.abilities) ? { kind: 'grant', abilities: toAbilities(value.abilities) } : null;
     case 'mortalWounds':
       return finite(value.on) && typeof value.perSuccess === 'string' ? { kind: 'mortalWounds', on: value.on, perSuccess: value.perSuccess } : null;
+    case 'woundPenalty':
+      return typeof value.strongerOnly === 'boolean' ? { kind: 'woundPenalty', strongerOnly: value.strongerOnly } : null;
     default:
       return null;
   }

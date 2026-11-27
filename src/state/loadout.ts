@@ -1,6 +1,6 @@
 import { noModifiers, type Army, type AttackConditions, type AttackerSelection, type DamageRerollThresholds, type DefenderKeyword, type DefenderProfile, type DefenderSelection, type LoadoutRow, type StoredWeapon, type Unit, type UnitAbility, type WeaponProfile } from '../types';
 import { byName, pickStats } from './presets';
-import { applyAbilities, canLead, isActive, type AbilityContext } from './unitAbilities';
+import { applyAbilities, applyDefensiveAbilities, canLead, isActive, type AbilityContext } from './unitAbilities';
 
 /** How many of a weapon a unit carries when it is first picked: units usually start at 5 models. */
 export const DEFAULT_WEAPON_COUNT = 5;
@@ -118,6 +118,16 @@ export interface LoadoutAbilities {
   keywords: readonly DefenderKeyword[] | null;
   /** The Settings thresholds for "Re-roll damage" (the defaults when left out). */
   damageRerolls?: DamageRerollThresholds;
+  /**
+   * The defending unit's abilities with a defensive effect (see defensiveAbilitiesFor) and its
+   * Toughness. Each is checked per weapon with isActive against the attacking unit's keywords.
+   */
+  defense?: { abilities: readonly UnitAbility[]; toughness: number };
+}
+
+/** The context for the defender's abilities: the same toggles and conditions, with the attacker as their "target". */
+export function defenseContext(ctx: AbilityContext, attacker: Unit): AbilityContext {
+  return { ...ctx, keywords: attacker.keywords };
 }
 
 /**
@@ -125,15 +135,21 @@ export interface LoadoutAbilities {
  * `count` models. The weapon id becomes the profile id (unique within the unit). Every profile
  * gets its own copy of the weapon and the attack conditions, and the abilities that are active
  * for it (by its type, the toggles and the target) folded in with applyAbilities. Abilities
- * limited to non-Monster / non-Vehicle targets are dropped against one (abilitiesAgainst).
+ * limited to non-Monster / non-Vehicle targets are dropped against one (abilitiesAgainst). Then
+ * the defender's defensive abilities active for it are folded in (applyDefensiveAbilities).
  */
 export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditions: AttackConditions, extra?: LoadoutAbilities): WeaponProfile[] {
   const ctx: AbilityContext = { conditions, toggles: extra?.toggles ?? [], keywords: extra?.keywords ?? null };
+  const defenseCtx = defenseContext(ctx, unit);
   return carriedWeapons(unit, rows).map(({ row, weapon }) => {
     const profile: WeaponProfile = { ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions }, modifiers: noModifiers() };
     const active = (extra?.abilities ?? []).filter((a) => isActive(a, weapon.type, ctx));
     // Resolved against the target even without abilities, so the engine input holds only what applies.
-    return applyAbilities(profile, active, extra?.damageRerolls, ctx.keywords);
+    const attacked = applyAbilities(profile, active, extra?.damageRerolls, ctx.keywords);
+    // The defender's abilities come last: "S > T" compares the Strength the attacker's abilities raised.
+    if (!extra?.defense) return attacked;
+    const defending = extra.defense.abilities.filter((a) => isActive(a, weapon.type, defenseCtx));
+    return applyDefensiveAbilities(attacked, defending, extra.defense.toughness);
   });
 }
 

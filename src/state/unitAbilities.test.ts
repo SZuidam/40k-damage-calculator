@@ -7,16 +7,21 @@ import {
   activeFor,
   addToDice,
   applyAbilities,
+  applyDefensiveAbilities,
   abilityNeeds,
   canLead,
   copyAbility,
+  defensiveAbilitiesFor,
   grantAbilities,
+  hasDefensiveEffect,
+  isDefensiveOnly,
   effectSummary,
   isActive,
   isUnitLevelOnly,
   mortalWoundSources,
   pruneToggles,
   sameAbilityContent,
+  woundPenalties,
   type AbilityContext,
 } from './unitAbilities';
 
@@ -317,5 +322,67 @@ describe('mortal wounds', () => {
     expect(effectSummary({ kind: 'mortalWounds', on: 4, perSuccess: '1' })).toBe('D6 per model, 4+: 1 MW');
     expect(effectSummary({ kind: 'mortalWounds', on: 5, perSuccess: 'd3' })).toBe('D6 per model, 5+: D3 MW');
     expect(abilitySummary(hammer)).toBe('Charged · Melee: D6 per model, 4+: 1 MW');
+  });
+});
+
+describe('defensive abilities', () => {
+  const ironHide = ability('Iron Hide', [{ kind: 'woundPenalty', strongerOnly: true }]);
+  const shockAssault = ability('Shock Assault', [{ kind: 'stat', stat: 'attacks', amount: 1 }]);
+  const mixed = ability('Mixed', [...shockAssault.effects, ...ironHide.effects]);
+
+  it('tells defensive effects and abilities apart', () => {
+    expect(hasDefensiveEffect(ironHide)).toBe(true);
+    expect(hasDefensiveEffect(mixed)).toBe(true);
+    expect(hasDefensiveEffect(shockAssault)).toBe(false);
+    expect(isDefensiveOnly(ironHide)).toBe(true);
+    expect(isDefensiveOnly(mixed)).toBe(false);
+    expect(isDefensiveOnly(ability('Empty', []))).toBe(false);
+  });
+
+  it('leaves abilities that only defend out of the attack', () => {
+    const squad = unit({ abilities: [ironHide, mixed, shockAssault] });
+    const army: Army = { id: 'sm', name: 'Space Marines', abilities: [ability('Army hide', ironHide.effects)] };
+    expect(abilitiesFor(squad, null, army).map((a) => a.ability.name)).toEqual(['Mixed', 'Shock Assault']);
+  });
+
+  it('takes the defender’s own abilities and army rules with a defensive effect, not those for a led unit', () => {
+    const squad = unit({ abilities: [ironHide, mixed, shockAssault, ability('Aura', ironHide.effects, { appliesTo: 'ledUnit' })] });
+    const army: Army = { id: 'sm', name: 'Space Marines', abilities: [ability('Army hide', ironHide.effects), ability('Oath', [{ kind: 'reroll', roll: 'hit', which: 'failed' }])] };
+    expect(defensiveAbilitiesFor(squad, army).map((a) => [a.ability.name, a.origin, a.from])).toEqual([
+      ['Iron Hide', 'defender', 'Intercessors'],
+      ['Mixed', 'defender', 'Intercessors'],
+      ['Army hide', 'defenderArmy', 'Space Marines'],
+    ]);
+    expect(defensiveAbilitiesFor(unit({ abilities: [shockAssault] }), null)).toEqual([]);
+  });
+
+  it('subtracts 1 from the wound roll only while S is greater than T, or always', () => {
+    const at = (strength: number) => weapon('Gun', 5, '2', 3, strength, 0, '1');
+    expect(applyDefensiveAbilities(at(5), [ironHide], 4).modifiers.wound).toBe(-1);
+    expect(applyDefensiveAbilities(at(4), [ironHide], 4).modifiers.wound).toBe(0);
+    expect(applyDefensiveAbilities(at(3), [ironHide], 4).modifiers.wound).toBe(0);
+    const always = ability('Always', [{ kind: 'woundPenalty', strongerOnly: false }]);
+    expect(applyDefensiveAbilities(at(3), [always], 4).modifiers.wound).toBe(-1);
+    // Summed with the attacker's modifiers; the engine caps the total.
+    expect(applyDefensiveAbilities({ ...at(8), modifiers: { ...at(8).modifiers, wound: 1 } }, [ironHide, always], 4).modifiers.wound).toBe(-1);
+    expect(woundPenalties(8, [ironHide, always, shockAssault], 4)).toBe(2);
+  });
+
+  it('ignores other effects and leaves the input profile alone', () => {
+    const profile = weapon('Gun', 5, '2', 3, 5, 0, '1');
+    expect(applyDefensiveAbilities(profile, [shockAssault], 4)).toBe(profile);
+    applyDefensiveAbilities(profile, [ironHide], 4);
+    expect(profile.modifiers.wound).toBe(0);
+  });
+
+  it('does nothing while the unit attacks', () => {
+    const profile = weapon('Gun', 5, '2', 3, 5, 0, '1');
+    expect(applyAbilities(profile, [ironHide])).toEqual(profile);
+  });
+
+  it('summarises the effect', () => {
+    expect(effectSummary({ kind: 'woundPenalty', strongerOnly: true })).toBe('Enemy -1 to wound if S > T');
+    expect(effectSummary({ kind: 'woundPenalty', strongerOnly: false })).toBe('Enemy -1 to wound');
+    expect(abilitySummary(ironHide)).toBe('Enemy -1 to wound if S > T');
   });
 });

@@ -472,6 +472,14 @@ describe('mortal wounds and attacker models', () => {
     expect(effectsOf([{ kind: 'mortalWounds', on: 4, perSuccess: 'D3' }])).toEqual([{ kind: 'mortalWounds', on: 4, perSuccess: 'D3' }]);
   });
 
+  it('keeps the defensive -1 to wound effect and drops it without a valid flag', () => {
+    expect(effectsOf([{ kind: 'woundPenalty', strongerOnly: true }, { kind: 'woundPenalty', strongerOnly: false }])).toEqual([
+      { kind: 'woundPenalty', strongerOnly: true },
+      { kind: 'woundPenalty', strongerOnly: false },
+    ]);
+    expect(effectsOf([{ kind: 'woundPenalty' }, { kind: 'woundPenalty', strongerOnly: 'yes' }])).toEqual([]);
+  });
+
   it('drops a mortal wounds effect with a missing or mistyped field, and keeps out-of-range values for validation', () => {
     expect(effectsOf([{ kind: 'mortalWounds', on: '4', perSuccess: '1' }, { kind: 'mortalWounds', on: 4 }, { kind: 'mortalWounds', on: 9, perSuccess: 'x' }])).toEqual([
       { kind: 'mortalWounds', on: 9, perSuccess: 'x' },

@@ -1,10 +1,10 @@
 import './style.css';
 import { optimiseOrder, type OptimiseResult } from './engine/optimise';
 import { simulate } from './engine/simulate';
-import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
+import { armyOf, carriedWeapons, defenseContext, defenderOf, leaderChoices, newLoadout, reconcileAttacker, reconcileDefender, reorderCarried, resolveLoadout, unitsOfArmy } from './state/loadout';
 import { bannerCss, loadBanners, pruneBanners, saveBanners } from './state/banners';
 import { loadState, saveState } from './state/storage';
-import { abilitiesFor, activeFor, mortalWoundSources, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
+import { abilitiesFor, activeFor, defensiveAbilitiesFor, mortalWoundSources, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
 import { MAX_DAMAGE_REROLL_BELOW, type MortalWoundSource, type StoredWeapon, type Unit, type WeaponProfile } from './types';
 import { renderAbilitiesLine } from './ui/abilitiesLine';
 import { renderAttackerModels } from './ui/attackerModels';
@@ -62,6 +62,20 @@ function abilityContext(): AbilityContext {
 /** The abilities active for `weapon`'s attacks. */
 const activeAbilitiesFor = (weapon: StoredWeapon) => activeFor(attackAbilities(), weapon.type, abilityContext());
 
+/** The defending unit's abilities and army rules with a defensive effect (empty without a defender). */
+function defenseAbilities(): SourcedAbility[] {
+  const unit = defendingUnit();
+  if (!unit) return [];
+  const armyId = armyOf(unit, state.armies);
+  return defensiveAbilitiesFor(unit, state.armies.find((a) => a.id === armyId));
+}
+
+/** The context for the defender's abilities: their "target" is the attacking unit (no keywords without one). */
+function defenseAbilityContext(): AbilityContext {
+  const unit = attackingUnit();
+  return unit ? defenseContext(abilityContext(), unit) : { ...abilityContext(), keywords: null };
+}
+
 /** The carried weapons of the attacking unit, in firing order (empty without a unit). */
 function carried() {
   const unit = attackingUnit();
@@ -78,7 +92,14 @@ function attackerWeapons(): WeaponProfile[] {
     toggles: ctx.toggles,
     keywords: ctx.keywords,
     damageRerolls: state.damageRerolls,
+    defense: defenseOf(),
   });
+}
+
+/** The defender's abilities and Toughness for resolveLoadout, or undefined without a defender. */
+function defenseOf() {
+  const unit = defendingUnit();
+  return unit ? { abilities: defenseAbilities().map((a) => a.ability), toughness: unit.toughness } : undefined;
 }
 
 /**
@@ -94,7 +115,7 @@ function attackerMortals(): MortalWoundSource[] {
 /** The first ability of the attack that is invalid (only from a bad save or import), with whose it is. */
 function invalidAbility(): string | undefined {
   const bySource = new Map<string, SourcedAbility[]>();
-  for (const a of attackAbilities()) bySource.set(a.from, [...(bySource.get(a.from) ?? []), a]);
+  for (const a of [...attackAbilities(), ...defenseAbilities()]) bySource.set(a.from, [...(bySource.get(a.from) ?? []), a]);
   for (const [from, list] of bySource) if (validateAbilities(list.map((a) => a.ability)) !== undefined) return from;
   return undefined;
 }
@@ -131,10 +152,15 @@ function onInputsChanged(): void {
   // unit abilities on the conditions, ability toggles, target and ticked weapons.
   loadoutRows.refreshStats();
   renderBanners();
-  abilitiesLine.update(
-    attackAbilities(),
-    carried().map(({ weapon }) => weapon.type),
-    abilityContext(),
+  const carriedTypes = carried().map(({ weapon }) => weapon.type);
+  abilitiesLine.update(attackAbilities(), carriedTypes, abilityContext());
+  // "S > T" compares the Strength after the attacker's abilities.
+  const defender = defendingUnit();
+  defenseLine.update(
+    defenseAbilities(),
+    carriedTypes,
+    defenseAbilityContext(),
+    defender ? { toughness: defender.toughness, weapons: attackerWeapons().map((w) => ({ type: w.type, strength: w.strength })) } : undefined,
   );
   if (!reordering) reorderNote = '';
   const reason = blockedReason();
@@ -335,6 +361,10 @@ const loadoutRows = new LoadoutRows($('loadout'), state.attacker, {
   conditions: () => state.conditions,
   abilities: activeAbilitiesFor,
   damageRerolls: () => state.damageRerolls,
+  defense: (weapon) => {
+    const unit = defendingUnit();
+    return unit ? { applied: activeFor(defenseAbilities(), weapon.type, defenseAbilityContext()), toughness: unit.toughness } : undefined;
+  },
 });
 
 // ---------- Defender ----------
@@ -362,6 +392,8 @@ const defenderPicker = new UnitPicker({
 $('defender-picker').append(defenderPicker.element);
 
 const defenderPanel = renderDefenderPanel($('defender'), state.defender, defendingUnit, onInputsChanged);
+// The defender's defensive abilities, under its stats; their toggles share the page's toggle list.
+const defenseLine = renderAbilitiesLine($('defender'), { toggles: state.toggles, onToggle: onInputsChanged, side: 'defense' });
 
 // ---------- Configuration drawer ----------
 

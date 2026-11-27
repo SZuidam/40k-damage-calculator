@@ -2,6 +2,7 @@ import { MAX_CONSTANT, formatDiceSum, tryParseDice } from '../engine/dice';
 import { abilitiesAgainst, damageRerollBelow, strongerReroll } from '../engine/rules';
 import {
   DEFENDER_KEYWORDS,
+  DEFENSIVE_EFFECT_KINDS,
   KEYWORD_NAMES,
   RESTRICTABLE_ABILITIES,
   WEAPON_TYPE_NAMES,
@@ -25,8 +26,11 @@ import {
 import { abilitiesSummary, normaliseDice, sameAbilities } from './abilities';
 import { uid } from './ids';
 
-/** Where an ability that applies to the attack comes from. */
-export type AbilityOrigin = 'unit' | 'leader' | 'army';
+/**
+ * Where an ability that applies to the attack comes from: the attacking unit, its leader or its
+ * army, or (defensive effects) the defending unit or its army.
+ */
+export type AbilityOrigin = 'unit' | 'leader' | 'army' | 'defender' | 'defenderArmy';
 
 /** An ability that can apply to the attack, with the unit or army it comes from (for the UI). */
 export interface SourcedAbility {
@@ -43,6 +47,21 @@ export interface AbilityContext {
   toggles: readonly string[];
   /** The defending unit's keywords; null while no defender is picked (keyword conditions fail). */
   keywords: readonly DefenderKeyword[] | null;
+}
+
+/** Whether `e` works while the unit defends (and does nothing while it attacks). */
+export function isDefensiveEffect(e: AbilityEffect): boolean {
+  return DEFENSIVE_EFFECT_KINDS.includes(e.kind);
+}
+
+/** Whether `ability` has an effect that works while its unit defends. */
+export function hasDefensiveEffect(ability: UnitAbility): boolean {
+  return ability.effects.some(isDefensiveEffect);
+}
+
+/** Whether every effect of `ability` is defensive, so it does nothing while its unit attacks. */
+export function isDefensiveOnly(ability: UnitAbility): boolean {
+  return ability.effects.length > 0 && ability.effects.every(isDefensiveEffect);
 }
 
 /** The built-in attack conditions an ability can need, with their short names and toggle labels. */
@@ -119,14 +138,28 @@ export function sameAbilityList(a: readonly UnitAbility[], b: readonly UnitAbili
 
 /**
  * Every ability that can apply to `attacker`'s attacks: its own abilities for itself, the
- * leader's abilities for the unit it leads, and the rules of the attacker's army.
+ * leader's abilities for the unit it leads, and the rules of the attacker's army. Abilities with
+ * only defensive effects are left out: they do nothing while the unit attacks.
  */
 export function abilitiesFor(attacker: Unit, leader: Unit | null | undefined, army: Army | null | undefined): SourcedAbility[] {
   return [
     ...attacker.abilities.filter((a) => a.appliesTo === 'unit').map((ability) => ({ ability, origin: 'unit' as const, from: attacker.name })),
     ...(leader ? leader.abilities.filter((a) => a.appliesTo === 'ledUnit').map((ability) => ({ ability, origin: 'leader' as const, from: leader.name })) : []),
     ...(army ? army.abilities.map((ability) => ({ ability, origin: 'army' as const, from: army.name })) : []),
-  ];
+  ].filter((a) => !isDefensiveOnly(a.ability));
+}
+
+/**
+ * Every ability that can apply to attacks against `defender`: its own abilities for itself and
+ * the rules of its army that have a defensive effect. (The defender has no leader on the main
+ * page, so abilities for the unit a leader leads never count here.) Check them per weapon with
+ * a context whose keywords are the attacking unit's: for a defending unit, "Target" is the attacker.
+ */
+export function defensiveAbilitiesFor(defender: Unit, army: Army | null | undefined): SourcedAbility[] {
+  return [
+    ...defender.abilities.filter((a) => a.appliesTo === 'unit').map((ability) => ({ ability, origin: 'defender' as const, from: defender.name })),
+    ...(army ? army.abilities.map((ability) => ({ ability, origin: 'defenderArmy' as const, from: army.name })) : []),
+  ].filter((a) => hasDefensiveEffect(a.ability));
 }
 
 /** Whether `unit` can lead: it has at least one ability for the unit it leads. */
@@ -307,6 +340,23 @@ export function applyAbilities(
   return out;
 }
 
+/**
+ * `profile` with the defensive effects of `abilities` (the defender's, assumed active for this
+ * weapon) folded in: each "-1 to wound" subtracts 1 from the wound modifier, a "S > T" one only
+ * while the profile's Strength (after the attacker's abilities, so call this after
+ * applyAbilities) is greater than `toughness`. The engine caps the sum with the attacker's
+ * modifiers and Lance at -1 / +1. Other effects are ignored. Returns a new profile.
+ */
+export function applyDefensiveAbilities(profile: WeaponProfile, abilities: readonly UnitAbility[], toughness: number): WeaponProfile {
+  const penalty = woundPenalties(profile.strength, abilities, toughness);
+  return penalty === 0 ? profile : { ...profile, modifiers: { ...profile.modifiers, wound: profile.modifiers.wound - penalty } };
+}
+
+/** How many "-1 to wound" effects of `abilities` hit an attack of Strength `strength` against Toughness `toughness`. */
+export function woundPenalties(strength: number, abilities: readonly UnitAbility[], toughness: number): number {
+  return abilities.reduce((sum, a) => sum + a.effects.filter((e) => e.kind === 'woundPenalty' && (!e.strongerOnly || strength > toughness)).length, 0);
+}
+
 // ---------- text ----------
 
 export const EFFECT_KIND_NAMES: Record<AbilityEffectKind, string> = {
@@ -318,11 +368,15 @@ export const EFFECT_KIND_NAMES: Record<AbilityEffectKind, string> = {
   rerollDamage: 'Re-roll damage',
   grant: 'Gain weapon abilities',
   mortalWounds: 'Inflict mortal wounds',
+  woundPenalty: 'Enemy -1 to wound',
 };
 
 const STAT_SHORT = { attacks: 'A', strength: 'S', damage: 'D' } as const;
 
-/** "+1 A", "Improve AP by 1", "+1 to hit", "Critical wounds on 5+", "Re-roll hits of 1", "Gain Lethal Hits", "D6 per model, 4+: 1 MW". */
+/**
+ * "+1 A", "Improve AP by 1", "+1 to hit", "Critical wounds on 5+", "Re-roll hits of 1", "Gain
+ * Lethal Hits", "D6 per model, 4+: 1 MW", "Enemy -1 to wound if S > T".
+ */
 export function effectSummary(e: AbilityEffect): string {
   switch (e.kind) {
     case 'stat':
@@ -343,6 +397,8 @@ export function effectSummary(e: AbilityEffect): string {
     }
     case 'mortalWounds':
       return `D6 per model, ${e.on}+: ${normaliseDice(e.perSuccess)} MW`;
+    case 'woundPenalty':
+      return e.strongerOnly ? 'Enemy -1 to wound if S > T' : 'Enemy -1 to wound';
   }
 }
 
