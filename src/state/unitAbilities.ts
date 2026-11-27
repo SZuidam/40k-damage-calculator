@@ -1,8 +1,9 @@
 import { MAX_CONSTANT, formatDiceSum, tryParseDice } from '../engine/dice';
-import { damageRerollBelow, strongerReroll } from '../engine/rules';
+import { abilitiesAgainst, damageRerollBelow, strongerReroll } from '../engine/rules';
 import {
   DEFENDER_KEYWORDS,
   KEYWORD_NAMES,
+  RESTRICTABLE_ABILITIES,
   WEAPON_TYPE_NAMES,
   copyAbilities,
   defaultDamageRerolls,
@@ -224,10 +225,22 @@ const amountOf = (x: number) => (Number.isInteger(x) && x > 0 && x <= 6 ? x : 0)
 /**
  * The weapon abilities `granted` adds to `base`: on / off abilities are switched on, an X
  * ability (Sustained Hits, Blast, …) is taken only when the weapon has none, and Anti-X Y+
- * keeps the lower Y per keyword.
+ * keeps the lower Y per keyword. A non-Monster / non-Vehicle limit goes with the ability it is
+ * on: Sustained Hits keeps the limit of the X it keeps, and Devastating Wounds is only limited
+ * when every source that has it is. Resolve both against the target first (abilitiesAgainst):
+ * a limited ability of the weapon that drops out lets a granted one take its place.
  */
 export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities): WeaponAbilities {
   const out = copyAbilities(base);
+  const limited = new Set(base.notVsMonsterVehicle);
+  if (granted.devastatingWounds) {
+    const grantedLimited = granted.notVsMonsterVehicle.includes('devastatingWounds');
+    if (!base.devastatingWounds ? grantedLimited : limited.has('devastatingWounds') && grantedLimited) limited.add('devastatingWounds');
+    else limited.delete('devastatingWounds');
+  }
+  if (base.sustainedHits === null && granted.sustainedHits !== null && tryParseDice(granted.sustainedHits) && granted.notVsMonsterVehicle.includes('sustainedHits')) {
+    limited.add('sustainedHits');
+  }
   out.lethalHits ||= granted.lethalHits;
   out.devastatingWounds ||= granted.devastatingWounds;
   out.lance ||= granted.lance;
@@ -242,6 +255,7 @@ export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities):
     const own = out.anti[keyword];
     if (own === undefined || y < own) out.anti[keyword] = y;
   }
+  out.notVsMonsterVehicle = RESTRICTABLE_ABILITIES.filter((key) => limited.has(key));
   return out;
 }
 
@@ -251,9 +265,17 @@ export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities):
  * summed (the engine caps them), the lowest critical threshold and the strongest re-roll win,
  * and granted weapon abilities are merged (grantAbilities). "Re-roll damage" takes the threshold
  * of `damageRerolls` for the dice of the resulting D (none for fixed damage). "Inflict mortal
- * wounds" is unit-level and ignored here (see mortalWoundSources). Returns a new profile.
+ * wounds" is unit-level and ignored here (see mortalWoundSources). With the target's `keywords`,
+ * the weapon's own and the granted abilities are first resolved against it (abilitiesAgainst), so
+ * against a Monster or Vehicle a limited Sustained Hits / Devastating Wounds drops out before a
+ * granted one is merged; null (no target) keeps them. Returns a new profile.
  */
-export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitAbility[], damageRerolls: DamageRerollThresholds = defaultDamageRerolls()): WeaponProfile {
+export function applyAbilities(
+  profile: WeaponProfile,
+  abilities: readonly UnitAbility[],
+  damageRerolls: DamageRerollThresholds = defaultDamageRerolls(),
+  keywords: readonly DefenderKeyword[] | null = null,
+): WeaponProfile {
   const effects = abilities.flatMap((a) => a.effects);
   const out: WeaponProfile = {
     ...profile,
@@ -261,7 +283,7 @@ export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitA
     strength: profile.strength + statAmount(effects, 'strength'),
     ap: Math.max(-6, profile.ap - apAmount(effects)),
     damage: addToDice(profile.damage, statAmount(effects, 'damage')),
-    abilities: copyAbilities(profile.abilities),
+    abilities: abilitiesAgainst(profile.abilities, keywords),
     conditions: { ...profile.conditions },
     modifiers: { ...profile.modifiers },
   };
@@ -279,7 +301,7 @@ export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitA
     } else if (e.kind === 'rerollDamage') {
       m.rerollDamageBelow = damageRerollBelow(out.damage, damageRerolls);
     } else if (e.kind === 'grant') {
-      out.abilities = grantAbilities(out.abilities, e.abilities);
+      out.abilities = grantAbilities(out.abilities, abilitiesAgainst(e.abilities, keywords));
     }
   }
   return out;

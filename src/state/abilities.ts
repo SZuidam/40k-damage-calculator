@@ -1,4 +1,4 @@
-import { DEFENDER_KEYWORDS, KEYWORD_NAMES, type AttackConditions, type DefenderKeyword, type WeaponAbilities } from '../types';
+import { DEFENDER_KEYWORDS, KEYWORD_NAMES, RESTRICTABLE_ABILITIES, type AttackConditions, type DefenderKeyword, type RestrictableAbility, type WeaponAbilities } from '../types';
 
 export type AbilityKey = keyof WeaponAbilities;
 
@@ -16,6 +16,8 @@ export interface ActiveAbility {
   anti?: { keywords: DefenderKeyword[]; value: number };
   /** Set for abilities that only work under an attack condition (Rapid Fire, Melta, Lance). */
   condition?: keyof AttackConditions;
+  /** Set for abilities that don't apply against Monster or Vehicle targets (`notVsMonsterVehicle`). */
+  limited?: true;
 }
 
 interface BaseChoice {
@@ -37,6 +39,11 @@ export interface ValueAbilityChoice extends BaseChoice {
   valueKey: ValueAbilityKey;
   /** The ability's name without X, e.g. "Blast". */
   name: string;
+  /**
+   * Whether the ability is added limited to non-Monster / non-Vehicle targets (true) or not
+   * (false); store it with `withLimit` after X. Unset for abilities that can't be limited.
+   */
+  limited?: boolean;
 }
 
 /** Anti-X Y+ for one keyword: picking it asks for Y first, then stores it with `withAntiValue`. */
@@ -63,6 +70,10 @@ export const VALUE_ABILITY_NAMES: Record<ValueAbilityKey, string> = {
   rapidFire: 'Rapid Fire',
   melta: 'Melta',
 };
+
+/** The suffix of an ability limited to non-Monster / non-Vehicle targets: "Sustained Hits 1 (non-Monster/Vehicle)". */
+export const NON_MONSTER_VEHICLE = '(non-Monster/Vehicle)';
+const NOT_VS_MONSTER_VEHICLE = ' It does not apply against a Monster or Vehicle target.';
 
 const attacksPerFive = (x: string) => `Adds ${x} attack${x === '1' ? '' : 's'} per model for every 5 models in the target unit`;
 
@@ -111,6 +122,13 @@ const valueChoice = (valueKey: ValueAbilityKey, value: string, description: stri
   isActive: (a) => a[valueKey] !== null,
 });
 
+/** Sustained Hits X, with or without the non-Monster / non-Vehicle limit (both leave the dropdown once it is set). */
+const sustainedChoice = (limited: boolean): ValueAbilityChoice => ({
+  ...valueChoice('sustainedHits', limited ? 'sustained-hits-limited' : 'sustained-hits', `${DESCRIPTIONS.sustainedHits('X')}${limited ? NOT_VS_MONSTER_VEHICLE : ''}`),
+  ...(limited && { label: `Sustained Hits X ${NON_MONSTER_VEHICLE}…` }),
+  limited,
+});
+
 export const ABILITY_CHOICES: AbilityChoice[] = [
   {
     value: 'lethal-hits',
@@ -119,13 +137,21 @@ export const ABILITY_CHOICES: AbilityChoice[] = [
     isActive: (a) => a.lethalHits,
     apply: (a) => ({ ...a, lethalHits: true }),
   },
-  valueChoice('sustainedHits', 'sustained-hits', DESCRIPTIONS.sustainedHits('X')),
+  sustainedChoice(false),
+  sustainedChoice(true),
   {
     value: 'devastating-wounds',
     label: 'Devastating Wounds',
     description: DESCRIPTIONS.devastatingWounds,
     isActive: (a) => a.devastatingWounds,
-    apply: (a) => ({ ...a, devastatingWounds: true }),
+    apply: (a) => withLimit({ ...a, devastatingWounds: true }, 'devastatingWounds', false),
+  },
+  {
+    value: 'devastating-wounds-limited',
+    label: `Devastating Wounds ${NON_MONSTER_VEHICLE}`,
+    description: `${DESCRIPTIONS.devastatingWounds}${NOT_VS_MONSTER_VEHICLE}`,
+    isActive: (a) => a.devastatingWounds,
+    apply: (a) => withLimit({ ...a, devastatingWounds: true }, 'devastatingWounds', true),
   },
   ...DEFENDER_KEYWORDS.map(antiChoice),
   valueChoice('blast', 'blast', DESCRIPTIONS.blast('X')),
@@ -160,6 +186,20 @@ export function withAbilityValue(a: WeaponAbilities, key: ValueAbilityKey, expr:
   return { ...a, [key]: normaliseDice(expr) };
 }
 
+/**
+ * The abilities with `key` limited to non-Monster / non-Vehicle targets (`on`) or not. The
+ * limit is kept in RESTRICTABLE_ABILITIES order; it only counts while the weapon has the ability.
+ */
+export function withLimit(a: WeaponAbilities, key: RestrictableAbility, on: boolean): WeaponAbilities {
+  const others = a.notVsMonsterVehicle.filter((k) => k !== key);
+  return { ...a, notVsMonsterVehicle: RESTRICTABLE_ABILITIES.filter((k) => others.includes(k) || (on && k === key)) };
+}
+
+/** Whether `key` is limited to non-Monster / non-Vehicle targets. */
+export function isLimited(a: WeaponAbilities, key: RestrictableAbility): boolean {
+  return a.notVsMonsterVehicle.includes(key);
+}
+
 /** The abilities a weapon has, in a fixed order. */
 export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
   const out: ActiveAbility[] = [];
@@ -168,9 +208,20 @@ export function activeAbilities(a: WeaponAbilities): ActiveAbility[] {
     const condition = CONDITIONS[key];
     out.push({ key, label: `${VALUE_ABILITY_NAMES[key]} ${x}`, description: DESCRIPTIONS[key](x), valueKey: key, ...(condition && { condition }) });
   };
+  /** Mark the last ability added as limited to non-Monster / non-Vehicle targets. */
+  const limit = () => {
+    const last = out[out.length - 1];
+    out[out.length - 1] = { ...last, label: `${last.label} ${NON_MONSTER_VEHICLE}`, description: `${last.description}${NOT_VS_MONSTER_VEHICLE}`, limited: true };
+  };
   if (a.lethalHits) out.push({ key: 'lethalHits', label: 'Lethal Hits', description: DESCRIPTIONS.lethalHits });
-  if (a.sustainedHits !== null) withValue('sustainedHits', a.sustainedHits);
-  if (a.devastatingWounds) out.push({ key: 'devastatingWounds', label: 'Devastating Wounds', description: DESCRIPTIONS.devastatingWounds });
+  if (a.sustainedHits !== null) {
+    withValue('sustainedHits', a.sustainedHits);
+    if (isLimited(a, 'sustainedHits')) limit();
+  }
+  if (a.devastatingWounds) {
+    out.push({ key: 'devastatingWounds', label: 'Devastating Wounds', description: DESCRIPTIONS.devastatingWounds });
+    if (isLimited(a, 'devastatingWounds')) limit();
+  }
   for (const { keywords, value } of antiGroups(a)) {
     out.push({ key: 'anti', label: `${antiName(keywords)} ${value}+`, description: DESCRIPTIONS.anti(keywordList(keywords), `${value}+`), anti: { keywords, value } });
   }
@@ -200,9 +251,12 @@ function antiGroups(a: WeaponAbilities): { keywords: DefenderKeyword[]; value: n
   return [...groups].map(([value, keywords]) => ({ keywords, value }));
 }
 
+/** The abilities without `key` (and without its non-Monster / non-Vehicle limit). */
 export function withoutAbility(a: WeaponAbilities, key: AbilityKey): WeaponAbilities {
   if (key === 'anti') return { ...a, anti: {} };
-  return { ...a, [key]: typeof a[key] === 'boolean' ? false : null };
+  if (key === 'notVsMonsterVehicle') return { ...a, notVsMonsterVehicle: [] };
+  const out = { ...a, [key]: typeof a[key] === 'boolean' ? false : null };
+  return key === 'sustainedHits' || key === 'devastatingWounds' ? withLimit(out, key, false) : out;
 }
 
 /** The abilities with Anti-X Y+ set (or replaced) to `y` for every keyword in `keywords`. */
@@ -245,7 +299,8 @@ export function sameAbilities(a: WeaponAbilities, b: WeaponAbilities): boolean {
     sameValue('cleave') &&
     sameValue('rapidFire') &&
     sameValue('melta') &&
-    DEFENDER_KEYWORDS.every((k) => a.anti[k] === b.anti[k])
+    DEFENDER_KEYWORDS.every((k) => a.anti[k] === b.anti[k]) &&
+    RESTRICTABLE_ABILITIES.every((k) => isLimited(a, k) === isLimited(b, k))
   );
 }
 

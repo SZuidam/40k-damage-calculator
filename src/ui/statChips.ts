@@ -3,7 +3,7 @@ import { bonusAttacks, bonusDamage, hitModifier, woundModifier } from '../engine
 import { activeAbilities, normaliseDice } from '../state/abilities';
 import { pickStats, skillValue } from '../state/presets';
 import { apAmount, applyAbilities, effectSummary, statAmount, type SourcedAbility } from '../state/unitAbilities';
-import { KEYWORD_NAMES, noModifiers, type AbilityEffect, type AttackConditions, type DamageRerollThresholds, type DefenderProfile, type WeaponProfile, type WeaponStats } from '../types';
+import { KEYWORD_NAMES, MONSTER_VEHICLE, noModifiers, type AbilityEffect, type AttackConditions, type DamageRerollThresholds, type DefenderProfile, type WeaponProfile, type WeaponStats } from '../types';
 import { h } from './dom';
 
 /** What the stat chips need to know about the defender: its size (Blast / Cleave) and keywords (Anti). */
@@ -39,7 +39,9 @@ const constant = (x: number): DiceExpr => ({ count: 0, sides: 0, bonus: x });
  * A and Melta on D), an improved AP in blue, a hit modifier on the BS chip, and their roll levers
  * and granted weapon abilities as dashed entries in the ability text. Weapon abilities that apply
  * to the defender's keywords or the current conditions are outlined. A Torrent weapon (its own or
- * granted) reads "BS N/A". `damageRerolls` are the Settings thresholds for "Re-roll damage".
+ * granted) reads "BS N/A". An ability limited to non-Monster / non-Vehicle targets is struck
+ * through while the defender is a Monster or Vehicle. `damageRerolls` are the Settings thresholds
+ * for "Re-roll damage".
  */
 export function statChips(
   weapon: WeaponStats | undefined,
@@ -51,7 +53,11 @@ export function statChips(
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
   const effects = applied.flatMap((a) => a.ability.effects);
   const base: WeaponProfile = { ...pickStats(weapon), id: '', models: 1, conditions, modifiers: noModifiers() };
-  const resolved = applied.length === 0 ? base : applyAbilities(base, applied.map((a) => a.ability), damageRerolls);
+  const abilities = applied.map((a) => a.ability);
+  // `resolved` is what the engine gets against the current defender; `listed` keeps the abilities
+  // limited to non-Monster / non-Vehicle targets, so the row can show them as inactive.
+  const resolved = applyAbilities(base, abilities, damageRerolls, defender?.keywords ?? null);
+  const listed = applyAbilities(base, abilities, damageRerolls);
   const melee = weapon.type === 'melee';
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, key === 'skill' && melee ? 'WS' : label), ' ', format ? format(weapon) : String(weapon[key])),
@@ -105,25 +111,45 @@ export function statChips(
     dChip.title = `Damage: ${weapon.damage}, plus ${sources.join(' and ')}`;
   }
 
-  const text = abilityText(weapon, resolved, defender, conditions, applied);
+  const text = abilityText(weapon, listed, resolved, defender, conditions, applied);
   return text ? [...tag, ...chips, text] : [...tag, ...chips];
 }
 
 /**
  * The ability text of a row: the weapon's abilities (with any granted by unit abilities, dashed)
- * and the roll levers of unit abilities (dashed), or null when there are none.
+ * and the roll levers of unit abilities (dashed), or null when there are none. `listed` holds
+ * every ability, `resolved` only those that apply against the defender: a limited ability
+ * missing from it is struck through, and a granted one that took its place is added after.
  */
-function abilityText(weapon: WeaponStats, resolved: WeaponProfile, defender: ChipDefender | undefined, conditions: AttackConditions, applied: readonly SourcedAbility[]): HTMLElement | null {
+function abilityText(
+  weapon: WeaponStats,
+  listed: WeaponProfile,
+  resolved: WeaponProfile,
+  defender: ChipDefender | undefined,
+  conditions: AttackConditions,
+  applied: readonly SourcedAbility[],
+): HTMLElement | null {
   const own = new Set(activeAbilities(weapon.abilities).map((a) => a.label));
-  const abilities = activeAbilities(resolved.abilities);
+  const shown = activeAbilities(listed.abilities);
+  const shownLabels = new Set(shown.map((a) => a.label));
+  const abilities = [...shown, ...activeAbilities(resolved.abilities).filter((a) => !shownLabels.has(a.label))];
+  const blocked = defender ? defender.keywords.filter((k) => MONSTER_VEHICLE.includes(k)) : [];
   const levers = rollLevers(resolved, weapon, applied);
   if (abilities.length === 0 && levers.length === 0) return null;
   // Read-only; abilities are edited in the weapon profile modal and the unit's abilities (Units tab).
   const text = h('span', { class: 'row-abilities' }, h('span', { class: 'visually-hidden' }, 'Abilities: '));
   const items: HTMLElement[] = [];
-  for (const { label, description, anti, condition } of abilities) {
+  for (const { label, description, anti, condition, limited } of abilities) {
     const granted = !own.has(label);
     const from = granted ? ` Gained from ${sourcesOf(applied, (e) => e.kind === 'grant')}.` : '';
+    // Limited to non-Monster / non-Vehicle targets and the defender is one: struck through.
+    if (limited && blocked.length > 0) {
+      const names = blocked.map((k) => KEYWORD_NAMES[k]).join(' and ');
+      const classes = ['ability-inactive', granted ? 'ability-granted' : ''].filter(Boolean).join(' ');
+      const title = `${description}${from} Inactive: the target has the ${names} keyword${blocked.length === 1 ? '' : 's'}.`;
+      items.push(h('span', { class: classes, title }, label, h('span', { class: 'visually-hidden' }, ' (inactive)')));
+      continue;
+    }
     // An Anti ability is outlined when the current defender has one of its keywords, a
     // conditional ability (Rapid Fire, Melta, Lance) while its attack condition is on.
     let active: string | null = null;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { WeaponAbilities } from '../types';
 import { exactResult, mortalKernel, weaponKernel } from './exact';
 import { boltRifles, defender, gravis, heavyBolter, lascannon, mortal, multiMelta, weapon } from './testFixtures';
 
@@ -113,5 +114,23 @@ describe('mortal wounds', () => {
     const result = exactResult([], defender(2, 4, 3, 2), [mortal('Overkill', 20, 2, 'D3')]);
     expect(result.expectedDamage).toBeLessThanOrEqual(4 + 1e-9);
     expect(result.killDistribution[2]).toBeGreaterThan(0.99);
+  });
+});
+
+describe('abilities limited to non-Monster / non-Vehicle targets', () => {
+  const abilities: Partial<WeaponAbilities> = { sustainedHits: '1', devastatingWounds: true, notVsMonsterVehicle: ['sustainedHits', 'devastatingWounds'] };
+  const limited = weapon('Limited', 10, '2', 3, 6, -1, '2', abilities);
+  const plain = weapon('Limited', 10, '2', 3, 6, -1, '2');
+  const both = weapon('Limited', 10, '2', 3, 6, -1, '2', { ...abilities, notVsMonsterVehicle: [] });
+
+  it('against a Monster the weapon does what it would without them', () => {
+    const monster = defender(1, 8, 3, 12, null, ['monster']);
+    expect(exactResult([limited], monster).expectedDamage).toBeCloseTo(exactResult([plain], monster).expectedDamage, 12);
+    expect(exactResult([both], monster).expectedDamage).toBeGreaterThan(exactResult([plain], monster).expectedDamage);
+  });
+
+  it('against anything else they apply', () => {
+    const infantry = defender(10, 4, 3, 2, null, ['infantry']);
+    expect(exactResult([limited], infantry).expectedDamage).toBeCloseTo(exactResult([both], infantry).expectedDamage, 12);
   });
 });

@@ -10,6 +10,7 @@ import {
   sameAbilities,
   withAbilityValue,
   withAntiValue,
+  withLimit,
   withoutAbility,
   withoutAnti,
   type AntiAbilityChoice,
@@ -31,7 +32,9 @@ describe('ability choices', () => {
     expect(ABILITY_CHOICES.map((c) => c.label)).toEqual([
       'Lethal Hits',
       'Sustained Hits X…',
+      'Sustained Hits X (non-Monster/Vehicle)…',
       'Devastating Wounds',
+      'Devastating Wounds (non-Monster/Vehicle)',
       'Anti-Vehicle Y+…',
       'Anti-Monster Y+…',
       'Anti-Psyker Y+…',
@@ -47,7 +50,7 @@ describe('ability choices', () => {
     ]);
     expect(ABILITY_CHOICES.filter(isAntiChoice).map((c) => c.keyword)).toEqual(['vehicle', 'monster', 'psyker', 'infantry', 'fly']);
     expect(ABILITY_CHOICES.filter(isAntiChoice).every((c) => !isValueChoice(c))).toBe(true);
-    expect(ABILITY_CHOICES.filter(isValueChoice).map((c) => c.valueKey)).toEqual(['sustainedHits', 'blast', 'cleave', 'rapidFire', 'melta']);
+    expect(ABILITY_CHOICES.filter(isValueChoice).map((c) => c.valueKey)).toEqual(['sustainedHits', 'sustainedHits', 'blast', 'cleave', 'rapidFire', 'melta']);
   });
 
   it('adds abilities without changing the input', () => {
@@ -93,7 +96,7 @@ describe('activeAbilities', () => {
   });
 
   it('marks the abilities with an X as editable', () => {
-    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false, torrent: false };
+    const all = { lethalHits: true, sustainedHits: '1', devastatingWounds: true, blast: 'D3', cleave: '1', anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false, torrent: false, notVsMonsterVehicle: [] };
     expect(activeAbilities(all).map((a) => a.valueKey)).toEqual([undefined, 'sustainedHits', undefined, 'blast', 'cleave']);
     expect(activeAbilities(all).find((a) => a.key === 'blast')?.description).toBe('Adds D3 attacks per model for every 5 models in the target unit.');
     expect(activeAbilities(all).find((a) => a.key === 'cleave')?.description).toMatch(/^Adds 1 attack per model/);
@@ -270,5 +273,46 @@ describe('Torrent', () => {
     expect(abilitiesSummary({ ...torrent, lethalHits: true })).toBe('Lethal Hits, Torrent');
     expect(sameAbilities(torrent, noAbilities())).toBe(false);
     expect(withoutAbility(torrent, 'torrent')).toEqual(noAbilities());
+  });
+});
+
+describe('non-Monster / non-Vehicle abilities', () => {
+  it('Sustained Hits and Devastating Wounds each have a limited choice; both leave the dropdown once the ability is set', () => {
+    expect(valued('sustained-hits').limited).toBe(false);
+    expect(valued('sustained-hits-limited').limited).toBe(true);
+    const sustained = withLimit(withAbilityValue(noAbilities(), 'sustainedHits', '1'), 'sustainedHits', true);
+    expect(valued('sustained-hits').isActive(sustained)).toBe(true);
+    expect(valued('sustained-hits-limited').isActive(sustained)).toBe(true);
+
+    const limited = flag('devastating-wounds-limited').apply(noAbilities());
+    expect(limited).toEqual({ ...noAbilities(), devastatingWounds: true, notVsMonsterVehicle: ['devastatingWounds'] });
+    expect(flag('devastating-wounds').isActive(limited)).toBe(true);
+    // The plain choice clears a leftover limit.
+    expect(flag('devastating-wounds').apply({ ...noAbilities(), notVsMonsterVehicle: ['devastatingWounds'] }).notVsMonsterVehicle).toEqual([]);
+  });
+
+  it('labels the limited abilities and marks them', () => {
+    const a = withLimit(withLimit({ ...noAbilities(), sustainedHits: '1', devastatingWounds: true, lethalHits: true }, 'devastatingWounds', true), 'sustainedHits', true);
+    expect(a.notVsMonsterVehicle).toEqual(['sustainedHits', 'devastatingWounds']);
+    const active = activeAbilities(a);
+    expect(active.map((x) => x.label)).toEqual(['Lethal Hits', 'Sustained Hits 1 (non-Monster/Vehicle)', 'Devastating Wounds (non-Monster/Vehicle)']);
+    expect(active.map((x) => x.limited)).toEqual([undefined, true, true]);
+    expect(active[1].valueKey).toBe('sustainedHits');
+    expect(active[2].description).toMatch(/does not apply against a Monster or Vehicle target\.$/);
+    expect(abilitiesSummary(a)).toBe('Lethal Hits, Sustained Hits 1 (non-Monster/Vehicle), Devastating Wounds (non-Monster/Vehicle)');
+  });
+
+  it('keeps the limit when X changes, and drops it with the ability', () => {
+    const a = withLimit({ ...noAbilities(), sustainedHits: '1', devastatingWounds: true }, 'sustainedHits', true);
+    expect(withAbilityValue(a, 'sustainedHits', 'd3').notVsMonsterVehicle).toEqual(['sustainedHits']);
+    expect(withoutAbility(a, 'sustainedHits')).toEqual({ ...noAbilities(), devastatingWounds: true });
+    expect(withLimit(a, 'sustainedHits', false).notVsMonsterVehicle).toEqual([]);
+    expect(a.notVsMonsterVehicle).toEqual(['sustainedHits']);
+  });
+
+  it('sameAbilities compares the limit', () => {
+    const plain = { ...noAbilities(), devastatingWounds: true };
+    expect(sameAbilities(plain, withLimit(plain, 'devastatingWounds', true))).toBe(false);
+    expect(sameAbilities(withLimit(plain, 'devastatingWounds', true), withLimit(plain, 'devastatingWounds', true))).toBe(true);
   });
 });

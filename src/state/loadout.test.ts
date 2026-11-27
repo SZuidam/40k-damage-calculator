@@ -195,6 +195,16 @@ describe('abilities in the loadout', () => {
     expect(profiles.map((p) => p.modifiers.rerollDamageBelow)).toEqual([3, 5, 0]);
   });
 
+  it('drops a weapon’s abilities limited to non-Monster / non-Vehicle targets against one, also without unit abilities', () => {
+    const u = squad();
+    u.weapons[0].abilities = { ...noAbilities(), sustainedHits: '1', devastatingWounds: true, notVsMonsterVehicle: ['sustainedHits'] };
+    const vsMonster = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [], toggles: [], keywords: ['monster'] });
+    expect(vsMonster[0].abilities).toEqual({ ...noAbilities(), devastatingWounds: true });
+    const vsInfantry = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [], toggles: [], keywords: ['infantry'] });
+    expect(vsInfantry[0].abilities.sustainedHits).toBe('1');
+    expect(u.weapons[0].abilities.sustainedHits).toBe('1');
+  });
+
   it('offers the units of the same army that can lead', () => {
     const lead: UnitAbility = { ...shock, id: 'a-lead', appliesTo: 'ledUnit' };
     const captain = unit({ id: 'cap', name: 'Captain', abilities: [lead] });

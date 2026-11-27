@@ -326,9 +326,20 @@ describe('weapon abilities on load', () => {
       lance: true,
       twinLinked: true,
       torrent: true,
+      notVsMonsterVehicle: ['sustainedHits', 'devastatingWounds'],
     };
     saveState(state, storage);
     expect(loadState(storage)).toEqual(state);
+  });
+
+  it('keeps the non-Monster / non-Vehicle limit only for known abilities the weapon has', () => {
+    expect(loadAbilities({ sustainedHits: '1' }).notVsMonsterVehicle).toEqual([]);
+    expect(loadAbilities({ sustainedHits: '1', devastatingWounds: true, notVsMonsterVehicle: ['devastatingWounds', 'lethalHits', 'sustainedHits', 'sustainedHits'] }).notVsMonsterVehicle).toEqual([
+      'sustainedHits',
+      'devastatingWounds',
+    ]);
+    expect(loadAbilities({ devastatingWounds: true, notVsMonsterVehicle: ['sustainedHits', 'devastatingWounds'] }).notVsMonsterVehicle).toEqual(['devastatingWounds']);
+    expect(loadAbilities({ sustainedHits: '1', notVsMonsterVehicle: 'sustainedHits' }).notVsMonsterVehicle).toEqual([]);
   });
 });
 

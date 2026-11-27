@@ -124,14 +124,16 @@ export interface LoadoutAbilities {
  * Engine input for the attacker: one profile per carried weapon, in firing order, fired by
  * `count` models. The weapon id becomes the profile id (unique within the unit). Every profile
  * gets its own copy of the weapon and the attack conditions, and the abilities that are active
- * for it (by its type, the toggles and the target) folded in with applyAbilities.
+ * for it (by its type, the toggles and the target) folded in with applyAbilities. Abilities
+ * limited to non-Monster / non-Vehicle targets are dropped against one (abilitiesAgainst).
  */
 export function resolveLoadout(unit: Unit, rows: readonly LoadoutRow[], conditions: AttackConditions, extra?: LoadoutAbilities): WeaponProfile[] {
   const ctx: AbilityContext = { conditions, toggles: extra?.toggles ?? [], keywords: extra?.keywords ?? null };
   return carriedWeapons(unit, rows).map(({ row, weapon }) => {
     const profile: WeaponProfile = { ...pickStats(weapon), id: weapon.id, models: row.count, conditions: { ...conditions }, modifiers: noModifiers() };
     const active = (extra?.abilities ?? []).filter((a) => isActive(a, weapon.type, ctx));
-    return active.length === 0 ? profile : applyAbilities(profile, active, extra?.damageRerolls);
+    // Resolved against the target even without abilities, so the engine input holds only what applies.
+    return applyAbilities(profile, active, extra?.damageRerolls, ctx.keywords);
   });
 }
 

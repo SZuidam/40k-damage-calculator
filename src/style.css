@@ -368,6 +368,12 @@ select[aria-invalid='true'] {
   padding: 0 3px;
 }
 
+/* An ability limited to non-Monster / non-Vehicle targets while the defender is one. */
+.row-abilities .ability-inactive {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

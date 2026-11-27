@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { weapon } from '../engine/testFixtures';
-import { noAbilities, noConditions, type AbilityEffect, type Army, type Unit, type UnitAbility } from '../types';
+import { noAbilities, noConditions, type AbilityEffect, type Army, type Unit, type UnitAbility, type WeaponAbilities } from '../types';
 import {
   abilitiesFor,
   abilitySummary,
@@ -191,6 +191,42 @@ describe('applyAbilities', () => {
     expect(grantAbilities({ ...noAbilities(), anti: { infantry: 2 } }, granted).anti.infantry).toBe(2);
     const out = applyAbilities({ ...base(), abilities: own }, [ability('Grant', [{ kind: 'grant', abilities: granted }])]);
     expect(out.abilities.lethalHits).toBe(true);
+  });
+
+  it('a non-Monster / non-Vehicle limit goes with the ability it is on when granting', () => {
+    const limitedSh: WeaponAbilities = { ...noAbilities(), sustainedHits: '2', notVsMonsterVehicle: ['sustainedHits'] };
+    const limitedDw: WeaponAbilities = { ...noAbilities(), devastatingWounds: true, notVsMonsterVehicle: ['devastatingWounds'] };
+    const plainSh = { ...noAbilities(), sustainedHits: '1' };
+    const plainDw = { ...noAbilities(), devastatingWounds: true };
+    // Sustained Hits keeps the weapon's own X, with its limit (or none).
+    expect(grantAbilities(limitedSh, plainSh)).toEqual(limitedSh);
+    expect(grantAbilities(plainSh, limitedSh)).toEqual(plainSh);
+    expect(grantAbilities(noAbilities(), limitedSh)).toEqual(limitedSh);
+    // Devastating Wounds is only limited when every source that has it is.
+    expect(grantAbilities(limitedDw, plainDw)).toEqual(plainDw);
+    expect(grantAbilities(plainDw, limitedDw)).toEqual(plainDw);
+    expect(grantAbilities(limitedDw, limitedDw)).toEqual(limitedDw);
+    expect(grantAbilities(noAbilities(), limitedDw)).toEqual(limitedDw);
+    expect(grantAbilities(limitedDw, noAbilities())).toEqual(limitedDw);
+    expect(grantAbilities(limitedSh, limitedDw).notVsMonsterVehicle).toEqual(['sustainedHits', 'devastatingWounds']);
+  });
+
+  it('resolves limited abilities against the target before granting', () => {
+    const own: WeaponAbilities = { ...noAbilities(), sustainedHits: '2', notVsMonsterVehicle: ['sustainedHits'] };
+    const grant = [ability('Leader', [{ kind: 'grant', abilities: { ...noAbilities(), sustainedHits: '1', devastatingWounds: true, notVsMonsterVehicle: ['devastatingWounds'] } }])];
+    const profile = { ...base(), abilities: own };
+    // Against a Monster the weapon's limited Sustained Hits 2 drops out, so the granted 1 takes its place.
+    expect(applyAbilities(profile, grant, undefined, ['monster']).abilities).toEqual({ ...noAbilities(), sustainedHits: '1' });
+    expect(applyAbilities(profile, grant, undefined, ['infantry']).abilities).toEqual({
+      ...noAbilities(),
+      sustainedHits: '2',
+      devastatingWounds: true,
+      notVsMonsterVehicle: ['sustainedHits', 'devastatingWounds'],
+    });
+    expect(applyAbilities(profile, grant).abilities.sustainedHits).toBe('2');
+    // Without any ability, the weapon's own limited abilities are still resolved.
+    expect(applyAbilities(profile, [], undefined, ['vehicle']).abilities).toEqual(noAbilities());
+    expect(profile.abilities).toEqual(own);
   });
 
   it('leaves the input profile alone', () => {

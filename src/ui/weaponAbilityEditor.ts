@@ -8,6 +8,7 @@ import {
   parseAntiValue,
   withAbilityValue,
   withAntiValue,
+  withLimit,
   withoutAbility,
   withoutAnti,
   type ValueAbilityKey,
@@ -58,7 +59,11 @@ export function weaponAbilityEditor(options: WeaponAbilityEditorOptions): Weapon
     onChange();
   };
 
-  const askValue = async (key: ValueAbilityKey, anchor: HTMLElement, initial: string, placeBy?: HTMLElement): Promise<boolean> => {
+  /**
+   * Ask for X of `key` and store it. `limited` (from the dropdown choice) also sets whether the
+   * ability is limited to non-Monster / non-Vehicle targets; a chip leaves it as it is.
+   */
+  const askValue = async (key: ValueAbilityKey, anchor: HTMLElement, initial: string, placeBy?: HTMLElement, limited?: boolean): Promise<boolean> => {
     const label = VALUE_ABILITY_NAMES[key];
     const value = await openAbilityValuePopover({
       container: abilityEditor,
@@ -69,7 +74,8 @@ export function weaponAbilityEditor(options: WeaponAbilityEditorOptions): Weapon
       validate: (x) => abilityValueError(x, label),
     });
     if (value === null) return false;
-    update(withAbilityValue(get(), key, value));
+    const next = withAbilityValue(get(), key, value);
+    update(limited !== undefined && key === 'sustainedHits' ? withLimit(next, key, limited) : next);
     return true;
   };
 
@@ -142,7 +148,7 @@ export function weaponAbilityEditor(options: WeaponAbilityEditorOptions): Weapon
     if (!choice) return;
     if (isValueChoice(choice)) {
       abilitySelect.value = '';
-      if (await askValue(choice.valueKey, abilitySelect, '')) focusAfterAdd();
+      if (await askValue(choice.valueKey, abilitySelect, '', undefined, choice.limited)) focusAfterAdd();
       return;
     }
     if (isAntiChoice(choice)) {
