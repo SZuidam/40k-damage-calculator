@@ -151,7 +151,28 @@ describe('applyAbilities', () => {
         { kind: 'reroll', roll: 'wound', which: 'ones' },
       ]),
     ]);
-    expect(modifiers).toEqual({ hit: 2, wound: -1, criticalHit: 5, criticalWound: 4, rerollHits: 'failed', rerollWounds: 'ones' });
+    expect(modifiers).toEqual({ hit: 2, wound: -1, criticalHit: 5, criticalWound: 4, rerollHits: 'failed', rerollWounds: 'ones', rerollDamageBelow: 0 });
+  });
+
+  it('re-rolls damage below the Settings threshold for the dice of D', () => {
+    const reroll = [ability('Re-roll', [{ kind: 'rerollDamage' }])];
+    const thresholds = { d3: 3, d6: 5 };
+    const withDamage = (damage: string) => ({ ...base(), damage });
+    expect(applyAbilities(withDamage('D3'), reroll, thresholds).modifiers.rerollDamageBelow).toBe(3);
+    expect(applyAbilities(withDamage('2D6'), reroll, thresholds).modifiers.rerollDamageBelow).toBe(5);
+    // Fixed damage has nothing to re-roll.
+    expect(applyAbilities(withDamage('2'), reroll, thresholds).modifiers.rerollDamageBelow).toBe(0);
+    // Without thresholds the defaults apply: below 2 for D3, below 4 for D6.
+    expect(applyAbilities(withDamage('D6'), reroll).modifiers.rerollDamageBelow).toBe(4);
+    // D +1 from another effect keeps the D6 threshold, compared with the dice of D6+1 only.
+    const plusOne = applyAbilities(withDamage('D6'), [ability('Both', [{ kind: 'stat', stat: 'damage', amount: 1 }, { kind: 'rerollDamage' }])], thresholds);
+    expect(plusOne.damage).toBe('D6+1');
+    expect(plusOne.modifiers.rerollDamageBelow).toBe(5);
+    expect(abilitySummary(reroll[0])).toBe('Re-roll damage');
+  });
+
+  it('grants Torrent', () => {
+    expect(grantAbilities(noAbilities(), { ...noAbilities(), torrent: true }).torrent).toBe(true);
   });
 
   it('ignores out-of-range values (validation flags them)', () => {

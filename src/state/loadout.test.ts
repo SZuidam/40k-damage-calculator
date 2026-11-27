@@ -186,6 +186,15 @@ describe('abilities in the loadout', () => {
     expect(on.every((p) => p.modifiers.rerollHits === 'failed')).toBe(true);
   });
 
+  it('passes the damage re-roll thresholds of the Settings on', () => {
+    const u = squad();
+    u.weapons[0].damage = 'D3';
+    u.weapons[1].damage = 'D6+1';
+    const reroll: UnitAbility = { ...shock, id: 'a-dmg', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'rerollDamage' }] };
+    const profiles = resolveLoadout(u, allCarried(u), noConditions(), { abilities: [reroll], toggles: [], keywords: null, damageRerolls: { d3: 3, d6: 5 } });
+    expect(profiles.map((p) => p.modifiers.rerollDamageBelow)).toEqual([3, 5, 0]);
+  });
+
   it('offers the units of the same army that can lead', () => {
     const lead: UnitAbility = { ...shock, id: 'a-lead', appliesTo: 'ledUnit' };
     const captain = unit({ id: 'cap', name: 'Captain', abilities: [lead] });

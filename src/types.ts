@@ -50,10 +50,16 @@ export interface WeaponAbilities {
    * roll, so it can be a critical wound. Lethal Hits auto-wounds make no wound roll to re-roll.
    */
   twinLinked: boolean;
+  /**
+   * Torrent: every attack hits automatically. No hit roll is made, so the weapon has no BS / WS
+   * that counts, hit modifiers and re-rolls don't matter, and there are no critical hits (Lethal
+   * Hits and Sustained Hits can't trigger).
+   */
+  torrent: boolean;
 }
 
 export function noAbilities(): WeaponAbilities {
-  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false };
+  return { lethalHits: false, sustainedHits: null, devastatingWounds: false, blast: null, cleave: null, anti: {}, rapidFire: null, melta: null, lance: false, twinLinked: false, torrent: false };
 }
 
 /**
@@ -89,7 +95,7 @@ export interface WeaponStats {
   type: WeaponType;
   /** Attacks per model, as a dice expression ("2", "D6", "2D3+1"). */
   attacks: string;
-  /** Ballistic / Weapon Skill target (2–6). */
+  /** Ballistic / Weapon Skill target (2–6). Kept but unused while the weapon has Torrent. */
   skill: number;
   strength: number;
   /** Armour penetration, entered as 0 or a negative number. */
@@ -156,10 +162,33 @@ export interface RollModifiers {
   rerollHits: RerollKind;
   /** Twin-linked counts as 'failed' on top of this. */
   rerollWounds: RerollKind;
+  /**
+   * A damage roll whose dice (the dice of the Damage characteristic, without its +X or Melta)
+   * show less than this is re-rolled once, and the re-roll stands; 0 for no re-roll. It is the Settings threshold for
+   * the weapon's dice (D3 or D6), set while an ability with "Re-roll damage" applies.
+   */
+  rerollDamageBelow: number;
 }
 
 export function noModifiers(): RollModifiers {
-  return { hit: 0, wound: 0, criticalHit: 6, criticalWound: 6, rerollHits: 'none', rerollWounds: 'none' };
+  return { hit: 0, wound: 0, criticalHit: 6, criticalWound: 6, rerollHits: 'none', rerollWounds: 'none', rerollDamageBelow: 0 };
+}
+
+/**
+ * Settings: "Re-roll damage" re-rolls a damage roll below these, by the dice of the weapon's
+ * Damage characteristic (D3 or D6). Compared with the dice only, before any +X: D6+2 rolling
+ * a 3 counts as 3, so "below 4" re-rolls 1–3 on D6, D6+1 and D6+2 alike.
+ */
+export interface DamageRerollThresholds {
+  d3: number;
+  d6: number;
+}
+
+/** The highest "re-roll below" a threshold can be set to (the dice of 2D3 show up to 6, of 2D6 up to 12). */
+export const MAX_DAMAGE_REROLL_BELOW = { d3: 6, d6: 12 } as const;
+
+export function defaultDamageRerolls(): DamageRerollThresholds {
+  return { d3: 2, d6: 4 };
 }
 
 /** Engine input: one attacking weapon profile, fired by `models` models. */
@@ -171,7 +200,7 @@ export interface WeaponProfile {
   models: number;
   /** Attacks per model, as a dice expression ("2", "D6", "2D3+1"). */
   attacks: string;
-  /** Ballistic / Weapon Skill target (2–6). */
+  /** Ballistic / Weapon Skill target (2–6); unused with Torrent. */
   skill: number;
   strength: number;
   /** Armour penetration, entered as 0 or a negative number. */
@@ -229,6 +258,8 @@ export type AbilityEffect =
   | { kind: 'critical'; roll: 'hit' | 'wound'; on: number }
   /** Re-roll hit / wound rolls of 1, or every failed one. */
   | { kind: 'reroll'; roll: 'hit' | 'wound'; which: 'ones' | 'failed' }
+  /** Re-roll a damage roll below the Settings threshold for the weapon's dice (DamageRerollThresholds). */
+  | { kind: 'rerollDamage' }
   /** The weapon gains these weapon abilities (only the ones set count). */
   | { kind: 'grant'; abilities: WeaponAbilities };
 

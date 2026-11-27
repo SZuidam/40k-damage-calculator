@@ -20,6 +20,10 @@ describe('statsSummary', () => {
     expect(statsSummary(boltRifle())).toBe('A 2 · BS 3+ · S 4 · AP -1 · D 1');
     expect(statsSummary({ ...boltRifle(), type: 'melee' })).toBe('Melee · A 2 · WS 3+ · S 4 · AP -1 · D 1');
   });
+
+  it('reads BS N/A for a Torrent weapon', () => {
+    expect(statsSummary({ ...boltRifle(), abilities: { ...noAbilities(), torrent: true } })).toBe('A 2 · BS N/A · S 4 · AP -1 · D 1 · Torrent');
+  });
 });
 
 describe('defenders', () => {

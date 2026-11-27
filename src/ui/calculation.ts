@@ -62,6 +62,33 @@ function termsNote(terms: DiceTerm[], per: string): string | null {
   return `${per}: ${parts.join(' + ')}.`;
 }
 
+/** How a damage re-roll changes the average of D. */
+function damageRerollNote(b: WeaponBreakdown): string | null {
+  const r = b.damageReroll;
+  if (r === null) return null;
+  const head = `Re-roll damage below ${r.below} (Settings): `;
+  if (r.rerolled === 0) return `${head}the dice of D ${b.weapon.damage} never show less than ${r.below}, so nothing is re-rolled.`;
+  return `${head}a D ${b.weapon.damage} roll whose dice show less than ${r.below} (${chance(r.rerolled)} of the rolls) is rolled again and the re-roll stands, which raises its average from ${num(r.plainMean)} to ${num(r.mean)}.`;
+}
+
+/** BS / WS as shown: "BS 3+", or "BS N/A" for a Torrent weapon (it makes no hit roll). */
+function skillText(b: WeaponBreakdown): string {
+  const skill = b.weapon.type === 'melee' ? 'WS' : 'BS';
+  return b.torrent ? `${skill} N/A` : `${skill} ${b.weapon.skill}+`;
+}
+
+/** The note on the hit roll: what it passes on, or that Torrent skips it. */
+function hitNote(b: WeaponBreakdown): string {
+  if (b.torrent) {
+    const lost = [b.weapon.abilities.lethalHits ? 'Lethal Hits' : '', b.weapon.abilities.sustainedHits !== null ? 'Sustained Hits' : ''].filter(Boolean);
+    const without = lost.length === 0 ? '' : `, so there are no critical hits and ${lost.join(' and ')} can't trigger`;
+    return `Torrent: every attack hits automatically. No hit roll is made${without}.`;
+  }
+  const why = [skillText(b)];
+  if (b.hitModifier !== 0) why.push(`${signed(b.hitModifier)} to hit`);
+  return `The hit roll ${passText(b.hit)} (${why.join(', ')}); an unmodified 1 always fails.`;
+}
+
 function weaponTitle(b: WeaponBreakdown, index: number): string {
   const name = b.weapon.name || `Weapon ${index + 1}`;
   return `${index + 1}. ${b.weapon.models}× ${name}`;
@@ -69,8 +96,7 @@ function weaponTitle(b: WeaponBreakdown, index: number): string {
 
 function weaponStatLine(b: WeaponBreakdown): string {
   const w = b.weapon;
-  const skill = w.type === 'melee' ? 'WS' : 'BS';
-  return `A ${w.attacks} · ${skill} ${w.skill}+ · S ${w.strength} · AP ${w.ap} · D ${w.damage}`;
+  return `A ${w.attacks} · ${skillText(b)} · S ${w.strength} · AP ${w.ap} · D ${w.damage}`;
 }
 
 export function defenderLine(defender: DefenderProfile): string {
@@ -95,19 +121,16 @@ export function weaponCalc(b: WeaponBreakdown, index: number, defender: Defender
   });
 
   // Hits
-  const skill = w.type === 'melee' ? 'WS' : 'BS';
-  const hitWhy = [`${skill} ${w.skill}+`];
-  if (b.hitModifier !== 0) hitWhy.push(`${signed(b.hitModifier)} to hit`);
   const hitFormula = `${num(b.attacks)} × ${rollFormula(b.hit.first, b.hit.rerolled)}`;
   const critHitFormula = rollFormula(b.hit.criticalFirst, b.hit.rerolled);
   lines.push({
     step: 'Hits',
-    formula: b.sustained === null ? hitFormula : `${hitFormula} + ${num(b.attacks)} × ${critHitFormula} × ${num(b.sustained.mean)}`,
+    formula: b.sustained === null || b.torrent ? hitFormula : `${hitFormula} + ${num(b.attacks)} × ${critHitFormula} × ${num(b.sustained.mean)}`,
     value: fixed(b.hits),
     notes: notes(
-      `The hit roll ${passText(b.hit)} (${hitWhy.join(', ')}); an unmodified 1 always fails.`,
+      hitNote(b),
       rerollNote(b.hit, 'hit'),
-      b.sustained === null
+      b.sustained === null || b.torrent
         ? null
         : `${b.sustained.label}: critical hits (unmodified ${b.hit.criticalOn}+) are ${num(b.attacks)} × ${critHitFormula} = ${num(b.criticalHits)}, each scoring ${b.sustained.expr}${b.sustained.expr === num(b.sustained.mean) ? '' : ` (avg ${num(b.sustained.mean)})`} extra hits = ${num(b.extraHits)}.`,
     ),
@@ -154,7 +177,7 @@ export function weaponCalc(b: WeaponBreakdown, index: number, defender: Defender
     step: 'Damage',
     formula: `${num(b.unsaved)} × ${termsFormula(b.damageTerms)}`,
     value: fixed(b.damage),
-    notes: notes(termsNote(b.damageTerms, 'Damage per unsaved wound')),
+    notes: notes(damageRerollNote(b), termsNote(b.damageTerms, 'Damage per unsaved wound')),
   });
 
   lines.push({

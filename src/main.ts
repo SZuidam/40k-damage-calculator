@@ -5,11 +5,11 @@ import { armyOf, carriedWeapons, defenderOf, leaderChoices, newLoadout, reconcil
 import { bannerCss, loadBanners, pruneBanners, saveBanners } from './state/banners';
 import { loadState, saveState } from './state/storage';
 import { abilitiesFor, activeFor, pruneToggles, type AbilityContext, type SourcedAbility } from './state/unitAbilities';
-import type { StoredWeapon, Unit, WeaponProfile } from './types';
+import { MAX_DAMAGE_REROLL_BELOW, type StoredWeapon, type Unit, type WeaponProfile } from './types';
 import { renderAbilitiesLine } from './ui/abilitiesLine';
 import { renderAttackConditions } from './ui/conditionsForm';
 import { renderDefenderPanel } from './ui/defenderPanel';
-import { field, h, numberValue, setFieldError } from './ui/dom';
+import { field, h, numberValue, select, setFieldError } from './ui/dom';
 import { Drawer } from './ui/drawer';
 import { LoadoutRows } from './ui/loadoutRows';
 import { createResultsView } from './ui/results';
@@ -72,7 +72,12 @@ function attackerWeapons(): WeaponProfile[] {
   const unit = attackingUnit();
   if (!unit) return [];
   const ctx = abilityContext();
-  return resolveLoadout(unit, state.attacker.rows, state.conditions, { abilities: attackAbilities().map((a) => a.ability), toggles: ctx.toggles, keywords: ctx.keywords });
+  return resolveLoadout(unit, state.attacker.rows, state.conditions, {
+    abilities: attackAbilities().map((a) => a.ability),
+    toggles: ctx.toggles,
+    keywords: ctx.keywords,
+    damageRerolls: state.damageRerolls,
+  });
 }
 
 /** The first ability of the attack that is invalid (only from a bad save or import), with whose it is. */
@@ -308,6 +313,7 @@ const loadoutRows = new LoadoutRows($('loadout'), state.attacker, {
   },
   conditions: () => state.conditions,
   abilities: activeAbilitiesFor,
+  damageRerolls: () => state.damageRerolls,
 });
 
 // ---------- Defender ----------
@@ -360,6 +366,19 @@ function settingsPanel(): HTMLElement {
   });
   sync();
 
+  // Re-roll damage: a D3 / D6 damage roll below its threshold is re-rolled once.
+  const rerollSelect = (key: 'd3' | 'd6') => {
+    const options = [];
+    for (let below = 2; below <= MAX_DAMAGE_REROLL_BELOW[key]; below++) options.push({ value: below, label: `below ${below}` });
+    const el = select({ id: `damage-reroll-${key}` }, options, state.damageRerolls[key]);
+    el.addEventListener('input', () => {
+      state.damageRerolls[key] = numberValue(el);
+      // The re-roll levers on the rows show the threshold.
+      onInputsChanged();
+    });
+    return el;
+  };
+
   const importButton = h('button', { type: 'button', class: 'button secondary' }, 'Import…');
   const exportButton = h('button', { type: 'button', class: 'button secondary' }, 'Export…');
   exportButton.addEventListener('click', () => openExportModal({ armies: state.armies, units: state.units, banners }));
@@ -384,6 +403,17 @@ function settingsPanel(): HTMLElement {
       h('h3', {}, 'Simulation'),
       field('Iterations', iterations, 'field--iterations'),
       h('p', { class: 'panel-hint' }, 'Simulated runs per press of Simulate, from 100 to 1,000,000. More runs give smoother results but take longer.'),
+    ),
+    h(
+      'section',
+      { class: 'settings-section' },
+      h('h3', {}, 'Damage re-rolls'),
+      h('div', { class: 'settings-row' }, field('Re-roll D3 damage', rerollSelect('d3')), field('Re-roll D6 damage', rerollSelect('d6'))),
+      h(
+        'p',
+        { class: 'panel-hint' },
+        'For abilities with the “Re-roll damage” effect. A damage roll whose dice show less than the threshold is rolled again once, and the re-roll stands. Only the dice count, not the +X: with “below 4”, D6, D6+1 and D6+2 all re-roll a 1, 2 or 3. Melta is added afterwards. Fixed damage is never re-rolled.',
+      ),
     ),
     h(
       'section',

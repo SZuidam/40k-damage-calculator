@@ -1,9 +1,9 @@
 import { formatDiceSum, tryParseDice, type DiceExpr } from '../engine/dice';
 import { bonusAttacks, bonusDamage, hitModifier, woundModifier } from '../engine/rules';
 import { activeAbilities, normaliseDice } from '../state/abilities';
-import { pickStats } from '../state/presets';
+import { pickStats, skillValue } from '../state/presets';
 import { apAmount, applyAbilities, effectSummary, statAmount, type SourcedAbility } from '../state/unitAbilities';
-import { KEYWORD_NAMES, noModifiers, type AbilityEffect, type AttackConditions, type DefenderProfile, type WeaponProfile, type WeaponStats } from '../types';
+import { KEYWORD_NAMES, noModifiers, type AbilityEffect, type AttackConditions, type DamageRerollThresholds, type DefenderProfile, type WeaponProfile, type WeaponStats } from '../types';
 import { h } from './dom';
 
 /** What the stat chips need to know about the defender: its size (Blast / Cleave) and keywords (Anti). */
@@ -11,7 +11,7 @@ export type ChipDefender = Pick<DefenderProfile, 'models' | 'keywords'>;
 
 export const CHIP_LABELS: { key: Exclude<keyof WeaponStats, 'abilities' | 'type'>; label: string; title: string; format?: (w: WeaponStats) => string }[] = [
   { key: 'attacks', label: 'A', title: 'Attacks' },
-  { key: 'skill', label: 'BS', title: 'Ballistic / Weapon Skill', format: (w) => `${w.skill}+` },
+  { key: 'skill', label: 'BS', title: 'Ballistic / Weapon Skill', format: skillValue },
   { key: 'strength', label: 'S', title: 'Strength' },
   { key: 'ap', label: 'AP', title: 'Armour penetration' },
   { key: 'damage', label: 'D', title: 'Damage' },
@@ -38,13 +38,20 @@ const constant = (x: number): DiceExpr => ({ count: 0, sides: 0, bonus: x });
  * their +X shows on the A / S / D chips in blue (with Blast / Cleave / Rapid Fire extra attacks on
  * A and Melta on D), an improved AP in blue, a hit modifier on the BS chip, and their roll levers
  * and granted weapon abilities as dashed entries in the ability text. Weapon abilities that apply
- * to the defender's keywords or the current conditions are outlined.
+ * to the defender's keywords or the current conditions are outlined. A Torrent weapon (its own or
+ * granted) reads "BS N/A". `damageRerolls` are the Settings thresholds for "Re-roll damage".
  */
-export function statChips(weapon: WeaponStats | undefined, defender: ChipDefender | undefined, conditions: AttackConditions, applied: readonly SourcedAbility[] = []): HTMLElement[] {
+export function statChips(
+  weapon: WeaponStats | undefined,
+  defender: ChipDefender | undefined,
+  conditions: AttackConditions,
+  applied: readonly SourcedAbility[] = [],
+  damageRerolls?: DamageRerollThresholds,
+): HTMLElement[] {
   if (!weapon) return [h('span', { class: 'chips-empty' }, 'No weapon chosen')];
   const effects = applied.flatMap((a) => a.ability.effects);
   const base: WeaponProfile = { ...pickStats(weapon), id: '', models: 1, conditions, modifiers: noModifiers() };
-  const resolved = applied.length === 0 ? base : applyAbilities(base, applied.map((a) => a.ability));
+  const resolved = applied.length === 0 ? base : applyAbilities(base, applied.map((a) => a.ability), damageRerolls);
   const melee = weapon.type === 'melee';
   const chips = CHIP_LABELS.map(({ key, label, title, format }) =>
     h('span', { class: 'chip', title }, h('span', { class: 'chip-label' }, key === 'skill' && melee ? 'WS' : label), ' ', format ? format(weapon) : String(weapon[key])),
@@ -63,9 +70,13 @@ export function statChips(weapon: WeaponStats | undefined, defender: ChipDefende
     aChip.title = `Attacks: ${weapon.attacks}, plus ${sources.join(' and ')}`;
   }
 
-  // BS / WS: "BS 3+ (+1)" while a hit modifier applies (capped at -1 / +1, as in the engine).
+  // BS / WS: "BS N/A" with Torrent (it never rolls to hit, so hit modifiers don't matter), else
+  // "BS 3+ (+1)" while a hit modifier applies (capped at -1 / +1, as in the engine).
   const toHit = hitModifier(resolved);
-  if (toHit !== 0) {
+  if (resolved.abilities.torrent) {
+    skillChip.replaceChildren(h('span', { class: 'chip-label' }, melee ? 'WS' : 'BS'), ' ', weapon.abilities.torrent ? 'N/A' : h('span', { class: 'chip-bonus' }, 'N/A'));
+    skillChip.title = `Torrent${weapon.abilities.torrent ? '' : ` (gained from ${sourcesOf(applied, (e) => e.kind === 'grant' && e.abilities.torrent)})`}: every attack hits automatically, without a hit roll.`;
+  } else if (toHit !== 0) {
     const text = `${toHit > 0 ? '+' : ''}${toHit}`;
     skillChip.append(h('span', { class: 'chip-bonus' }, ` (${text})`));
     skillChip.title = `${melee ? 'Weapon' : 'Ballistic'} Skill ${weapon.skill}+, ${text} to hit from ${sourcesOf(applied, (e) => e.kind === 'roll' && e.roll === 'hit')}`;
@@ -151,6 +162,14 @@ function rollLevers(resolved: WeaponProfile, weapon: WeaponStats, applied: reado
   // Twin-linked already re-rolls failed wounds; only show what abilities add on top.
   if (m.rerollWounds !== 'none' && !weapon.abilities.twinLinked) {
     out.push({ label: effectSummary({ kind: 'reroll', roll: 'wound', which: m.rerollWounds }), title: from((e) => e.kind === 'reroll' && e.roll === 'wound') });
+  }
+  // Re-roll damage: the threshold comes from the Settings, by the dice of D (none for fixed damage).
+  const rerollsDamage = (e: AbilityEffect) => e.kind === 'rerollDamage';
+  if (applied.some((a) => a.ability.effects.some(rerollsDamage))) {
+    const title = m.rerollDamageBelow > 0
+      ? `${from(rerollsDamage)} A D ${resolved.damage} damage roll whose dice show less than ${m.rerollDamageBelow} is re-rolled once (set under ☰ → Settings).`
+      : `${from(rerollsDamage)} D ${resolved.damage} is fixed, so there is nothing to re-roll.`;
+    out.push({ label: m.rerollDamageBelow > 0 ? `Re-roll damage below ${m.rerollDamageBelow}` : 'Re-roll damage (fixed D)', title });
   }
   return out;
 }

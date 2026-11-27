@@ -56,6 +56,23 @@ describe('weaponCalc', () => {
   });
 });
 
+describe('Torrent and damage re-rolls', () => {
+  it('reads BS N/A and explains that a Torrent weapon hits automatically', () => {
+    const flamer = weapon('Flamer', 1, 'D6', 3, 4, 0, '1', { torrent: true, sustainedHits: '1' });
+    const wc = weaponCalc(breakdown([flamer], gravis).weapons[0], 0, gravis);
+    expect(wc.statLine).toBe('A D6 · BS N/A · S 4 · AP 0 · D 1');
+    const hits = wc.lines.find((l) => l.step === 'Hits')!;
+    expect(hits.formula).toBe(dec('3.5 × 1'));
+    expect(hits.notes).toEqual(['Torrent: every attack hits automatically. No hit roll is made, so there are no critical hits and Sustained Hits can’t trigger.'.replace('’', "'")]);
+  });
+
+  it('explains the damage re-roll', () => {
+    const gun = weapon('Gun', 1, '1', 3, 4, 0, 'D6', {}, {}, { rerollDamageBelow: 4 });
+    const damage = weaponCalc(breakdown([gun], gravis).weapons[0], 0, gravis).lines.find((l) => l.step === 'Damage')!;
+    expect(damage.notes[0]).toBe(dec('Re-roll damage below 4 (Settings): a D D6 roll whose dice show less than 4 (3/6 of the rolls) is rolled again and the re-roll stands, which raises its average from 3.5 to 4.25') + '.');
+  });
+});
+
 describe('calculationText', () => {
   it('ends with the exact totals', () => {
     const text = calculationText(breakdown([boltRifles], gravis), gravis);

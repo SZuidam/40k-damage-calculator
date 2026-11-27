@@ -1,5 +1,6 @@
-import type { DefenderKeyword, DefenderProfile, RerollKind, RollModifiers, WeaponAbilities, WeaponProfile } from '../types';
-import { convolve, diceDistribution, parseDice, repeatDice, type DiceExpr } from './dice';
+import type { DamageRerollThresholds, DefenderKeyword, DefenderProfile, RerollKind, RollModifiers, WeaponAbilities, WeaponProfile } from '../types';
+import { convolve, diceDistribution, parseDice, repeatDice, rollDice, rollDiceSum, tryParseDice, type DiceExpr } from './dice';
+import type { Rng } from './rng';
 
 /** A roll target above 6 can never be met. */
 export const IMPOSSIBLE = 7;
@@ -74,6 +75,10 @@ export interface AttackContext {
   rerollHits: RerollKind;
   /** Which wound rolls are re-rolled once: Twin-linked re-rolls failed ones, abilities 1s or failed ones. */
   rerollWounds: RerollKind;
+  /** Torrent: every attack hits automatically, without a hit roll (so never a critical hit). */
+  torrent: boolean;
+  /** A roll of `damage` whose dice (without its +X) show less than this is re-rolled once and the re-roll stands; 0 for none. */
+  rerollDamageBelow: number;
 }
 
 /** A hit or wound roll can be modified by at most -1 / +1 in total. */
@@ -134,6 +139,18 @@ export function isRerolled(kind: RerollKind, roll: number, succeeded: boolean): 
   return false;
 }
 
+/**
+ * The "re-roll damage below" threshold for a Damage characteristic: the D3 or D6 threshold of
+ * the Settings by the dice it rolls, or 0 when it rolls none (fixed damage has nothing to re-roll)
+ * or isn't a valid expression.
+ */
+export function damageRerollBelow(damage: string, thresholds: DamageRerollThresholds): number {
+  const parsed = tryParseDice(damage);
+  if (!parsed || parsed.count === 0) return 0;
+  const below = parsed.sides === 3 ? thresholds.d3 : thresholds.d6;
+  return Number.isInteger(below) && below > 0 ? below : 0;
+}
+
 /** A critical threshold as a whole number 2–6 (6 when it isn't usable). */
 function threshold(value: number): number {
   return Number.isInteger(value) && value >= 2 && value <= 6 ? value : 6;
@@ -167,14 +184,56 @@ export function damagePerWound(ctx: AttackContext): DiceExpr[] {
   return [ctx.damage, ...ctx.bonusDamage];
 }
 
+/** Whether a damage roll of `total` is re-rolled: its dice (the total without D's +X) show less than the threshold. */
+function isDamageRerolled(ctx: AttackContext, total: number): boolean {
+  return total - ctx.damage.bonus < ctx.rerollDamageBelow;
+}
+
+/**
+ * PMF of the Damage characteristic's roll after a re-roll: a roll whose dice show less than
+ * `rerollDamageBelow` (D6+2 rolling a 3 counts as 3, not 5) is rolled again and the new roll
+ * stands, whatever it is:
+ *   P(v) = [v is kept] · p(v) + P(first roll is re-rolled) · p(v).
+ * Without a re-roll this is the plain PMF of D.
+ */
+export function damageRollDistribution(ctx: AttackContext): number[] {
+  const first = diceDistribution(ctx.damage);
+  if (ctx.rerollDamageBelow <= 0) return first;
+  const again = first.reduce((sum, p, v) => sum + (isDamageRerolled(ctx, v) ? p : 0), 0);
+  return first.map((p, v) => (isDamageRerolled(ctx, v) ? 0 : p) + again * p);
+}
+
+/** P(a damage roll is re-rolled): P(the dice of D show less than `rerollDamageBelow`). */
+export function damageRerollChance(ctx: AttackContext): number {
+  if (ctx.rerollDamageBelow <= 0) return 0;
+  return diceDistribution(ctx.damage).reduce((sum, p, v) => sum + (isDamageRerolled(ctx, v) ? p : 0), 0);
+}
+
+/** PMF of the damage of one unsaved wound: D (after any re-roll) plus Melta. */
+export function damageDistribution(ctx: AttackContext): number[] {
+  let pmf = damageRollDistribution(ctx);
+  for (const term of ctx.bonusDamage) pmf = convolve(pmf, diceDistribution(term));
+  return pmf;
+}
+
+/** Roll the damage of one unsaved wound: D (re-rolled once when its dice show less than `rerollDamageBelow`) plus Melta. */
+export function rollDamage(ctx: AttackContext, rng: Rng): number {
+  let damage = rollDice(ctx.damage, rng);
+  if (isDamageRerolled(ctx, damage)) damage = rollDice(ctx.damage, rng);
+  return damage + rollDiceSum(ctx.bonusDamage, rng);
+}
+
 export function createAttackContext(weapon: WeaponProfile, defender: DefenderProfile): AttackContext {
   const { abilities } = weapon;
   const critical = criticalThresholds(weapon.modifiers);
+  const damage = parseDice(weapon.damage);
+  const torrent = abilities.torrent;
+  const rerollDamage = weapon.modifiers.rerollDamageBelow;
   return {
     weapon,
     defender,
     attacks: parseDice(weapon.attacks),
-    damage: parseDice(weapon.damage),
+    damage,
     bonusDamage: bonusDamage(weapon),
     hitTarget: weapon.skill,
     woundTarget: woundTarget(weapon.strength, defender.toughness),
@@ -185,19 +244,24 @@ export function createAttackContext(weapon: WeaponProfile, defender: DefenderPro
     sustainedHits: abilities.sustainedHits === null ? null : parseDice(abilities.sustainedHits),
     devastatingWounds: abilities.devastatingWounds,
     bonusAttacks: bonusAttacks(weapon, defender),
-    hitModifier: hitModifier(weapon),
+    // Torrent makes no hit roll: nothing to modify or re-roll.
+    hitModifier: torrent ? 0 : hitModifier(weapon),
     woundModifier: woundModifier(weapon),
-    rerollHits: weapon.modifiers.rerollHits,
+    rerollHits: torrent ? 'none' : weapon.modifiers.rerollHits,
     rerollWounds: strongerReroll(abilities.twinLinked ? 'failed' : 'none', weapon.modifiers.rerollWounds),
+    torrent,
+    // Fixed damage has nothing to re-roll.
+    rerollDamageBelow: damage.count > 0 && Number.isInteger(rerollDamage) && rerollDamage > 0 ? rerollDamage : 0,
   };
 }
 
 /**
  * A hit roll succeeds when the modified roll meets BS / WS, and a critical hit (an unmodified
- * roll of `criticalHit`+) always hits. An unmodified 1 always fails.
+ * roll of `criticalHit`+) always hits. An unmodified 1 always fails. A Torrent weapon hits
+ * whatever the face (it makes no hit roll).
  */
 export function hitSucceeds(ctx: AttackContext, roll: number): boolean {
-  return roll !== 1 && (roll + ctx.hitModifier >= ctx.hitTarget || roll >= ctx.criticalHit);
+  return ctx.torrent || (roll !== 1 && (roll + ctx.hitModifier >= ctx.hitTarget || roll >= ctx.criticalHit));
 }
 
 /**
@@ -212,9 +276,9 @@ export function saveSucceeds(ctx: AttackContext, roll: number): boolean {
   return rollSucceeds(roll, ctx.saveTarget);
 }
 
-/** A successful hit whose unmodified roll is a critical hit. */
+/** A successful hit whose unmodified roll is a critical hit. Torrent makes no hit roll, so never. */
 export function isCriticalHit(ctx: AttackContext, roll: number): boolean {
-  return roll >= ctx.criticalHit && hitSucceeds(ctx, roll);
+  return !ctx.torrent && roll >= ctx.criticalHit && hitSucceeds(ctx, roll);
 }
 
 /** A successful wound whose unmodified roll is a critical wound. */

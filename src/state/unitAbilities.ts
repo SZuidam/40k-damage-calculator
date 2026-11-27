@@ -1,16 +1,18 @@
 import { MAX_CONSTANT, formatDiceSum, tryParseDice } from '../engine/dice';
-import { strongerReroll } from '../engine/rules';
+import { damageRerollBelow, strongerReroll } from '../engine/rules';
 import {
   DEFENDER_KEYWORDS,
   KEYWORD_NAMES,
   WEAPON_TYPE_NAMES,
   copyAbilities,
+  defaultDamageRerolls,
   noAbilities,
   type AbilityCondition,
   type AbilityEffect,
   type AbilityEffectKind,
   type Army,
   type AttackConditions,
+  type DamageRerollThresholds,
   type DefenderKeyword,
   type Unit,
   type UnitAbility,
@@ -203,6 +205,7 @@ export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities):
   out.devastatingWounds ||= granted.devastatingWounds;
   out.lance ||= granted.lance;
   out.twinLinked ||= granted.twinLinked;
+  out.torrent ||= granted.torrent;
   for (const key of ['sustainedHits', 'blast', 'cleave', 'rapidFire', 'melta'] as const) {
     if (out[key] === null && granted[key] !== null && tryParseDice(granted[key])) out[key] = normaliseDice(granted[key]);
   }
@@ -219,9 +222,10 @@ export function grantAbilities(base: WeaponAbilities, granted: WeaponAbilities):
  * `profile` with the effects of `abilities` folded in (they are assumed active; see activeFor).
  * A / D get +X added to their dice, S +X, AP is improved by X (to -6 at most). Roll modifiers are
  * summed (the engine caps them), the lowest critical threshold and the strongest re-roll win,
- * and granted weapon abilities are merged (grantAbilities). Returns a new profile.
+ * and granted weapon abilities are merged (grantAbilities). "Re-roll damage" takes the threshold
+ * of `damageRerolls` for the dice of the resulting D (none for fixed damage). Returns a new profile.
  */
-export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitAbility[]): WeaponProfile {
+export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitAbility[], damageRerolls: DamageRerollThresholds = defaultDamageRerolls()): WeaponProfile {
   const effects = abilities.flatMap((a) => a.effects);
   const out: WeaponProfile = {
     ...profile,
@@ -244,6 +248,8 @@ export function applyAbilities(profile: WeaponProfile, abilities: readonly UnitA
     } else if (e.kind === 'reroll') {
       if (e.roll === 'hit') m.rerollHits = strongerReroll(m.rerollHits, e.which);
       else m.rerollWounds = strongerReroll(m.rerollWounds, e.which);
+    } else if (e.kind === 'rerollDamage') {
+      m.rerollDamageBelow = damageRerollBelow(out.damage, damageRerolls);
     } else if (e.kind === 'grant') {
       out.abilities = grantAbilities(out.abilities, e.abilities);
     }
@@ -259,6 +265,7 @@ export const EFFECT_KIND_NAMES: Record<AbilityEffectKind, string> = {
   roll: 'Roll modifier',
   critical: 'Critical on',
   reroll: 'Re-roll',
+  rerollDamage: 'Re-roll damage',
   grant: 'Gain weapon abilities',
 };
 
@@ -277,6 +284,8 @@ export function effectSummary(e: AbilityEffect): string {
       return `Critical ${e.roll}s on ${e.on}+`;
     case 'reroll':
       return e.which === 'ones' ? `Re-roll ${e.roll}s of 1` : `Re-roll failed ${e.roll}s`;
+    case 'rerollDamage':
+      return 'Re-roll damage';
     case 'grant': {
       const text = abilitiesSummary(e.abilities);
       return text === '' ? 'Gain nothing' : `Gain ${text}`;

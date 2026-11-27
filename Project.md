@@ -10,7 +10,7 @@ A single-page browser app. You enter one or more attacking weapon profiles and a
 
 - **Vite 8 + vanilla TypeScript 7**, no UI framework. **Vitest 5** for the engine tests.
 - `npm run dev`: dev server
-- `npm test`: Vitest, run once (318 tests, about 5 s)
+- `npm test`: Vitest, run once (373 tests, about 6 s)
 - `npm run test:watch`: Vitest in watch mode
 - `npm run build`: `tsc --noEmit` + `vite build` to `dist/`
 - `tsconfig.json` uses strict mode, `verbatimModuleSyntax` and `noUnusedLocals/Parameters`. Use `import type` for types.
@@ -86,6 +86,8 @@ src/
 - **Melta X:** while the attack condition *Within half range* is on, X is added to the Damage characteristic of every unsaved wound (a dice expression rolled with each damage roll, so Melta D3 on D6 is D6+D3 per wound). `rules.bonusDamage` returns the term, `ctx.damage` stays the base D and `damagePerWound(ctx)` = D plus that term, rolled with `rollDiceSum` / convolved with `diceSumDistribution` into the exact engine's damage PMF. Excess damage is still lost, as for any damage.
 - **Lance:** while the attack condition *Charged this turn* is on, +1 to the wound roll (`woundModifier`). S4 vs T4 goes from 4+ to 3+, S4 vs T8 from 6+ to 5+, a 2+ still fails on a 1. Lance never makes a critical wound on its own: Devastating Wounds and Anti still use the unmodified roll.
 - **Twin-linked:** a failed wound roll is re-rolled once, and the re-roll stands whether it passes or fails (a die is never re-rolled twice). Only failed rolls are re-rolled, so a successful non-critical wound is never re-rolled to fish for a Devastating Wounds 6. The re-rolled die counts as an unmodified roll: it gets the same Lance modifier, and a re-rolled 6 (or Y+ with Anti) is a critical wound. Lethal Hits auto-wounds make no wound roll, so there is nothing to re-roll. In the maths, `woundRollFaces(ctx)` gives the probability of each final face, P(f) = [f wounds]/6 + P(first roll fails)/6, and `woundChance` / `unsavedPerWoundRoll` weigh the faces with it; S4 vs T4 goes from 1/2 to 3/4, in general p + (1 − p)·p.
+- **Torrent:** every attack hits automatically. No hit roll is made, so BS / WS doesn't count (shown as `BS N/A`), hit modifiers and hit re-rolls don't matter, and there are no critical hits: Lethal Hits and Sustained Hits can't trigger. `ctx.torrent` makes `hitSucceeds` true and `isCriticalHit` false on every face, and zeroes `hitModifier` / `rerollHits`; `simulate` skips the hit roll.
+- **Re-roll damage** (a unit / leader / army ability effect, `{ kind: 'rerollDamage' }`): a roll of the Damage characteristic below a threshold is re-rolled once, and the re-roll stands. The threshold is a setting (☰ → Settings → Damage re-rolls), one for D3 damage (default below 2) and one for D6 damage (default below 4), picked by the dice D rolls (`damageRerollBelow`). It is compared with the **dice only**, without D's +X (also a +X from a Damage effect): D6+2 rolling a 3 counts as 3, so "below 4" re-rolls 1–3 on D6, D6+1 and D6+2 alike, and 2D6 compares the sum of both dice. Melta is added after the re-roll and never compared. Fixed damage is never re-rolled. `applyAbilities` sets `modifiers.rerollDamageBelow` (0 for none); `damageRollDistribution(ctx)` gives P(v) = [v kept]·p(v) + P(re-rolled)·p(v), `damageDistribution(ctx)` adds Melta for the exact engine, and `rollDamage(ctx, rng)` rolls it in the simulation. D6 below 4 averages 4.25, D3 below 2 averages 2.33.
 - When every defending model is destroyed, damage stops being applied. Hits, wounds and unsaved wounds are still counted, so the per-step stats show the weapon's full output.
 - **Weapon order:** weapons resolve top to bottom. The user can reorder the rows on the main page, and the "Optimise order" button under them can reorder them for the user.
 
@@ -431,6 +433,16 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 **Verification:** `npm test` 336/336, `npm run build` clean. Checked in Chrome at 1536px wide with a test banner on the Intercessor Squad on both sides: each banner ends at the line under its own pickers, the Attacker head has no extra space, no console errors.
 
+## Torrent and damage re-rolls (session 20, 2026-11-27, branch `torrent-damage-rerolls`)
+
+**What:** the weapon ability **Torrent** (auto-hit) and a **Re-roll damage** effect for unit, leader and army abilities, with its thresholds in the Settings tab. Decided with the user: re-roll damage is an ability effect only (not a weapon ability), with separate D3 / D6 thresholds compared with the dice before the +X (first built against the whole roll, changed at the user's request). See *Rules implemented* for the rules.
+
+**Code:** `WeaponAbilities.torrent`; `RollModifiers.rerollDamageBelow`; `AbilityEffect` `{ kind: 'rerollDamage' }`; `DamageRerollThresholds` / `defaultDamageRerolls()` / `MAX_DAMAGE_REROLL_BELOW` (D3 up to below 6, D6 up to below 12) in `types.ts`. `StoredState.damageRerolls` (`toDamageRerolls` repairs it; older saves get the defaults). `resolveLoadout` takes `damageRerolls` in its extra options and passes it to `applyAbilities`. `breakdown` adds `torrent` and `damageReroll` (D's mean in `damageTerms` is the re-rolled one). The calculation reads `BS N/A` and "Torrent: every attack hits automatically…", and explains the damage re-roll ("raises its average from 3.5 to 4.25").
+
+**UI:** Torrent is the last entry of "Add ability…". The weapon modal shows BS / WS as a disabled "N/A" while Torrent is on (the stored skill is kept for when it comes off); chips and the Units tab read `BS N/A` (a granted Torrent shows N/A in blue). The ability modal has "Re-roll damage" with the note "below the Settings threshold" instead of a value; the rows show a dashed lever "Re-roll damage below 4" (or "Re-roll damage (fixed D)"). Settings has a *Damage re-rolls* section with two selects.
+
+**Verification:** `npm test` 373/373 (new: Torrent hits on every face, ignores modifiers / re-rolls / lower criticals, doesn't trigger Lethal or Sustained Hits; damage re-roll PMFs by hand (D6 below 4, D3+1 below 3 and D6+2 below 4 on the dice only, 2D6 below 4), fixed damage, Melta after the re-roll, threshold choice; sim vs exact for Torrent with Lethal Hits / hit re-roll / Devastating Wounds and for D3+1 re-rolled with Melta, sim of D6+2 below 4 at 6.25; breakdown and calculation text; storage defaults, repair and round trip; loadout resolution; `applyAbilities`; `statsSummary`). `npm run build` is clean. **Not checked in the browser** (the Chrome extension was not connected).
+
 ## Housekeeping
 
 - The repo is on GitHub (`origin`, branch `master`). The remote also has an unrelated `main` branch from when the repo was created; `master` is the working branch.
@@ -439,7 +451,7 @@ The kill count of a sequence of damage rolls (with excess damage lost) stays the
 
 ## Ideas for next steps
 
-- More abilities through the `AttackContext` step functions: Torrent, Feel No Pain, damage reduction, cover (defensive abilities would hang off the defending unit's abilities). Unit abilities could also gain more levers (re-roll damage, +1 to the save roll of the target, Ignores Cover).
+- More abilities through the `AttackContext` step functions: Feel No Pain, damage reduction, cover (defensive abilities would hang off the defending unit's abilities). Unit abilities could also gain more levers (+1 to the save roll of the target, Ignores Cover).
 - Show the exact expected values next to the simulated ones, or offer an "exact only" mode.
 - A Web Worker for large iteration counts.
 - A share link (export encoded in the URL hash) next to Copy / Download.

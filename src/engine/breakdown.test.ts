@@ -11,6 +11,8 @@ const withAbilities = [
   weapon('Devastating anti', 3, '2', 4, 3, 0, '2', { devastatingWounds: true, anti: { infantry: 4 } }),
   weapon('Blast melta', 2, 'D3', 3, 8, -3, 'D6', { blast: 'D3', melta: '2' }, { halfRange: true }),
   weapon('Re-rolls', 10, '2', 3, 4, -1, '1', { twinLinked: true }, {}, { hit: 1, rerollHits: 'ones', criticalHit: 5 }),
+  weapon('Torrent', 3, 'D6', 6, 5, 0, '1', { torrent: true, sustainedHits: '1' }),
+  weapon('Damage re-roll', 2, '2', 3, 8, -2, 'D6', { melta: '1' }, { halfRange: true }, { rerollDamageBelow: 4 }),
 ];
 const target = defender(10, 4, 3, 2, 5, ['infantry']);
 
@@ -70,6 +72,26 @@ describe('weaponBreakdown', () => {
         expect(Math.abs(actual - expected) / expected).toBeLessThan(0.02);
       }
     });
+  });
+});
+
+describe('Torrent and damage re-rolls', () => {
+  it('Torrent: every attack hits, without critical hits', () => {
+    const b = weaponBreakdown(weapon('Flamer', 1, 'D6', 6, 4, 0, '1', { torrent: true, lethalHits: true, sustainedHits: '1' }), gravis);
+    expect(b.torrent).toBe(true);
+    expect(b.hit.chance).toBeCloseTo(1, 12);
+    expect(b.hits).toBeCloseTo(3.5, 12);
+    expect(b.criticalHits).toBe(0);
+    expect(b.lethal).toBe(0);
+    expect(b.extraHits).toBe(0);
+  });
+
+  it('re-roll damage: the D term averages the re-rolled roll', () => {
+    const b = weaponBreakdown(weapon('Gun', 1, '1', 3, 4, 0, 'D6', {}, {}, { rerollDamageBelow: 4 }), gravis);
+    expect(b.damageReroll).toEqual({ below: 4, rerolled: 0.5, plainMean: 3.5, mean: 4.25 });
+    expect(b.damageTerms[0].mean).toBeCloseTo(4.25, 12);
+    expect(b.damagePerWound).toBeCloseTo(4.25, 12);
+    expect(weaponBreakdown(boltRifles, gravis).damageReroll).toBeNull();
   });
 });
 

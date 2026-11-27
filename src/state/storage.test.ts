@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noAbilities, noConditions, type StoredWeapon, type Unit } from '../types';
+import { defaultDamageRerolls, noAbilities, noConditions, type StoredWeapon, type Unit } from '../types';
 import { STORAGE_KEY, V4_STORAGE_KEY, defaultState, loadState, saveState, type KeyValueStorage } from './storage';
 
 function memoryStorage(initial: Record<string, string> = {}): KeyValueStorage & { data: Record<string, string> } {
@@ -247,7 +247,7 @@ describe('v4 → v5', () => {
   it('keeps the armies, units, conditions and iterations, and drops the rest', () => {
     const storage = memoryStorage({ [V4_STORAGE_KEY]: JSON.stringify(v4()) });
     const state = loadState(storage);
-    expect(Object.keys(state).sort()).toEqual(['armies', 'attacker', 'conditions', 'defender', 'iterations', 'toggles', 'units']);
+    expect(Object.keys(state).sort()).toEqual(['armies', 'attacker', 'conditions', 'damageRerolls', 'defender', 'iterations', 'toggles', 'units']);
     expect(state.armies).toEqual(v4().armies);
     expect(state.units).toEqual([intercessors()]);
     expect(state.conditions).toEqual({ halfRange: false, charged: true });
@@ -323,6 +323,7 @@ describe('weapon abilities on load', () => {
       melta: 'D3+1',
       lance: true,
       twinLinked: true,
+      torrent: true,
     };
     saveState(state, storage);
     expect(loadState(storage)).toEqual(state);
@@ -427,5 +428,25 @@ describe('abilities, leader and toggles on load', () => {
     expect(load(v5({ armies, toggles: 'a-oath' })).toggles).toEqual([]);
     // The switched-on situations of older saves are not carried over.
     expect(load(v5({ armies, situations: ['oath target'] })).toggles).toEqual([]);
+  });
+});
+
+describe('damage re-roll thresholds on load', () => {
+  it('defaults to below 2 for D3 and below 4 for D6, also for saves from before the setting', () => {
+    expect(defaultState().damageRerolls).toEqual({ d3: 2, d6: 4 });
+    const { damageRerolls: _, ...older } = load(v5());
+    expect(load(older).damageRerolls).toEqual(defaultDamageRerolls());
+  });
+
+  it('round trips the thresholds and repairs values out of range', () => {
+    expect(load(v5({ damageRerolls: { d3: 3, d6: 6 } })).damageRerolls).toEqual({ d3: 3, d6: 6 });
+    expect(load(v5({ damageRerolls: { d3: 7, d6: 1.5 } })).damageRerolls).toEqual(defaultDamageRerolls());
+    expect(load(v5({ damageRerolls: { d3: '3', d6: 12 } })).damageRerolls).toEqual({ d3: 2, d6: 12 });
+    expect(load(v5({ damageRerolls: 'often' })).damageRerolls).toEqual(defaultDamageRerolls());
+  });
+
+  it('keeps the Re-roll damage effect of unit abilities', () => {
+    const reroll = { id: 'a-dmg', name: 'Gets Hot', description: '', appliesTo: 'unit', when: { toggle: false, conditions: [], weaponType: 'any', targetKeyword: null }, effects: [{ kind: 'rerollDamage' }] };
+    expect(load(v5({ units: [{ ...intercessors(), abilities: [reroll] }] })).units[0].abilities[0].effects).toEqual([{ kind: 'rerollDamage' }]);
   });
 });

@@ -40,6 +40,23 @@ export function openWeaponModal(initial?: WeaponStats, { takenNames }: WeaponMod
       nameInput = name;
       const attacks = h('input', { id: id('attacks'), type: 'text', value: draft.attacks, autocomplete: 'off', spellcheck: 'false', class: 'dice' });
       const skill = select({ id: id('skill') }, SKILL_OPTIONS, draft.skill);
+      // Torrent: the weapon never rolls to hit, so BS / WS reads "N/A" and can't be changed. The
+      // stored skill stays as it was, for when Torrent is taken off again.
+      const notApplicable = h('option', { value: '' }, 'N/A');
+      const syncTorrent = () => {
+        const torrent = draft.abilities.torrent;
+        if (torrent === skill.disabled) return;
+        skill.disabled = torrent;
+        if (torrent) {
+          skill.prepend(notApplicable);
+          skill.value = '';
+          skill.title = 'Torrent: every attack hits automatically, without a hit roll.';
+        } else {
+          notApplicable.remove();
+          skill.value = String(draft.skill);
+          skill.removeAttribute('title');
+        }
+      };
       const strength = h('input', { id: id('strength'), type: 'number', inputmode: 'numeric', min: 1, max: 30, value: draft.strength });
       const ap = select({ id: id('ap') }, AP_OPTIONS, draft.ap);
       const damage = h('input', { id: id('damage'), type: 'text', value: draft.damage, autocomplete: 'off', spellcheck: 'false', class: 'dice' });
@@ -105,9 +122,13 @@ export function openWeaponModal(initial?: WeaponStats, { takenNames }: WeaponMod
         listLabel: 'Abilities of this weapon',
         get: () => draft.abilities,
         set: (abilities) => (draft.abilities = abilities),
-        onChange: () => validate(),
+        onChange: () => {
+          syncTorrent();
+          validate();
+        },
       });
       controls.abilities = abilityEditor.select;
+      syncTorrent();
 
       const form = h(
         'form',

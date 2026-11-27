@@ -1060,6 +1060,17 @@ select[aria-invalid='true'] {
   max-width: 180px;
 }
 
+/* Fields side by side (the D3 / D6 damage re-roll thresholds), wrapping on narrow drawers. */
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.settings-row .field {
+  flex: 0 1 160px;
+}
+
 .optimise {
   display: flex;
   flex-direction: column;
@@ -2150,6 +2161,13 @@ input.share-check:disabled {
 
 .effect-line .icon-button {
   flex: 0 0 auto;
+}
+
+/* In place of a value: where the effect takes it from (Re-roll damage: the Settings threshold). */
+.effect-line .effect-note {
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
 }
 
 .effect-row .ability-editor {

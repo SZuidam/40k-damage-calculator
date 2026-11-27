@@ -25,6 +25,7 @@ const EFFECT_CHOICES: { value: string; label: string; create: () => AbilityEffec
   { value: 'critical-wound', label: 'Critical wounds on', create: () => ({ kind: 'critical', roll: 'wound', on: 5 }), matches: (e) => e.kind === 'critical' && e.roll === 'wound' },
   { value: 'reroll-hit', label: 'Re-roll hits', create: () => ({ kind: 'reroll', roll: 'hit', which: 'ones' }), matches: (e) => e.kind === 'reroll' && e.roll === 'hit' },
   { value: 'reroll-wound', label: 'Re-roll wounds', create: () => ({ kind: 'reroll', roll: 'wound', which: 'ones' }), matches: (e) => e.kind === 'reroll' && e.roll === 'wound' },
+  { value: 'reroll-damage', label: 'Re-roll damage', create: () => ({ kind: 'rerollDamage' }), matches: (e) => e.kind === 'rerollDamage' },
   { value: 'grant', label: 'Gain weapon abilities', create: emptyGrant, matches: (e) => e.kind === 'grant' },
 ];
 
@@ -167,6 +168,9 @@ export function openAbilityModal(initial: UnitAbility | undefined, options: Abil
             return [numberSelect('Unmodified roll', THRESHOLD_OPTIONS, e.on, (v) => (e.on = Number(v)), i)];
           case 'reroll':
             return [numberSelect('Which rolls', REROLL_OPTIONS, e.which, (v) => (e.which = v === 'failed' ? 'failed' : 'ones'), i)];
+          case 'rerollDamage':
+            // Which rolls is a setting: below the D3 / D6 threshold under ☰ → Settings.
+            return [h('span', { class: 'effect-note', title: 'A D3 or D6 damage roll below its threshold under ☰ → Settings is re-rolled once.' }, 'below the Settings threshold')];
           case 'grant':
             return [];
         }

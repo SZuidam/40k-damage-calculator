@@ -5,6 +5,8 @@ import {
   attacksPerModel,
   createAttackContext,
   damagePerWound,
+  damageRerollChance,
+  damageRollDistribution,
   hitRollFaces,
   hitSucceeds,
   isCriticalHit,
@@ -39,6 +41,17 @@ export interface RollBreakdown {
   critical: number;
 }
 
+/** Re-roll damage: a roll of the Damage characteristic whose dice show less than `below` is re-rolled once. */
+export interface DamageReroll {
+  below: number;
+  /** P(the first roll is re-rolled): P(the dice of D < below). */
+  rerolled: number;
+  /** The average of D without the re-roll. */
+  plainMean: number;
+  /** The average of D with it. */
+  mean: number;
+}
+
 /** A term of the attacks or damage per model / per wound, labelled with where it comes from. */
 export interface DiceTerm {
   label: string;
@@ -59,6 +72,8 @@ export interface WeaponBreakdown {
   attacksPerModelExpr: string;
   attacksPerModel: number;
   attacks: number;
+  /** Torrent: every attack hits automatically (no hit roll, so no critical hits). */
+  torrent: boolean;
   hit: RollBreakdown;
   /** Sustained Hits X: extra hits per critical hit, or null. */
   sustained: DiceTerm | null;
@@ -84,7 +99,10 @@ export interface WeaponBreakdown {
   armourOn: number;
   failSave: number;
   unsaved: number;
+  /** D first (its mean after a damage re-roll), then Melta. */
   damageTerms: DiceTerm[];
+  /** Re-roll damage, or null when no ability re-rolls it (or D is fixed). */
+  damageReroll: DamageReroll | null;
   damagePerWoundExpr: string;
   damagePerWound: number;
   /** unsaved × damage per wound, before excess damage is lost. */
@@ -171,6 +189,14 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
 
   const damageLabels = ['D', ...(ctx.bonusDamage.length > 0 ? [`Melta ${weapon.abilities.melta}`] : [])];
   const damageTerms = damagePerWound(ctx).map((expr, i) => term(damageLabels[i] ?? 'Bonus', expr));
+  let damageReroll: DamageReroll | null = null;
+  if (ctx.rerollDamageBelow > 0) {
+    const below = ctx.rerollDamageBelow;
+    const rerolled = damageRerollChance(ctx);
+    const mean = damageRollDistribution(ctx).reduce((total, p, v) => total + p * v, 0);
+    damageReroll = { below, rerolled, plainMean: damageTerms[0].mean, mean };
+    damageTerms[0] = { ...damageTerms[0], mean };
+  }
   const damagePerWoundMean = sum(damageTerms);
 
   return {
@@ -179,6 +205,7 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
     attacksPerModelExpr: formatDiceSum(attacksPerModel(ctx)),
     attacksPerModel: attacksPerModelMean,
     attacks,
+    torrent: ctx.torrent,
     hit,
     sustained,
     criticalHits,
@@ -197,6 +224,7 @@ export function weaponBreakdown(weapon: WeaponProfile, defender: DefenderProfile
     failSave,
     unsaved,
     damageTerms,
+    damageReroll,
     damagePerWoundExpr: formatDiceSum(damagePerWound(ctx)),
     damagePerWound: damagePerWoundMean,
     damage: unsaved * damagePerWoundMean,

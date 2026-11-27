@@ -188,6 +188,7 @@ export function effectError(e: AbilityEffect): string | undefined {
     case 'critical':
       return Number.isInteger(e.on) && e.on >= 2 && e.on <= 6 ? undefined : `Critical ${e.roll}s must be on 2+ to 6+`;
     case 'reroll':
+    case 'rerollDamage':
       return undefined;
     case 'grant':
       return activeAbilities(e.abilities).length === 0 ? 'Pick at least one weapon ability to gain' : abilityError(e.abilities);

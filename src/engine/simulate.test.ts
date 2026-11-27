@@ -207,6 +207,42 @@ describe('simulate', () => {
   );
 });
 
+describe('Torrent and damage re-rolls', () => {
+  it('Torrent: every attack hits, even at BS 6+ with Sustained Hits', () => {
+    const flamers = [weapon('Flamers', 5, 'D6', 6, 4, 0, '1', { torrent: true, sustainedHits: '1' })];
+    const sim = simulate(flamers, defender(40, 4, 7, 1), ITERATIONS, mulberry32(51));
+    expect(sim.total.hits).toBe(sim.total.attacks);
+    expectClose(sim.total.attacks, 5 * 3.5);
+  });
+  compareWithExact(
+    'Torrent with Lethal Hits, a hit re-roll and Devastating Wounds',
+    [weapon('Flamers', 3, 'D6', 4, 5, -1, '1', { torrent: true, lethalHits: true, devastatingWounds: true }, {}, { rerollHits: 'failed', hit: 1 }), heavyBolter],
+    defender(10, 4, 3, 2),
+    52,
+  );
+
+  it('re-roll damage below 4 raises D6 damage from 3.5 to 4.25 per unsaved wound', () => {
+    // 10 attacks, BS 2+, S12 vs T6 (2+), no save: 10 × 5/6 × 5/6 unsaved wounds.
+    const guns = (below: number) => [weapon('Lascannons', 10, '1', 2, 12, -3, 'D6', {}, {}, { rerollDamageBelow: below })];
+    const tank = defender(1, 6, 7, 400);
+    const unsaved = 10 * (5 / 6) * (5 / 6);
+    expectClose(simulate(guns(0), tank, ITERATIONS, mulberry32(53)).total.damage, unsaved * 3.5);
+    expectClose(simulate(guns(4), tank, ITERATIONS, mulberry32(53)).total.damage, unsaved * 4.25);
+    expectClose(exactResult(guns(4), tank).expectedDamage, unsaved * 4.25);
+  });
+  it('re-roll damage compares the dice only: D6+2 below 4 averages 6.25', () => {
+    const guns = [weapon('Lascannons', 10, '1', 2, 12, -3, 'D6+2', {}, {}, { rerollDamageBelow: 4 })];
+    const unsaved = 10 * (5 / 6) * (5 / 6);
+    expectClose(simulate(guns, defender(1, 6, 7, 400), ITERATIONS, mulberry32(55)).total.damage, unsaved * 6.25);
+  });
+  compareWithExact(
+    'D3+1 damage re-rolled below 3 (dice only) with Melta, carrying over to the next weapon',
+    [weapon('Melta rifles', 3, '1', 3, 9, -4, 'D3+1', { melta: '2' }, { halfRange: true }, { rerollDamageBelow: 3 }), heavyBolter],
+    defender(4, 5, 3, 5),
+    54,
+  );
+});
+
 describe('atLeast', () => {
   it('turns exact probabilities into cumulative tails', () => {
     expect(atLeast([0.25, 0.5, 0.25])).toEqual([1, 0.75, 0.25]);

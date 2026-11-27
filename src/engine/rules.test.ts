@@ -7,7 +7,10 @@ import {
   bonusAttacks,
   bonusDamage,
   createAttackContext,
+  damageDistribution,
   damagePerWound,
+  damageRerollBelow,
+  damageRollDistribution,
   hitChance,
   hitRollFaces,
   hitSucceeds,
@@ -454,5 +457,84 @@ describe('roll modifiers from abilities', () => {
     expect(woundChance(ctxOf(3, { rerollWounds: 'ones' }))).toBeCloseTo(3 / 6 + (1 / 6) * (3 / 6), 12);
     expect(ctxOf(3, { rerollWounds: 'ones' }, { twinLinked: true }).rerollWounds).toBe('failed');
     expect(ctxOf(3, { rerollWounds: 'failed' }).rerollWounds).toBe('failed');
+  });
+});
+
+describe('Torrent', () => {
+  const target = defender(1, 4, 7, 2);
+  const ctxOf = (modifiers: Parameters<typeof weapon>[9] = {}, abilities: Partial<WeaponAbilities> = {}) =>
+    createAttackContext(weapon('Flamer', 1, 'D6', 6, 4, 0, '1', { torrent: true, ...abilities }, {}, modifiers), target);
+
+  it('hits on every face, whatever BS says, and never scores a critical hit', () => {
+    const ctx = ctxOf();
+    for (let roll = 1; roll <= 6; roll++) {
+      expect(hitSucceeds(ctx, roll)).toBe(true);
+      expect(isCriticalHit(ctx, roll)).toBe(false);
+    }
+    expect(hitChance(ctx)).toBeCloseTo(1, 12);
+  });
+
+  it('ignores hit modifiers, hit re-rolls and lower critical hits', () => {
+    const ctx = ctxOf({ hit: -1, rerollHits: 'ones', criticalHit: 2 });
+    expect(ctx).toMatchObject({ hitModifier: 0, rerollHits: 'none' });
+    expect(hitRollFaces(ctx)).toEqual(new Array(6).fill(1 / 6));
+    expect(hitChance(ctx)).toBeCloseTo(1, 12);
+    expect([1, 2, 3, 4, 5, 6].some((roll) => isCriticalHit(ctx, roll))).toBe(false);
+  });
+
+  it('never triggers Lethal Hits or Sustained Hits: every attack rolls to wound once', () => {
+    // S4 vs T4 wounds on 4+, no save.
+    const ctx = ctxOf({}, { lethalHits: true, sustainedHits: '2' });
+    const pmf = unsavedDistribution(ctx);
+    expect(pmf).toHaveLength(2);
+    expect(pmf[1]).toBeCloseTo(1 / 2, 12);
+    expect(unsavedPerAttack(ctx)).toBeCloseTo(1 / 2, 12);
+  });
+});
+
+describe('re-roll damage', () => {
+  const target = defender(1, 4, 7, 20);
+  const ctxOf = (damage: string, below: number, abilities: Partial<WeaponAbilities> = {}, halfRange = false) =>
+    createAttackContext(weapon('Gun', 1, '1', 3, 4, 0, damage, abilities, { halfRange }, { rerollDamageBelow: below }), target);
+
+  it('picks the D3 or D6 threshold by the dice of D, and none for fixed damage', () => {
+    const thresholds = { d3: 2, d6: 4 };
+    expect(damageRerollBelow('D3', thresholds)).toBe(2);
+    expect(damageRerollBelow('D3+1', thresholds)).toBe(2);
+    expect(damageRerollBelow('2D6', thresholds)).toBe(4);
+    expect(damageRerollBelow('3', thresholds)).toBe(0);
+    expect(damageRerollBelow('nonsense', thresholds)).toBe(0);
+  });
+
+  it('D6 below 4: faces 1–3 are re-rolled, so the average rises from 3.5 to 4.25', () => {
+    const pmf = damageRollDistribution(ctxOf('D6', 4));
+    [1, 2, 3].forEach((v) => expect(pmf[v]).toBeCloseTo(1 / 12, 12));
+    [4, 5, 6].forEach((v) => expect(pmf[v]).toBeCloseTo(1 / 4, 12));
+    expect(pmf.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(pmf.reduce((sum, p, v) => sum + p * v, 0)).toBeCloseTo(4.25, 12);
+  });
+
+  it('compares only the dice: D3+1 below 3 re-rolls a die of 1 or 2 (a total of 2 or 3)', () => {
+    const pmf = damageRollDistribution(ctxOf('D3+1', 3));
+    expect(pmf[2]).toBeCloseTo(2 / 9, 12);
+    expect(pmf[3]).toBeCloseTo(2 / 9, 12);
+    expect(pmf[4]).toBeCloseTo(1 / 3 + 2 / 9, 12);
+    // D6+2 below 4 re-rolls dice of 1–3, as D6 does: the average rises from 5.5 to 6.25.
+    expect(damageRollDistribution(ctxOf('D6+2', 4)).reduce((sum, p, v) => sum + p * v, 0)).toBeCloseTo(6.25, 12);
+    // 2D6 below 4 re-rolls dice totalling 2 or 3 (3/36).
+    const twoD6 = damageRollDistribution(ctxOf('2D6', 4));
+    expect(twoD6[2] + twoD6[3]).toBeCloseTo((3 / 36) * (3 / 36), 12);
+  });
+
+  it('leaves fixed damage and a threshold of 0 alone', () => {
+    expect(ctxOf('2', 4).rerollDamageBelow).toBe(0);
+    expect(damageRollDistribution(ctxOf('D6', 0))).toEqual(damageRollDistribution(ctxOf('D6', 1)));
+    expect(damageDistribution(ctxOf('D6', 0)).reduce((sum, p, v) => sum + p * v, 0)).toBeCloseTo(3.5, 12);
+  });
+
+  it('adds Melta after the re-roll', () => {
+    const ctx = ctxOf('D6', 4, { melta: '2' }, true);
+    expect(damagePerWound(ctx)).toHaveLength(2);
+    expect(damageDistribution(ctx).reduce((sum, p, v) => sum + p * v, 0)).toBeCloseTo(6.25, 12);
   });
 });
